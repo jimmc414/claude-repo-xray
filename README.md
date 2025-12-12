@@ -6,9 +6,9 @@ AST-based Python codebase analysis for AI coding assistants.
 
 AI coding assistants face a cold start problem: a 200K token context window cannot directly ingest a codebase that may span millions of tokens, yet the assistant must understand the architecture to work effectively.
 
-## The Solution
+## The (Attempted) Solution
 
-repo-xray solves this by using AST parsing to extract structural information—class signatures, method signatures, type annotations, Pydantic fields, and import relationships—without loading implementation details, typically achieving 95% token reduction. The result is that an AI assistant can survey an entire codebase's architecture, identify entry points, and understand data flow within its context budget before reading any full source files.
+repo-xray atempts to solve this quickly and efficiently by using AST parsing to extract structural information; class signatures, method signatures, type annotations, Pydantic fields, and import relationships without loading implementation details, typically achieving 95% token reduction. The result is that an AI assistant can survey an entire codebase's architecture, identify entry points, and understand data flow within its context budget before reading any full source files.
 
 Optimized for Claude Code via skills and agents, or manual command-line use.
 
