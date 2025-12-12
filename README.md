@@ -12,6 +12,10 @@ repo-xray atempts to solve this quickly and efficiently by using AST parsing to 
 
 Optimized for Claude Code via skills and agents, or manual command-line use.
 
+## Limitations
+
+Uses Python's built-in AST parser, so currently Python-only. If there's interest, I'll expand it to use tree-sitter for multi-language support.
+
 ## Tools
 - `mapper.py` - Directory tree with token estimates per file
 - `skeleton.py` - Interface extraction (classes, methods, fields, decorators, line numbers)
