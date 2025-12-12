@@ -1,0 +1,54 @@
+{
+  "priority_patterns": {
+    "critical": {
+      "description": "Core orchestration and entry points - understand these first",
+      "patterns": []
+    },
+    "high": {
+      "description": "Domain logic and data models",
+      "patterns": []
+    },
+    "medium": {
+      "description": "Supporting infrastructure",
+      "patterns": []
+    },
+    "low": {
+      "description": "Utilities and tests - explore only if needed",
+      "patterns": []
+    }
+  },
+  "entry_points": {
+    "description": "Key entry points for understanding system flow",
+    "hints": [
+      "Look for classes with 'Workflow', 'Orchestrator', 'App' in name",
+      "Look for 'main' functions or '__main__' blocks",
+      "Look for CLI command definitions (@click.command, argparse)",
+      "Look for FastAPI/Flask app definitions"
+    ]
+  },
+  "architecture_keywords": {
+    "description": "Keywords that indicate architectural importance",
+    "class_patterns": [
+      "Workflow",
+      "Orchestrator",
+      "Manager",
+      "Registry",
+      "Base",
+      "Abstract",
+      "Executor",
+      "Handler",
+      "Service",
+      "Model",
+      "Schema"
+    ],
+    "method_patterns": [
+      "run",
+      "execute",
+      "process",
+      "handle",
+      "dispatch",
+      "start"
+    ]
+  },
+  "_comment": "Auto-populated by configure.py based on folder structure. Safe to customize."
+}
