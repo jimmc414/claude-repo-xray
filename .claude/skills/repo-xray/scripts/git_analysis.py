@@ -68,7 +68,7 @@ def analyze_risk(cwd: str, files: List[str], months: int = 6) -> List[Dict]:
     """
     # Parse git log with custom delimiter
     log = run_git(
-        ["log", f"--since={months}.months", "--name-only", "--format=COMMIT::%an::%s"],
+        ["log", f"--since={months}.months", "--name-only", "--pretty=format:COMMIT::%an::%s"],
         cwd
     )
 
@@ -134,7 +134,7 @@ def analyze_coupling(cwd: str, max_commits: int = 200, min_cooccurrences: int = 
     3. Filter to pairs with >= min_cooccurrences
     4. Skip bulk refactors (commits touching >20 files)
     """
-    log = run_git(["log", "-n", str(max_commits), "--name-only", "--format=COMMIT"], cwd)
+    log = run_git(["log", "-n", str(max_commits), "--name-only", "--pretty=format:COMMIT"], cwd)
 
     if not log:
         return []
@@ -181,7 +181,7 @@ def analyze_freshness(cwd: str, files: List[str]) -> Dict[str, List[Dict]]:
     - Stale: 90-180 days (possibly neglected)
     - Dormant: >180 days (stable or abandoned)
     """
-    log = run_git(["log", "--name-only", "--format=COMMIT::%ct"], cwd)
+    log = run_git(["log", "--name-only", "--pretty=format:COMMIT::%ct"], cwd)
 
     if not log:
         return {"active": [], "aging": [], "stale": [], "dormant": []}

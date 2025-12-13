@@ -334,7 +334,15 @@ python .claude/skills/repo-xray/scripts/git_analysis.py kosmos/ --risk
 
 ## 11. Hidden Coupling
 
-*No significant coupling pairs detected.* Files are modified independently - indicates clean module boundaries.
+| File A | File B | Co-changes |
+|--------|--------|------------|
+| `config.py` | `providers/anthropic.py` | 5 |
+| `providers/anthropic.py` | `providers/openai.py` | 4 |
+| `config.py` | `providers/litellm_provider.py` | 4 |
+| `validation/__init__.py` | `world_model/artifacts.py` | 3 |
+| `research_director.py` | `cli/commands/run.py` | 3 |
+
+**Interpretation:** Provider files (anthropic, openai, litellm) change together - consider abstracting common logic. `config.py` couples with many files - expected for configuration.
 
 ---
 
