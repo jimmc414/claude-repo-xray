@@ -23,6 +23,15 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+# Exports for programmatic use
+__all__ = [
+    'map_directory',
+    'load_ignore_patterns',
+    'estimate_tokens',
+    'format_tokens',
+    'get_size_tag',
+]
+
 
 # Find the skill root directory (parent of scripts/)
 SCRIPT_DIR = Path(__file__).parent

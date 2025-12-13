@@ -1,0 +1,9 @@
+{
+  "mermaid": "graph TD\n    subgraph ORCHESTRATION\n        generate_warm_start[generate_warm_start]\n    end\n    subgraph CORE\n        dependency_graph[dependency_graph]\n        git_analysis[git_analysis]\n        mapper[mapper]\n        skeleton[skeleton]\n    end\n    subgraph FOUNDATION\n        lib_ast_utils[ast_utils]\n        configure[configure]\n    end\n    generate_warm_start --> dependency_graph\n    generate_warm_start --> git_analysis\n    generate_warm_start --> mapper\n    generate_warm_start --> lib_ast_utils",
+  "layer_counts": {
+    "foundation": 2,
+    "core": 4,
+    "orchestration": 1,
+    "leaf": 2
+  }
+}

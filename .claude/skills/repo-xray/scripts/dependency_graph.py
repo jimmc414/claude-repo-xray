@@ -26,6 +26,17 @@ from collections import defaultdict, Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+# Exports for programmatic use
+__all__ = [
+    'build_dependency_graph',
+    'identify_layers',
+    'generate_mermaid',
+    'find_orphans',
+    'calculate_impact',
+    'auto_detect_root_package',
+    'detect_source_root',
+]
+
 
 # Known external/stdlib packages to exclude from root detection
 EXTERNAL_PACKAGES = {
@@ -144,8 +155,12 @@ def auto_detect_root_package(directory: str) -> Optional[str]:
         for item in os.listdir(directory):
             item_path = os.path.join(directory, item)
             if os.path.isdir(item_path) and not item.startswith("."):
-                if (Path(item_path) / "__init__.py").exists():
-                    potential_packages.add(item)
+                try:
+                    if (Path(item_path) / "__init__.py").exists():
+                        potential_packages.add(item)
+                except (PermissionError, OSError):
+                    # Skip directories we can't access
+                    pass
     except Exception:
         return None
 
@@ -188,10 +203,84 @@ def auto_detect_root_package(directory: str) -> Optional[str]:
     return None
 
 
+def detect_source_root(directory: str) -> Optional[str]:
+    """
+    Detect the logical source root for Python files.
+
+    For projects where code is in nested directories (like .claude/skills/repo-xray/scripts/),
+    this finds the deepest common directory containing Python files that represents
+    the logical package boundary.
+
+    Returns:
+        Path to the detected source root, or None if unclear
+    """
+    ignore_dirs = load_ignore_patterns()
+    directory = os.path.abspath(directory)
+
+    # Collect all directories containing Python files
+    py_dirs = []
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = [d for d in dirs if d not in ignore_dirs]
+
+        py_files = [f for f in files if f.endswith('.py')]
+        if py_files:
+            py_dirs.append((root, len(py_files)))
+
+    if not py_dirs:
+        return None
+
+    # If all Python files are in one directory tree, find the root of that tree
+    if len(py_dirs) == 1:
+        return py_dirs[0][0]
+
+    # Find the deepest common parent that contains Python files
+    # Prefer directories with more Python files
+    py_dirs.sort(key=lambda x: (-x[1], -len(x[0])))  # Most files, then deepest
+
+    # Check if most Python files are in a nested structure
+    # (like .claude/skills/repo-xray/scripts/)
+    top_dir = py_dirs[0][0]
+    rel_path = os.path.relpath(top_dir, directory)
+
+    # If the top directory is deeply nested and contains sibling imports pattern
+    if rel_path != '.' and len(rel_path.split(os.sep)) >= 2:
+        # Check for sibling import patterns (sys.path manipulation)
+        for py_dir, _ in py_dirs:
+            for py_file in Path(py_dir).glob('*.py'):
+                try:
+                    content = py_file.read_text(encoding='utf-8')
+                    if 'sys.path.insert' in content or 'sys.path.append' in content:
+                        # This directory uses sibling imports, use it as source root
+                        return str(py_dir)
+                except Exception:
+                    pass
+
+    # Find common ancestor of all Python directories
+    if len(py_dirs) > 1:
+        paths = [Path(d[0]) for d in py_dirs]
+        common_parts = list(paths[0].parts)
+        for p in paths[1:]:
+            new_common = []
+            for i, (a, b) in enumerate(zip(common_parts, p.parts)):
+                if a == b:
+                    new_common.append(a)
+                else:
+                    break
+            common_parts = new_common
+
+        if common_parts:
+            common_path = str(Path(*common_parts))
+            if common_path != directory:
+                return common_path
+
+    return None
+
+
 def build_dependency_graph(
     directory: str,
     root_package: Optional[str] = None,
-    auto_detect: bool = True
+    auto_detect: bool = True,
+    source_dir: Optional[str] = None
 ) -> Dict:
     """
     Build a dependency graph for all Python files.
@@ -200,6 +289,7 @@ def build_dependency_graph(
         directory: Directory to analyze
         root_package: Root package name (e.g., 'mypackage')
         auto_detect: If True and root_package is None, auto-detect
+        source_dir: Override source root directory for module name generation
 
     Returns dict with:
     {
@@ -215,6 +305,17 @@ def build_dependency_graph(
         if root_package:
             print(f"  Auto-detected root package: {root_package}", file=sys.stderr)
 
+    # Detect source root for nested project structures
+    # Only use source root detection when no root package was found
+    # (indicates non-standard project structure like code in hidden directories)
+    if source_dir is None and root_package is None:
+        source_dir = detect_source_root(directory)
+        if source_dir and source_dir != directory:
+            print(f"  Detected source root: {source_dir}", file=sys.stderr)
+
+    # Use detected source_dir or fall back to directory
+    module_base_dir = source_dir if source_dir else directory
+
     ignore_dirs = load_ignore_patterns()
 
     # First pass: discover all modules
@@ -227,9 +328,18 @@ def build_dependency_graph(
                 continue
 
             filepath = os.path.join(root, filename)
-            module_name = module_path_to_name(filepath, directory)
 
-            if root_package:
+            # Use source_dir as base for module names if within it
+            if source_dir and filepath.startswith(source_dir):
+                module_name = module_path_to_name(filepath, source_dir)
+            else:
+                module_name = module_path_to_name(filepath, module_base_dir)
+
+            # Clean up module names that start with dots
+            while module_name.startswith('.'):
+                module_name = module_name[1:]
+
+            if root_package and not module_name.startswith(root_package):
                 module_name = f"{root_package}.{module_name}"
 
             modules[module_name] = {
@@ -237,6 +347,12 @@ def build_dependency_graph(
                 "imports": [],
                 "imported_by": []
             }
+
+    # Build a lookup for matching imports by leaf name (for sibling imports)
+    leaf_to_modules = defaultdict(list)
+    for mod_name in modules:
+        leaf = mod_name.split(".")[-1]
+        leaf_to_modules[leaf].append(mod_name)
 
     # Second pass: analyze imports
     internal_edges = []
@@ -250,23 +366,49 @@ def build_dependency_graph(
             # Get base module (first component)
             base = imp.split(".")[0]
 
-            # Check if it's an internal import
-            is_internal = False
-            for known_module in modules:
-                if imp == known_module or known_module.startswith(f"{imp}.") or imp.startswith(f"{known_module}."):
-                    is_internal = True
-                    # Find the most specific match
-                    target = imp
-                    while target and target not in modules:
-                        target = ".".join(target.split(".")[:-1])
+            # Check if it's an internal import - try multiple matching strategies
+            target = None
 
-                    if target and target != module_name:
-                        info["imports"].append(target)
-                        modules[target]["imported_by"].append(module_name)
-                        internal_edges.append((module_name, target))
-                    break
+            # Strategy 1: Exact match
+            if imp in modules:
+                target = imp
 
-            if not is_internal:
+            # Strategy 2: Match by prefix (import is a parent of a known module)
+            if not target:
+                for known_module in modules:
+                    if known_module.startswith(f"{imp}."):
+                        target = known_module
+                        break
+
+            # Strategy 3: Known module is prefix of import
+            if not target:
+                for known_module in modules:
+                    if imp.startswith(f"{known_module}."):
+                        target = known_module
+                        break
+
+            # Strategy 4: Match by leaf name (for sibling imports like "from mapper import ...")
+            if not target and base in leaf_to_modules:
+                candidates = leaf_to_modules[base]
+                if len(candidates) == 1:
+                    target = candidates[0]
+                elif candidates:
+                    # Multiple matches - prefer one in same directory
+                    module_dir = os.path.dirname(info["file"])
+                    for cand in candidates:
+                        cand_file = modules[cand]["file"]
+                        if os.path.dirname(cand_file) == module_dir:
+                            target = cand
+                            break
+                    if not target:
+                        target = candidates[0]  # Fall back to first
+
+            if target and target != module_name:
+                if target not in info["imports"]:
+                    info["imports"].append(target)
+                    modules[target]["imported_by"].append(module_name)
+                    internal_edges.append((module_name, target))
+            elif not target and base not in EXTERNAL_PACKAGES:
                 external_deps[module_name].add(base)
 
         # Process relative imports
@@ -278,9 +420,10 @@ def build_dependency_graph(
                 target = ".".join(target.split(".")[:-1])
 
             if target and target != module_name:
-                info["imports"].append(target)
-                modules[target]["imported_by"].append(module_name)
-                internal_edges.append((module_name, target))
+                if target not in info["imports"]:
+                    info["imports"].append(target)
+                    modules[target]["imported_by"].append(module_name)
+                    internal_edges.append((module_name, target))
 
     # Find circular dependencies
     circular = []
@@ -480,6 +623,159 @@ def print_text_graph(graph: Dict, focus: Optional[str] = None):
         print(f"    Top: {', '.join(sorted(all_external)[:10])}")
 
 
+# Entry point patterns (not orphans)
+ENTRY_POINT_PATTERNS = {
+    "main.py", "__main__.py", "cli.py", "app.py", "wsgi.py", "asgi.py",
+    "setup.py", "manage.py", "fabfile.py", "conftest.py"
+}
+
+ENTRY_POINT_PREFIXES = ("test_",)
+ENTRY_POINT_SUFFIXES = ("_test.py",)
+
+
+def is_entry_point(filepath: str, source: str = None) -> bool:
+    """Check if file is likely an entry point (not an orphan)."""
+    filename = os.path.basename(filepath)
+
+    # Check filename patterns
+    if filename in ENTRY_POINT_PATTERNS:
+        return True
+    if filename.startswith(ENTRY_POINT_PREFIXES):
+        return True
+    if any(filename.endswith(s) for s in ENTRY_POINT_SUFFIXES):
+        return True
+
+    # Check for if __name__ == "__main__"
+    if source is None:
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                source = f.read()
+        except Exception:
+            return False
+
+    return 'if __name__ ==' in source or "if __name__==" in source
+
+
+def find_orphans(graph: Dict) -> List[Dict]:
+    """Find files with zero importers that aren't entry points."""
+    modules = graph["modules"]
+    orphans = []
+
+    for name, info in modules.items():
+        if len(info["imported_by"]) == 0:
+            filepath = info["file"]
+            if is_entry_point(filepath):
+                continue
+
+            # Calculate confidence
+            confidence = 0.9
+            filename = os.path.basename(filepath).lower()
+
+            # Lower confidence for certain patterns
+            if "script" in filepath.lower():
+                confidence = 0.6
+            elif "deprecated" in filename or "legacy" in filename or "old" in filename:
+                confidence = 0.95
+            elif "util" in filename or "helper" in filename:
+                confidence = 0.7
+
+            orphans.append({
+                "file": filepath,
+                "module": name,
+                "confidence": confidence,
+                "notes": get_orphan_notes(filepath, filename)
+            })
+
+    return sorted(orphans, key=lambda x: x["confidence"], reverse=True)
+
+
+def get_orphan_notes(filepath: str, filename: str) -> str:
+    """Generate notes explaining orphan classification."""
+    if "deprecated" in filename or "legacy" in filename:
+        return "Name suggests deprecated"
+    if "old" in filename:
+        return "Name suggests superseded"
+    if "script" in filepath.lower():
+        return "Might be CLI script"
+    return "No imports, not entry point pattern"
+
+
+def calculate_impact(graph: Dict, target_file: str, max_depth: int = 2) -> Dict:
+    """Calculate blast radius for a file."""
+    modules = graph["modules"]
+
+    # Find the module for this file
+    target_module = None
+    for name, info in modules.items():
+        if info["file"] == target_file or info["file"].endswith(target_file):
+            target_module = name
+            break
+
+    if not target_module:
+        return {"error": f"File not found: {target_file}"}
+
+    # Direct dependents
+    direct = modules[target_module]["imported_by"]
+
+    # Transitive dependents (BFS)
+    seen = set(direct)
+    frontier = list(direct)
+    for _ in range(max_depth - 1):
+        next_frontier = []
+        for mod in frontier:
+            if mod in modules:
+                for dep in modules[mod]["imported_by"]:
+                    if dep not in seen:
+                        seen.add(dep)
+                        next_frontier.append(dep)
+        frontier = next_frontier
+
+    return {
+        "file": target_file,
+        "module": target_module,
+        "direct_dependents": direct,
+        "direct_count": len(direct),
+        "transitive_dependents": list(seen),
+        "transitive_count": len(seen)
+    }
+
+
+def print_orphans(orphans: List[Dict]):
+    """Print orphan analysis."""
+    if not orphans:
+        print("No orphan candidates found")
+        return
+
+    print("ORPHAN CANDIDATES (0 importers, excluding entry points)")
+    print(f"{'CONFIDENCE':<12} {'FILE':<40} {'NOTES'}")
+    print("-" * 80)
+    for o in orphans[:20]:
+        print(f"{o['confidence']:<12.2f} {o['file']:<40} {o['notes']}")
+
+
+def print_impact(impact: Dict):
+    """Print impact analysis."""
+    if "error" in impact:
+        print(f"Error: {impact['error']}")
+        return
+
+    print(f"IMPACT ANALYSIS: {impact['file']}")
+    print()
+    print(f"Direct dependents (import this file): {impact['direct_count']}")
+    for dep in impact['direct_dependents'][:10]:
+        print(f"  {dep}")
+    if impact['direct_count'] > 10:
+        print(f"  ... ({impact['direct_count'] - 10} more)")
+
+    print()
+    print(f"Transitive dependents (2 levels): {impact['transitive_count']}")
+
+    if impact['transitive_count'] > 10:
+        print()
+        print("WARNING: Changes to this file have wide blast radius.")
+        print("SUGGESTION: Consider smaller, incremental changes with tests.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate dependency graph for Python codebase"
@@ -500,6 +796,10 @@ def main():
         help="Disable auto-detection of root package"
     )
     parser.add_argument(
+        "--source-dir",
+        help="Override source root directory for module name generation"
+    )
+    parser.add_argument(
         "--focus",
         help="Focus on modules matching this string"
     )
@@ -513,6 +813,16 @@ def main():
         action="store_true",
         help="Output as Mermaid.js diagram"
     )
+    parser.add_argument(
+        "--orphans",
+        action="store_true",
+        help="Find files with zero importers (dead code candidates)"
+    )
+    parser.add_argument(
+        "--impact",
+        metavar="FILE",
+        help="Calculate blast radius for a specific file"
+    )
 
     args = parser.parse_args()
 
@@ -523,8 +833,26 @@ def main():
     graph = build_dependency_graph(
         args.directory,
         args.root,
-        auto_detect=not args.no_auto_detect
+        auto_detect=not args.no_auto_detect,
+        source_dir=args.source_dir
     )
+
+    # Handle orphans and impact modes
+    if args.orphans:
+        orphans = find_orphans(graph)
+        if args.json:
+            print(json.dumps({"orphans": orphans}, indent=2))
+        else:
+            print_orphans(orphans)
+        return
+
+    if args.impact:
+        impact = calculate_impact(graph, args.impact)
+        if args.json:
+            print(json.dumps(impact, indent=2))
+        else:
+            print_impact(impact)
+        return
 
     if args.mermaid:
         print(generate_mermaid(graph, args.focus))

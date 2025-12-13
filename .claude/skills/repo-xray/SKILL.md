@@ -65,7 +65,29 @@ python .claude/skills/repo-xray/scripts/dependency_graph.py src/              # 
 python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --mermaid    # Mermaid diagram
 python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --root pkg   # explicit root
 python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --focus api  # filter area
+python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --orphans    # dead code candidates
+python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --impact file.py  # blast radius
 python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --json       # JSON output
+```
+
+### git_analysis.py
+
+Analyzes git history for temporal signals.
+
+```bash
+python .claude/skills/repo-xray/scripts/git_analysis.py src/                  # show usage
+python .claude/skills/repo-xray/scripts/git_analysis.py src/ --risk           # risk scores
+python .claude/skills/repo-xray/scripts/git_analysis.py src/ --coupling       # co-modification pairs
+python .claude/skills/repo-xray/scripts/git_analysis.py src/ --freshness      # activity categories
+python .claude/skills/repo-xray/scripts/git_analysis.py src/ --json           # combined JSON output
+python .claude/skills/repo-xray/scripts/git_analysis.py src/ --months 12      # custom history period
+```
+
+Output example (--risk):
+```
+RISK   FILE                              FACTORS
+0.87   src/api/auth.py                   churn:15 hotfix:3 authors:5
+0.72   src/core/workflow.py              churn:8 hotfix:1 authors:3
 ```
 
 ## Workflow
@@ -75,7 +97,9 @@ python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --json       # 
 3. `dependency_graph.py --mermaid` - architecture diagram
 4. `skeleton.py --priority critical` - core interfaces
 5. Verify imports work
-6. `@repo_architect generate` - full documentation
+6. `git_analysis.py --risk` - identify volatile files
+7. `git_analysis.py --coupling` - find hidden dependencies
+8. `@repo_architect generate` - full documentation
 
 ## Token Budget
 
@@ -87,6 +111,12 @@ python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --json       # 
 | skeleton.py --priority critical | ~5K |
 | dependency_graph.py | ~3K |
 | dependency_graph.py --mermaid | ~500 |
+| dependency_graph.py --orphans | ~1K |
+| dependency_graph.py --impact | ~500 |
+| git_analysis.py --risk | ~1K |
+| git_analysis.py --coupling | ~500 |
+| git_analysis.py --freshness | ~500 |
+| git_analysis.py --json | ~3K |
 
 ## Priority Levels
 

@@ -27,6 +27,27 @@ python .claude/skills/repo-xray/scripts/skeleton.py <path> [--priority critical|
 
 # Analyze import dependencies (auto-detects root package)
 python .claude/skills/repo-xray/scripts/dependency_graph.py [directory] [--root package] [--focus area] [--json] [--mermaid]
+
+# Find orphan files (zero importers - dead code candidates)
+python .claude/skills/repo-xray/scripts/dependency_graph.py [directory] --orphans
+
+# Calculate blast radius for a file
+python .claude/skills/repo-xray/scripts/dependency_graph.py [directory] --impact <file>
+
+# Git Analysis (temporal signals from history)
+python .claude/skills/repo-xray/scripts/git_analysis.py [directory] [options]
+
+# Risk scoring from git history (churn, hotfixes, authors)
+python .claude/skills/repo-xray/scripts/git_analysis.py [directory] --risk
+
+# Find files that change together (hidden coupling)
+python .claude/skills/repo-xray/scripts/git_analysis.py [directory] --coupling
+
+# Categorize by freshness (active/aging/stale/dormant)
+python .claude/skills/repo-xray/scripts/git_analysis.py [directory] --freshness
+
+# JSON output for downstream consumption
+python .claude/skills/repo-xray/scripts/git_analysis.py [directory] --json
 ```
 
 ## Operating Modes
@@ -34,13 +55,15 @@ python .claude/skills/repo-xray/scripts/dependency_graph.py [directory] [--root 
 ### 1. `generate` (Default)
 Create a fresh WARM_START.md file for onboarding.
 
-**6-Step Workflow:**
+**8-Step Workflow:**
 1. **Bootstrap** - Run `configure.py --dry-run` to detect project structure and priorities
 2. **Survey** - Run `mapper.py --summary` to get codebase overview
 3. **Map** - Run `dependency_graph.py --mermaid` to visualize architecture layers
 4. **X-Ray** - Run `skeleton.py --priority critical` (using the auto-generated config)
 5. **Verify** - Identify entry points (e.g., `if __name__ == '__main__':` or `app = ...`) and verify they are importable
-6. **Document** - Generate WARM_START.md using the template
+6. **Risk** - Run `git_analysis.py --risk` to identify volatile files
+7. **Coupling** - Run `git_analysis.py --coupling` to find hidden dependencies
+8. **Document** - Generate WARM_START.md using the template
 
 ### 2. `refresh`
 Update an existing WARM_START.md with recent changes.
@@ -98,6 +121,10 @@ The generated document must include:
 Skip these placeholders when not applicable:
 - `{WORKFLOW_MERMAID_DIAGRAM}` - Skip for simple architectures (<10 modules)
 - `{EXECUTOR_CLASSES_TABLE}` - Skip if no Executor/Runner/Manager classes found
+- `{RISK_FILES_TABLE}` - Skip if no files have risk score > 0.5
+- `{COUPLING_TABLE}` - Skip if no significant coupling pairs found
+- `{ORPHAN_TABLE}` - Skip if no orphan candidates detected
+- `{DORMANT_TABLE}` - Skip if no files dormant >180 days
 - Foundation table should only include modules with ≥5 importers
 
 ## Skeleton Output Features

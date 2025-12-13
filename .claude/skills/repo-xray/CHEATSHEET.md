@@ -49,7 +49,19 @@ dependency_graph.py [dir]      Import analysis
 dependency_graph.py --mermaid  Mermaid diagram
 dependency_graph.py --root PKG Set root package
 dependency_graph.py --focus X  Filter to area
+dependency_graph.py --orphans  Dead code candidates
+dependency_graph.py --impact F Blast radius for file F
 dependency_graph.py --json     JSON output
+```
+
+### git_analysis.py
+```
+git_analysis.py [dir]          Git history analysis
+git_analysis.py --risk         Risk scores (churn, hotfixes, authors)
+git_analysis.py --coupling     Co-modification pairs
+git_analysis.py --freshness    Active/Aging/Stale/Dormant
+git_analysis.py --json         Combined JSON output
+git_analysis.py --months N     History period (default: 6)
 ```
 
 ---
@@ -72,7 +84,13 @@ python SCRIPTS/skeleton.py src/ --priority critical
 # 5. Verify imports
 python -c "from pkg.main import Main"
 
-# 6. Generate docs
+# 6. Risk assessment
+python SCRIPTS/git_analysis.py src/ --risk
+
+# 7. Hidden coupling
+python SCRIPTS/git_analysis.py src/ --coupling
+
+# 8. Generate docs
 @repo_architect generate
 ```
 
@@ -88,6 +106,12 @@ python -c "from pkg.main import Main"
 | skeleton.py --priority critical | ~5K |
 | dependency_graph.py | ~3K |
 | dependency_graph.py --mermaid | ~500 |
+| dependency_graph.py --orphans | ~1K |
+| dependency_graph.py --impact | ~500 |
+| git_analysis.py --risk | ~1K |
+| git_analysis.py --coupling | ~500 |
+| git_analysis.py --freshness | ~500 |
+| git_analysis.py --json | ~3K |
 
 ---
 

@@ -1,0 +1,229 @@
+{
+  "project_name": "claude-repo-xray",
+  "source_dir": ".",
+  "timestamp": "2025-12-12",
+  "token_budget": 86449,
+  "file_count": 30,
+  "layers": {
+    "foundation": [
+      "lib.ast_utils",
+      "configure"
+    ],
+    "core": [
+      "dependency_graph",
+      "git_analysis",
+      "mapper",
+      "skeleton"
+    ],
+    "orchestration": [
+      "generate_warm_start"
+    ],
+    "leaf": [
+      "lib.token_estimator",
+      "lib"
+    ]
+  },
+  "mermaid": "graph TD\n    subgraph ORCHESTRATION\n        generate_warm_start[generate_warm_start]\n    end\n    subgraph CORE\n        dependency_graph[dependency_graph]\n        git_analysis[git_analysis]\n        mapper[mapper]\n        skeleton[skeleton]\n    end\n    subgraph FOUNDATION\n        lib_ast_utils[ast_utils]\n        configure[configure]\n    end\n    generate_warm_start --> dependency_graph\n    generate_warm_start --> git_analysis\n    generate_warm_start --> mapper\n    generate_warm_start --> lib_ast_utils",
+  "risk": [
+    {
+      "file": ".claude/skills/repo-xray/lib/__init__.py",
+      "risk_score": 0.44,
+      "churn": 1,
+      "hotfixes": 0,
+      "authors": 1
+    },
+    {
+      "file": ".claude/skills/repo-xray/lib/ast_utils.py",
+      "risk_score": 0.44,
+      "churn": 1,
+      "hotfixes": 0,
+      "authors": 1
+    },
+    {
+      "file": ".claude/skills/repo-xray/lib/token_estimator.py",
+      "risk_score": 0.44,
+      "churn": 1,
+      "hotfixes": 0,
+      "authors": 1
+    },
+    {
+      "file": ".claude/skills/repo-xray/scripts/configure.py",
+      "risk_score": 0.44,
+      "churn": 1,
+      "hotfixes": 0,
+      "authors": 1
+    },
+    {
+      "file": ".claude/skills/repo-xray/scripts/dependency_graph.py",
+      "risk_score": 0.44,
+      "churn": 1,
+      "hotfixes": 0,
+      "authors": 1
+    },
+    {
+      "file": ".claude/skills/repo-xray/scripts/mapper.py",
+      "risk_score": 0.44,
+      "churn": 1,
+      "hotfixes": 0,
+      "authors": 1
+    },
+    {
+      "file": ".claude/skills/repo-xray/scripts/skeleton.py",
+      "risk_score": 0.44,
+      "churn": 1,
+      "hotfixes": 0,
+      "authors": 1
+    }
+  ],
+  "coupling": [],
+  "freshness": {
+    "active": [
+      {
+        "file": ".claude/skills/repo-xray/lib/__init__.py",
+        "days": 0
+      },
+      {
+        "file": ".claude/skills/repo-xray/lib/ast_utils.py",
+        "days": 0
+      },
+      {
+        "file": ".claude/skills/repo-xray/lib/token_estimator.py",
+        "days": 0
+      },
+      {
+        "file": ".claude/skills/repo-xray/scripts/configure.py",
+        "days": 0
+      },
+      {
+        "file": ".claude/skills/repo-xray/scripts/dependency_graph.py",
+        "days": 0
+      },
+      {
+        "file": ".claude/skills/repo-xray/scripts/mapper.py",
+        "days": 0
+      },
+      {
+        "file": ".claude/skills/repo-xray/scripts/skeleton.py",
+        "days": 0
+      }
+    ],
+    "aging": [],
+    "stale": [],
+    "dormant": []
+  },
+  "orphans": [
+    {
+      "file": "./.claude/skills/repo-xray/lib/token_estimator.py",
+      "module": "lib.token_estimator",
+      "confidence": 0.9,
+      "notes": "No imports, not entry point pattern"
+    },
+    {
+      "file": "./.claude/skills/repo-xray/lib/__init__.py",
+      "module": "lib",
+      "confidence": 0.9,
+      "notes": "No imports, not entry point pattern"
+    }
+  ],
+  "large_files": [
+    {
+      "path": "Phase2_Implementation_plan.md",
+      "tokens": 10440,
+      "formatted": "10.4K"
+    }
+  ],
+  "entry_points": [
+    {
+      "module": "configure",
+      "file": "./.claude/skills/repo-xray/scripts/configure.py",
+      "type": "script",
+      "description": "Has __main__ block"
+    },
+    {
+      "module": "dependency_graph",
+      "file": "./.claude/skills/repo-xray/scripts/dependency_graph.py",
+      "type": "script",
+      "description": "Has __main__ block"
+    },
+    {
+      "module": "generate_warm_start",
+      "file": "./.claude/skills/repo-xray/scripts/generate_warm_start.py",
+      "type": "script",
+      "description": "Has __main__ block"
+    },
+    {
+      "module": "git_analysis",
+      "file": "./.claude/skills/repo-xray/scripts/git_analysis.py",
+      "type": "script",
+      "description": "Has __main__ block"
+    },
+    {
+      "module": "mapper",
+      "file": "./.claude/skills/repo-xray/scripts/mapper.py",
+      "type": "script",
+      "description": "Has __main__ block"
+    },
+    {
+      "module": "skeleton",
+      "file": "./.claude/skills/repo-xray/scripts/skeleton.py",
+      "type": "script",
+      "description": "Has __main__ block"
+    }
+  ],
+  "critical_classes": [],
+  "data_models": [],
+  "graph_modules": {
+    "lib.ast_utils": {
+      "imports": [],
+      "imported_by": [
+        "generate_warm_start",
+        "skeleton"
+      ]
+    },
+    "lib.token_estimator": {
+      "imports": [],
+      "imported_by": []
+    },
+    "lib": {
+      "imports": [],
+      "imported_by": []
+    },
+    "configure": {
+      "imports": [],
+      "imported_by": []
+    },
+    "dependency_graph": {
+      "imports": [],
+      "imported_by": [
+        "generate_warm_start"
+      ]
+    },
+    "generate_warm_start": {
+      "imports": [
+        "dependency_graph",
+        "git_analysis",
+        "mapper",
+        "lib.ast_utils"
+      ],
+      "imported_by": []
+    },
+    "git_analysis": {
+      "imports": [],
+      "imported_by": [
+        "generate_warm_start"
+      ]
+    },
+    "mapper": {
+      "imports": [],
+      "imported_by": [
+        "generate_warm_start"
+      ]
+    },
+    "skeleton": {
+      "imports": [
+        "lib.ast_utils"
+      ],
+      "imported_by": []
+    }
+  }
+}

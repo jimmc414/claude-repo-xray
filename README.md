@@ -19,7 +19,8 @@ Uses Python's built-in AST parser, so currently Python-only. If there's interest
 ## Tools
 - `mapper.py` - Directory tree with token estimates per file
 - `skeleton.py` - Interface extraction (classes, methods, fields, decorators, line numbers)
-- `dependency_graph.py` - Import analysis with architectural layer detection and Mermaid output
+- `dependency_graph.py` - Import analysis with architectural layer detection, orphan detection, and impact analysis
+- `git_analysis.py` - Git history analysis for risk scoring, hidden coupling, and freshness tracking
 - `configure.py` - Auto-detection of project structure, root package, and ignore patterns
 
 ## Installation
@@ -130,8 +131,21 @@ skeleton.py <path>           Extract class/method signatures
 dependency_graph.py [dir]    Analyze import relationships
   --root PACKAGE             Set root package explicitly
   --focus STRING             Filter to modules containing string
+  --orphans                  Find files with zero importers (dead code)
+  --impact FILE              Calculate blast radius for a file
   --mermaid                  Output Mermaid diagram
   --json                     Machine-readable output
+```
+
+### git_analysis.py
+
+```
+git_analysis.py [dir]        Analyze git history
+  --risk                     Risk scores (churn, hotfixes, authors)
+  --coupling                 Find co-modification pairs
+  --freshness                Categorize: Active/Aging/Stale/Dormant
+  --json                     Combined JSON output
+  --months N                 History period (default: 6)
 ```
 
 ### configure.py
@@ -181,6 +195,12 @@ graph TD
 | skeleton.py --priority critical | ~5K |
 | dependency_graph.py | ~3K |
 | dependency_graph.py --mermaid | ~500 |
+| dependency_graph.py --orphans | ~1K |
+| dependency_graph.py --impact | ~500 |
+| git_analysis.py --risk | ~1K |
+| git_analysis.py --coupling | ~500 |
+| git_analysis.py --freshness | ~500 |
+| git_analysis.py --json | ~3K |
 
 ## Auto-Detection
 
@@ -213,6 +233,11 @@ repo-xray/
             ├── reference.md
             ├── configs/
             ├── scripts/
+            │   ├── mapper.py
+            │   ├── skeleton.py
+            │   ├── dependency_graph.py
+            │   ├── git_analysis.py
+            │   └── configure.py
             ├── templates/
             └── lib/
 ```

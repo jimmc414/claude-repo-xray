@@ -212,9 +212,27 @@ python dependency_graph.py [directory] [--root PACKAGE] [--focus STRING] [--no-a
 | `directory` | string | `.` | Directory to analyze |
 | `--root` | string | auto | Root package name (auto-detected if not specified) |
 | `--focus` | string | - | Focus on modules matching this string |
+| `--orphans` | flag | - | Find files with zero importers (dead code candidates) |
+| `--impact` | string | - | Calculate blast radius for specified file |
 | `--no-auto-detect` | flag | - | Disable auto-detection of root package |
 | `--mermaid` | flag | - | Output as Mermaid.js diagram |
 | `--json` | flag | - | Output as JSON |
+
+### Orphan Detection
+Finds files with no internal importers, excluding known entry point patterns:
+- `main.py`, `__main__.py`, `cli.py`, `app.py`, `wsgi.py`, `asgi.py`
+- `test_*.py`, `*_test.py`, `conftest.py`
+- `setup.py`, `manage.py`
+- Files containing `if __name__ == "__main__":`
+
+Output includes confidence scores based on naming patterns.
+
+### Impact Analysis
+Calculates blast radius for a file showing:
+- **Direct dependents**: Files that directly import this module
+- **Transitive dependents**: Files affected through 2 levels of imports
+
+Warns when changes have wide impact (>10 transitive dependents).
 
 ### Architectural Layers
 The tool automatically categorizes modules using both import patterns AND naming conventions:
@@ -303,6 +321,93 @@ graph TD
     "total_modules": 45,
     "internal_edges": 120,
     "circular_count": 1
+  }
+}
+```
+
+---
+
+## git_analysis.py
+
+### Purpose
+Analyzes git history to extract temporal signals: risk scoring, co-modification patterns, and file freshness. Identifies volatile files, hidden coupling, and maintenance activity.
+
+### Usage
+```
+python git_analysis.py [directory] [--risk] [--coupling] [--freshness] [--json] [--months N]
+```
+
+### Arguments
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `directory` | string | `.` | Directory to analyze (must be in a git repository) |
+| `--risk` | flag | - | Calculate risk scores from churn, hotfixes, authors |
+| `--coupling` | flag | - | Find co-modification pairs (hidden coupling) |
+| `--freshness` | flag | - | Categorize files by last modification time |
+| `--json` | flag | - | Output all analyses as combined JSON |
+| `--months` | int | 6 | History period for risk analysis |
+
+### Risk Scoring
+Calculates a 0-1 risk score based on:
+- **Churn (40%)**: Normalized commit count in period
+- **Hotfixes (40%)**: Commits with fix/bug/urgent/revert keywords
+- **Author Entropy (20%)**: Number of unique authors (higher = more coordination overhead)
+
+### Output Format (Risk)
+```
+RISK   FILE                              FACTORS
+0.87   src/api/auth.py                   churn:15 hotfix:3 authors:5
+0.72   src/core/workflow.py              churn:8 hotfix:1 authors:3
+```
+
+### Coupling Analysis
+Finds files that frequently change together, indicating hidden dependencies not visible in imports:
+- Analyzes recent commits (default: 200)
+- Counts co-occurrences for Python files
+- Filters to pairs with >= 3 co-occurrences
+- Skips bulk refactors (commits touching >20 files)
+
+### Output Format (Coupling)
+```
+=== CO-MODIFICATION PAIRS ===
+Files that change together (hidden coupling)
+12   src/api/auth.py <-> src/api/session.py
+8    src/models/user.py <-> src/db/user_repo.py
+```
+
+### Freshness Categories
+| Category | Threshold | Meaning |
+|----------|-----------|---------|
+| Active | <30 days | Being maintained |
+| Aging | 30-90 days | May need attention |
+| Stale | 90-180 days | Possibly neglected |
+| Dormant | >180 days | Stable or abandoned |
+
+### Output Format (Freshness)
+```
+=== FRESHNESS ANALYSIS ===
+ACTIVE (last 30 days): 45 files
+AGING (30-90 days): 23 files
+STALE (90-180 days): 8 files
+DORMANT (>180 days): 12 files
+  Oldest files:
+    src/legacy/converter.py (412 days)
+```
+
+### Output Format (JSON)
+```json
+{
+  "risk": [
+    {"file": "src/api/auth.py", "risk_score": 0.87, "churn": 15, "hotfixes": 3, "authors": 5}
+  ],
+  "coupling": [
+    {"file_a": "src/api/auth.py", "file_b": "src/api/session.py", "count": 12}
+  ],
+  "freshness": {
+    "active": [{"file": "src/api/auth.py", "days": 5}],
+    "aging": [],
+    "stale": [],
+    "dormant": [{"file": "src/legacy/old.py", "days": 412}]
   }
 }
 ```
