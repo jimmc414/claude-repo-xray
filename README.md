@@ -21,20 +21,24 @@ A two-pass analysis system that extracts 18 signals from 14 metadata sources:
 - Test coverage mapping
 
 **Pass 2: Behavioral Analysis (HOT_START.md)**
+- Mermaid architecture diagrams with layer classification
 - Cyclomatic complexity scoring
 - Control flow logic maps
 - Method signatures with docstrings
 - Import weight (which modules are most depended upon)
+- Git analysis: risk scores, coupling pairs, freshness
+- External dependencies, circular dependencies, orphan detection
 - Side effect detection
-- Module relationship graphs
+- Developer Activity section (placeholder for Claude Code behavioral metrics)
 
-Together, these produce a ~4,000 token hierarchical reference that attempts to help an AI effectively grok a multimillion token repository within a limited 200,000 token context window.
+Together, these produce a comprehensive reference (~15-50K tokens depending on codebase size) that helps an AI effectively understand a multimillion token repository within a limited context window.
 
 ## Example Output
 
-See the generated analysis for this repository:
-- [WARM_START.md](WARM_START.md) - Pass 1: Structural analysis
-- [HOT_START.md](HOT_START.md) - Pass 2: Behavioral analysis
+See the generated analysis for the [Kosmos](https://github.com/jimmc414/Kosmos) codebase (159M tokens, 633 Python files):
+- [WARM_START.md](WARM_START.md) - Pass 1: Structural analysis (~20KB)
+- [HOT_START.md](HOT_START.md) - Pass 2: Behavioral analysis (~48KB, 1231 lines)
+- [examples/WARM_START.md](examples/WARM_START.md) - Additional example output
 
 ## Limitations
 
@@ -231,6 +235,31 @@ generate_warm_start.py [dir] Generate WARM_START.md documentation
   -v, --verbose              Show progress messages
 ```
 
+### generate_hot_start.py
+
+**What it looks for**: Behavioral patterns—complexity hotspots, control flow, side effects, git history, module relationships.
+
+**Why**: Pass 2 analysis focuses on *how* code behaves rather than *what* it declares. Identifies risky files, hidden coupling, and generates logic maps for complex methods.
+
+**How**: Combines cyclomatic complexity analysis with git history (risk, coupling, freshness), dependency graph analysis, and AST-based logic map generation.
+
+**Raw output**: Priority-ranked files with complexity scores, logic maps, verification status, hidden dependencies.
+
+```
+generate_hot_start.py [dir]  Generate HOT_START.md documentation
+  -o, --output FILE          Output file path (default: HOT_START.md)
+  --detail LEVEL             Detail level: 1/compact, 2/normal, 3/verbose, 4/full
+  --top N                    Number of priority files to analyze (default: 10)
+  --debug                    Output raw JSON to HOT_START_debug/
+  -v, --verbose              Show progress messages
+```
+
+**Detail levels:**
+- `1/compact`: Priority table only (~500 tokens)
+- `2/normal`: Standard with logic maps (~2,700 tokens)
+- `3/verbose`: Preserve literals (~5,000 tokens)
+- `4/full`: Add signatures and docstrings (~8,000+ tokens)
+
 ### Test Coverage Analysis (Section 13)
 
 **What it looks for**: Test file counts, test function estimates, pytest fixtures, and source-to-test directory mapping.
@@ -400,7 +429,9 @@ RISK   FILE                                    FACTORS
 | git_analysis.py --coupling | ~500 | Hidden dependencies |
 | git_analysis.py --freshness | ~500 | Maintenance activity |
 | Test coverage (Section 13) | ~100-200 | Test metadata without reading tests |
-| generate_warm_start.py | ~8-20K | Complete documentation |
+| generate_warm_start.py | ~8-20K | Pass 1 complete documentation |
+| generate_hot_start.py --detail 1 | ~500 | Pass 2 compact (priority table only) |
+| generate_hot_start.py --detail 4 | ~8-50K | Pass 2 full (logic maps, git analysis) |
 
 ---
 
@@ -409,45 +440,40 @@ RISK   FILE                                    FACTORS
 ```
 repo-xray/
 ├── README.md
-├── install.sh
-├── WARM_START.python-only.md      # Raw Python tool output (complete)
-├── WARM_START.claude-processed.md # Claude-reviewed (filtered for usefulness)
+├── WARM_START.md                  # Example Pass 1 output (Kosmos)
+├── HOT_START.md                   # Example Pass 2 output (Kosmos)
+├── examples/
+│   └── WARM_START.md              # Additional example
 └── .claude/
     ├── agents/
     │   └── repo_architect.md
     └── skills/
-        └── repo-xray/
-            ├── SKILL.md
-            ├── COMMANDS.md          # Quick reference for Claude
-            ├── reference.md         # Detailed API docs
-            ├── configs/
-            ├── scripts/
-            │   ├── mapper.py
-            │   ├── skeleton.py
-            │   ├── dependency_graph.py
-            │   ├── git_analysis.py
-            │   ├── configure.py
-            │   └── generate_warm_start.py
-            ├── templates/
-            ├── tests/
-            └── lib/
+        ├── repo-xray/             # Pass 1 tools
+        │   ├── SKILL.md
+        │   ├── scripts/
+        │   │   ├── mapper.py
+        │   │   ├── skeleton.py
+        │   │   ├── dependency_graph.py
+        │   │   ├── git_analysis.py
+        │   │   ├── configure.py
+        │   │   └── generate_warm_start.py
+        │   └── lib/
+        └── repo-investigator/     # Pass 2 tools
+            └── scripts/
+                ├── generate_hot_start.py
+                ├── complexity.py
+                ├── smart_read.py
+                └── verify.py
 ```
 
-### Example Output Comparison
+### Example Output Details
 
-Both example files are generated from the [kosmos](https://github.com/jimmc414/kosmos) codebase:
+Example files are generated from the [Kosmos](https://github.com/jimmc414/kosmos) codebase (159M tokens):
 
 | File | Size | Description |
 |------|------|-------------|
-| `WARM_START.python-only.md` | ~19KB | Raw tool output - complete but includes noise |
-| `WARM_START.claude-processed.md` | ~12KB | Claude-reviewed - filtered for usefulness |
-
-**Why Claude-processed may be smaller:**
-- Removes noise (test utilities detected as entry points, internal `.claude/` modules)
-- Curates Mermaid diagrams to show key modules only
-- Focuses large file warnings on Python source files, not data files
-- Replaces "files with `__main__` blocks" with actual classes you'd instantiate
-- Adds interpretive context (what modules do, risk implications)
+| `WARM_START.md` | ~20KB | Pass 1: Architecture, layers, dependencies, entry points |
+| `HOT_START.md` | ~48KB | Pass 2: Complexity, logic maps, git analysis, risk scores |
 
 ## Requirements
 
