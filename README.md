@@ -10,7 +10,31 @@ AI coding assistants face a cold start problem: a 200K token context window cann
 
 ## The Solution
 
-repo-xray uses AST parsing to extract structural information—class signatures, method signatures, type annotations, Pydantic fields, and import relationships—without loading implementation details, typically achieving 95% token reduction. The result is that an AI assistant can survey an entire codebase's architecture, identify entry points, and understand data flow within its context budget before reading any full source files.
+A two-pass analysis system that extracts 18 signals from 14 metadata sources:
+
+**Pass 1: Structural Analysis (WARM_START.md)**
+- Architecture layers and module classification
+- Dependency graph and import relationships
+- Entry points (CLI, API)
+- Class interfaces and type signatures
+- Git history risk analysis
+- Test coverage mapping
+
+**Pass 2: Behavioral Analysis (HOT_START.md)**
+- Cyclomatic complexity scoring
+- Control flow logic maps
+- Method signatures with docstrings
+- Import weight (which modules are most depended upon)
+- Side effect detection
+- Module relationship graphs
+
+Together, these produce a ~4,000 token hierarchical reference that attempts to help an AI effectively grok a multimillion token repository within a limited 200,000 token context window.
+
+## Example Output
+
+See the generated analysis for this repository:
+- [WARM_START.md](WARM_START.md) - Pass 1: Structural analysis
+- [HOT_START.md](HOT_START.md) - Pass 2: Behavioral analysis
 
 ## Limitations
 
@@ -207,6 +231,41 @@ generate_warm_start.py [dir] Generate WARM_START.md documentation
   -v, --verbose              Show progress messages
 ```
 
+### Test Coverage Analysis (Section 13)
+
+**What it looks for**: Test file counts, test function estimates, pytest fixtures, and source-to-test directory mapping.
+
+**Why**: Tests are typically 2-5x larger than source code but provide derivative information. Reading test content consumes significant context for low architectural signal. However, *metadata about tests* reveals coverage gaps and available fixtures without the token cost.
+
+**How**: Scans `tests/`, `test/`, `testing/` directories. Counts files by test type (unit, integration, e2e). Extracts `@pytest.fixture` names from conftest.py files. Maps test subdirectories to source directories to identify untested modules.
+
+**Raw output**: `{test_file_count, test_function_count, coverage_by_type{}, tested_dirs[], untested_dirs[], fixtures[]}`
+
+**Token cost**: ~100-200 tokens for complete test metadata vs ~50K+ tokens to read actual test files.
+
+**Example output**:
+```markdown
+## 13. Test Coverage
+
+**205** test files, **~3897** test functions
+
+### Tests by Type
+| Type | Files |
+|------|-------|
+| `unit/` | 98 |
+| `integration/` | 32 |
+| `e2e/` | 12 |
+
+### Tested Modules
+`agents`, `cli`, `core`, `execution`, `knowledge`...
+
+### Potentially Untested
+`api/`, `config/`...
+
+### Key Fixtures (conftest.py)
+`mock_anthropic_client`, `e2e_artifacts_dir`, `event_loop`...
+```
+
 ---
 
 ## Installation
@@ -340,6 +399,7 @@ RISK   FILE                                    FACTORS
 | git_analysis.py --risk | ~1K | Identify volatile files |
 | git_analysis.py --coupling | ~500 | Hidden dependencies |
 | git_analysis.py --freshness | ~500 | Maintenance activity |
+| Test coverage (Section 13) | ~100-200 | Test metadata without reading tests |
 | generate_warm_start.py | ~8-20K | Complete documentation |
 
 ---

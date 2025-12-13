@@ -35,7 +35,7 @@ __all__ = [
 ]
 
 
-def run_git(cmd: List[str], cwd: str) -> str:
+def run_git(cmd: List[str], cwd: str, verbose: bool = False) -> str:
     """Execute a git command and return output."""
     try:
         result = subprocess.run(
@@ -46,8 +46,14 @@ def run_git(cmd: List[str], cwd: str) -> str:
             encoding="utf-8",
             errors="replace"
         )
+        if result.returncode != 0 and verbose:
+            print(f"Warning: git {' '.join(cmd[:3])}... failed", file=sys.stderr)
+            if result.stderr:
+                print(f"  {result.stderr.strip()[:100]}", file=sys.stderr)
         return result.stdout.strip()
-    except subprocess.SubprocessError:
+    except subprocess.SubprocessError as e:
+        if verbose:
+            print(f"Error: git command failed: {e}", file=sys.stderr)
         return ""
 
 
@@ -57,7 +63,7 @@ def get_tracked_files(cwd: str) -> List[str]:
     return [f for f in raw.splitlines() if f.strip()]
 
 
-def analyze_risk(cwd: str, files: List[str], months: int = 6) -> List[Dict]:
+def analyze_risk(cwd: str, files: List[str], months: int = 6, verbose: bool = False) -> List[Dict]:
     """
     Calculate Risk Score based on:
     - Churn: Number of commits in period (40% weight)
@@ -69,10 +75,13 @@ def analyze_risk(cwd: str, files: List[str], months: int = 6) -> List[Dict]:
     # Parse git log with custom delimiter
     log = run_git(
         ["log", f"--since={months}.months", "--name-only", "--pretty=format:COMMIT::%an::%s"],
-        cwd
+        cwd,
+        verbose
     )
 
     if not log:
+        if verbose:
+            print(f"Warning: No git log for risk analysis (past {months} months)", file=sys.stderr)
         return []
 
     stats = defaultdict(lambda: {"commits": 0, "authors": set(), "hotfixes": 0})
@@ -124,7 +133,8 @@ def analyze_risk(cwd: str, files: List[str], months: int = 6) -> List[Dict]:
     return sorted(results, key=lambda x: x["risk_score"], reverse=True)
 
 
-def analyze_coupling(cwd: str, max_commits: int = 200, min_cooccurrences: int = 3) -> List[Dict]:
+def analyze_coupling(cwd: str, max_commits: int = 200, min_cooccurrences: int = 3,
+                     verbose: bool = False) -> List[Dict]:
     """
     Find files that change together even without import relationships.
 
@@ -134,9 +144,11 @@ def analyze_coupling(cwd: str, max_commits: int = 200, min_cooccurrences: int = 
     3. Filter to pairs with >= min_cooccurrences
     4. Skip bulk refactors (commits touching >20 files)
     """
-    log = run_git(["log", "-n", str(max_commits), "--name-only", "--pretty=format:COMMIT"], cwd)
+    log = run_git(["log", "-n", str(max_commits), "--name-only", "--pretty=format:COMMIT"], cwd, verbose)
 
     if not log:
+        if verbose:
+            print("Warning: No git log for coupling analysis", file=sys.stderr)
         return []
 
     commits = []
@@ -171,7 +183,7 @@ def analyze_coupling(cwd: str, max_commits: int = 200, min_cooccurrences: int = 
     return results
 
 
-def analyze_freshness(cwd: str, files: List[str]) -> Dict[str, List[Dict]]:
+def analyze_freshness(cwd: str, files: List[str], verbose: bool = False) -> Dict[str, List[Dict]]:
     """
     Categorize files by last modification time.
 
@@ -181,9 +193,11 @@ def analyze_freshness(cwd: str, files: List[str]) -> Dict[str, List[Dict]]:
     - Stale: 90-180 days (possibly neglected)
     - Dormant: >180 days (stable or abandoned)
     """
-    log = run_git(["log", "--name-only", "--pretty=format:COMMIT::%ct"], cwd)
+    log = run_git(["log", "--name-only", "--pretty=format:COMMIT::%ct"], cwd, verbose)
 
     if not log:
+        if verbose:
+            print("Warning: No git log for freshness analysis", file=sys.stderr)
         return {"active": [], "aging": [], "stale": [], "dormant": []}
 
     last_modified = {}
@@ -303,6 +317,11 @@ def main():
         default=6,
         help="Months of history for risk analysis (default: 6)"
     )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Show warnings and progress on stderr"
+    )
 
     args = parser.parse_args()
 
@@ -340,13 +359,13 @@ def main():
     output = {}
 
     if args.json or args.risk:
-        output["risk"] = analyze_risk(args.directory, files, args.months)
+        output["risk"] = analyze_risk(args.directory, files, args.months, args.verbose)
 
     if args.json or args.coupling:
-        output["coupling"] = analyze_coupling(args.directory)
+        output["coupling"] = analyze_coupling(args.directory, verbose=args.verbose)
 
     if args.json or args.freshness:
-        output["freshness"] = analyze_freshness(args.directory, files)
+        output["freshness"] = analyze_freshness(args.directory, files, args.verbose)
 
     # Output
     if args.json:

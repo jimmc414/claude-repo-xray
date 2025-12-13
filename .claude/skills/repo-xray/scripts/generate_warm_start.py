@@ -155,9 +155,9 @@ def collect_all_data(directory: str, verbose: bool = False) -> Dict[str, Any]:
     if verbose:
         print("  Analyzing git history...", file=sys.stderr)
     files = get_tracked_files(directory)
-    risk = analyze_risk(directory, files) if files else []
-    coupling = analyze_coupling(directory) if files else []
-    freshness = analyze_freshness(directory, files) if files else {"active": [], "aging": [], "stale": [], "dormant": []}
+    risk = analyze_risk(directory, files, verbose=verbose) if files else []
+    coupling = analyze_coupling(directory, verbose=verbose) if files else []
+    freshness = analyze_freshness(directory, files, verbose=verbose) if files else {"active": [], "aging": [], "stale": [], "dormant": []}
 
     # Detect entry points and critical classes
     if verbose:
@@ -168,6 +168,11 @@ def collect_all_data(directory: str, verbose: bool = False) -> Dict[str, Any]:
         print("  Extracting critical classes...", file=sys.stderr)
     critical_classes = extract_critical_classes(directory, graph, layers)
     data_models = extract_data_models(directory, graph, layers)
+
+    # Test coverage metadata
+    if verbose:
+        print("  Analyzing test coverage...", file=sys.stderr)
+    test_coverage = analyze_test_coverage(directory, graph.get("modules", {}))
 
     return {
         "project_name": project_name,
@@ -187,6 +192,7 @@ def collect_all_data(directory: str, verbose: bool = False) -> Dict[str, Any]:
         "entry_points": entry_points,
         "critical_classes": critical_classes,
         "data_models": data_models,
+        "test_coverage": test_coverage,
     }
 
 
@@ -366,6 +372,110 @@ def extract_data_models(directory: str, graph: Dict, layers: Dict) -> List[Dict]
                     pass
 
     return models[:5]  # Limit
+
+
+# =============================================================================
+# Test Coverage Analysis
+# =============================================================================
+
+def analyze_test_coverage(directory: str, source_modules: Dict) -> Dict:
+    """
+    Analyze test coverage metadata without reading test content.
+
+    Returns:
+        - test_files: count of test files
+        - test_functions: estimated count of test functions
+        - coverage_map: source_dir -> test_dir mapping
+        - untested: source modules with no corresponding tests
+        - fixtures: list of fixture names from conftest.py
+    """
+    test_dirs = ["tests", "test", "testing"]
+    test_files = []
+    fixtures = []
+
+    # Find test directories
+    for test_dir in test_dirs:
+        test_path = Path(directory) / test_dir
+        if test_path.exists():
+            # Collect test files
+            for py_file in test_path.rglob("*.py"):
+                rel_path = str(py_file.relative_to(directory))
+                test_files.append(rel_path)
+
+                # Extract fixtures from conftest.py
+                if py_file.name == "conftest.py":
+                    try:
+                        content = py_file.read_text(encoding='utf-8', errors='replace')
+                        # Find @pytest.fixture decorated functions
+                        import re
+                        fixture_matches = re.findall(
+                            r'@pytest\.fixture[^\n]*\ndef\s+(\w+)',
+                            content
+                        )
+                        fixtures.extend(fixture_matches)
+                        # Also find simple fixture pattern
+                        fixture_matches = re.findall(
+                            r'@fixture[^\n]*\ndef\s+(\w+)',
+                            content
+                        )
+                        fixtures.extend(fixture_matches)
+                    except Exception:
+                        pass
+
+    # Estimate test function count (count 'def test_' patterns)
+    test_function_count = 0
+    for test_file in test_files:
+        try:
+            content = Path(directory, test_file).read_text(encoding='utf-8', errors='replace')
+            test_function_count += content.count('def test_')
+            test_function_count += content.count('async def test_')
+        except Exception:
+            pass
+
+    # Build coverage map: source_dir -> test_file_count
+    # Look for source directories mentioned in test paths
+    # e.g., tests/unit/agents/test_base.py means agents/ is tested
+    tested_source_dirs = set()
+    coverage_by_type = {}  # e.g., "unit" -> count, "integration" -> count
+
+    for test_file in test_files:
+        parts = Path(test_file).parts
+        if len(parts) >= 2:
+            # First level after tests/ is the test type (unit, integration, e2e)
+            test_type = parts[1]
+            # Skip files directly in tests/ (conftest.py, __init__.py)
+            if test_type.endswith(".py"):
+                continue
+            if test_type not in coverage_by_type:
+                coverage_by_type[test_type] = 0
+            coverage_by_type[test_type] += 1
+
+            # Look for source directory names in the path
+            # e.g., tests/unit/agents/test_base.py -> agents is tested
+            for part in parts[2:]:  # Skip tests/ and test_type/
+                if not part.startswith("test_") and not part.startswith("__") and not part.endswith(".py"):
+                    tested_source_dirs.add(part)
+
+    # Find untested modules (source dirs without corresponding test dirs)
+    source_dirs = set()
+    for module_name in source_modules.keys():
+        parts = module_name.split(".")
+        if len(parts) >= 2:
+            source_dirs.add(parts[1])  # e.g., kosmos.agents -> agents
+
+    # Filter out common non-source directories
+    ignore_dirs = {"__pycache__", "__init__", "alembic", "migrations", "docs", "examples"}
+    source_dirs = source_dirs - ignore_dirs
+    untested_dirs = source_dirs - tested_source_dirs
+
+    return {
+        "test_file_count": len(test_files),
+        "test_function_count": test_function_count,
+        "coverage_by_type": coverage_by_type,
+        "tested_dirs": sorted(list(tested_source_dirs)),
+        "untested_dirs": sorted(list(untested_dirs))[:10],
+        "fixtures": sorted(list(set(fixtures)))[:15],  # Dedupe and limit
+    }
 
 
 # =============================================================================
@@ -622,6 +732,51 @@ def format_hazard_files(large_files: List[Dict]) -> str:
     return "\n".join(lines)
 
 
+def format_test_coverage(test_coverage: Dict) -> str:
+    """Format test coverage metadata section."""
+    if not test_coverage or test_coverage.get("test_file_count", 0) == 0:
+        return "*No test directory found*"
+
+    lines = []
+
+    # Summary
+    lines.append(f"**{test_coverage['test_file_count']}** test files, **~{test_coverage['test_function_count']}** test functions\n")
+
+    # Coverage by type
+    coverage_by_type = test_coverage.get("coverage_by_type", {})
+    if coverage_by_type:
+        lines.append("### Tests by Type")
+        lines.append("| Type | Files |")
+        lines.append("|------|-------|")
+        for test_type, count in sorted(coverage_by_type.items(), key=lambda x: -x[1]):
+            lines.append(f"| `{test_type}/` | {count} |")
+        lines.append("")
+
+    # Tested directories
+    tested = test_coverage.get("tested_dirs", [])
+    if tested:
+        lines.append("### Tested Modules")
+        lines.append(", ".join(f"`{d}`" for d in tested[:15]))
+        lines.append("")
+
+    # Untested directories
+    untested = test_coverage.get("untested_dirs", [])
+    if untested:
+        lines.append("### Potentially Untested")
+        lines.append("*Source directories without corresponding test directories:*\n")
+        lines.append(", ".join(f"`{d}/`" for d in untested[:8]))
+        lines.append("")
+
+    # Fixtures
+    fixtures = test_coverage.get("fixtures", [])
+    if fixtures:
+        lines.append("### Key Fixtures (conftest.py)")
+        lines.append("*Available test fixtures for setup:*\n")
+        lines.append(", ".join(f"`{f}`" for f in fixtures[:12]))
+
+    return "\n".join(lines)
+
+
 # =============================================================================
 # Template Rendering
 # =============================================================================
@@ -748,6 +903,9 @@ def render_template(data: Dict) -> str:
         # Section 12
         "{ORPHAN_TABLE}": format_orphan_table(data["orphans"]),
         "{DORMANT_TABLE}": format_dormant_table(data["freshness"]) + "\n\n### Freshness Summary\n" + format_freshness_summary(data["freshness"]),
+
+        # Section 13
+        "{TEST_COVERAGE}": format_test_coverage(data.get("test_coverage", {})),
     }
 
     # Apply replacements
@@ -841,7 +999,8 @@ def write_debug_output(data: Dict, output_dir: Path):
         "section_12_deadcode": {
             "orphans": data["orphans"],
             "freshness": data["freshness"]
-        }
+        },
+        "section_13_test_coverage": data.get("test_coverage", {})
     }
 
     for name, content in sections.items():
@@ -850,6 +1009,40 @@ def write_debug_output(data: Dict, output_dir: Path):
         )
 
     print(f"Debug data written to {output_dir}/")
+
+
+# =============================================================================
+# Validation
+# =============================================================================
+
+def validate_data(data: Dict, verbose: bool = False) -> List[str]:
+    """Check for missing or suspicious data and return warnings."""
+    warnings = []
+
+    if not data.get("graph", {}).get("modules"):
+        warnings.append("No modules detected in dependency graph")
+
+    if not data.get("entry_points"):
+        warnings.append("No entry points detected")
+
+    if not data.get("risk"):
+        warnings.append("No risk data (git history may be shallow or outside repo)")
+
+    if not data.get("coupling"):
+        warnings.append("No coupling data (may need more commits, or very clean module boundaries)")
+
+    layers = data.get("layers", {})
+    leaf_count = len(layers.get("leaf", []))
+    total = sum(len(v) for v in layers.values())
+    if total > 0 and leaf_count / total > 0.8:
+        warnings.append("Most modules in leaf layer - import relationships may not be detected")
+
+    if verbose and warnings:
+        print("Validation warnings:", file=sys.stderr)
+        for w in warnings:
+            print(f"  ⚠ {w}", file=sys.stderr)
+
+    return warnings
 
 
 # =============================================================================
@@ -900,6 +1093,9 @@ def main():
     except Exception as e:
         print(f"Error collecting data: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # Validate data and warn about issues
+    validate_data(data, verbose=args.verbose)
 
     # Write debug output if requested
     if args.debug:

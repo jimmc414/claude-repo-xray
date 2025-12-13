@@ -36,6 +36,36 @@ A semantic companion to WARM_START.md containing:
 - **Phase 1 Dependent**: Consumes JSON from Phase 1 tools
 - **Token Efficient**: Every tool optimized for context budget
 
+### Phase Independence
+
+Phase 1 (`repo-xray`) remains fully standalone. Phase 2 is **additive**, not a replacement.
+
+| Aspect | Phase 1 | Phase 2 |
+|--------|---------|---------|
+| Skill | `repo-xray/` (unchanged) | `repo-investigator/` (new directory) |
+| Agent | `repo_architect.md` (unchanged) | `repo_investigator.md` (new file) |
+| Output | `WARM_START.md` | `HOT_START.md` (companion) |
+| Data Flow | Produces JSON outputs | Consumes Phase 1 JSON |
+
+**User workflows:**
+
+```
+# Option A: Phase 1 only (structural analysis)
+python generate_warm_start.py . -v
+# Output: WARM_START.md - complete and usable standalone
+
+# Option B: Phase 1 + Phase 2 (structural + semantic analysis)
+python generate_warm_start.py . --debug -v
+# Output: WARM_START.md + WARM_START_debug/
+
+python complexity.py . --unified deps.json git.json
+python smart_read.py <top-priority-file> --focus-top 3
+python verify.py . --mode safe
+# Output: HOT_START.md - semantic companion to WARM_START.md
+```
+
+**Implementation constraint**: Phase 2 tools must never modify Phase 1 files or require Phase 1 code changes.
+
 ---
 
 ## 2. New Skill: repo-investigator
@@ -85,6 +115,8 @@ python .claude/skills/repo-investigator/scripts/complexity.py src/ --json
 ```
 Priority = (CC * 0.35) + (ImportWeight * 0.25) + (RiskScore * 0.25) + (Freshness * 0.15)
 ```
+
+> **Note**: See Section 11.1 for an enhanced 5-signal formula that adds test coverage (Untested) as a priority signal.
 
 ### smart_read.py - Surgical Reader
 
@@ -1456,9 +1488,244 @@ print(f'Score: {data[0][\"score\"]}')
 
 | Category | Lines |
 |----------|-------|
-| New Python code | ~500 |
-| Documentation | ~350 |
-| **Total** | ~850 |
+| New Python code | ~620 |
+| Documentation | ~370 |
+| **Total** | ~990 |
+
+> **Note**: See Section 11.8 for breakdown of additional lines from Phase 1 integration enhancements (+140 lines over original estimate).
+
+---
+
+## 11. Phase 1 Integration Enhancements
+
+Since the original Phase 2 plan was written, several enhancements have been added to Phase 1 that enable deeper integration.
+
+### Recent Phase 1 Additions
+
+| Addition | Location | Impact on Phase 2 |
+|----------|----------|-------------------|
+| **Section 13: Test Coverage** | `generate_warm_start.py` | New signal for priority scoring |
+| **Verbose error handling** | `git_analysis.py`, `generate_warm_start.py` | Pattern to replicate |
+| **Debug JSON output** | `generate_warm_start.py --debug` | Chain to extend |
+| **Data validation** | `validate_data()` | Pattern to use when consuming JSON |
+| **Coupling data (fixed)** | `git_analysis.py` | Now reliable input |
+
+---
+
+### 11.1 Extended Unified Priority Score Formula
+
+**Original formula** (Section 3):
+```
+Priority = (CC * 0.35) + (ImportWeight * 0.25) + (RiskScore * 0.25) + (Freshness * 0.15)
+```
+
+**Enhanced formula** with test coverage signal:
+```
+Priority = (CC * 0.30) + (ImportWeight * 0.20) + (RiskScore * 0.20) + (Freshness * 0.15) + (Untested * 0.15)
+```
+
+**Rationale**: High-complexity untested code is significantly riskier than tested code. The test coverage metadata provides this signal at ~100 tokens cost.
+
+**Implementation in `complexity.py`**:
+```python
+def load_phase1_data(deps_path: str, git_path: str, warm_start_debug_path: str = None):
+    # ... existing code ...
+
+    # NEW: Load test coverage
+    test_coverage = {}
+    if warm_start_debug_path:
+        try:
+            debug_dir = Path(warm_start_debug_path)
+            test_data = json.loads((debug_dir / "section_13_test_coverage.json").read_text())
+            tested_dirs = set(test_data.get("tested_dirs", []))
+            # Module is untested if its directory isn't in tested_dirs
+            for module in modules:
+                parts = module.split(".")
+                if len(parts) >= 2:
+                    test_coverage[module] = 0.0 if parts[1] in tested_dirs else 1.0
+        except Exception:
+            pass
+
+    return imports, risks, freshness, test_coverage
+```
+
+**CLI Enhancement**:
+```bash
+# Enhanced unified scoring with test coverage
+python complexity.py src/ --unified deps.json git.json --warm-start-debug ./WARM_START_debug
+```
+
+---
+
+### 11.2 Coupled File Analysis in smart_read.py
+
+**Current behavior**: Analyzes single files in isolation.
+
+**Enhancement**: Accept coupled file pairs from `git_analysis.py --coupling` output.
+
+**Why**: Files that change together should be understood together. If `config.py` always changes with `providers/anthropic.py`, analyzing them together reveals hidden contracts.
+
+```bash
+# New usage pattern
+python smart_read.py src/config.py src/providers/anthropic.py --coupled
+```
+
+**Implementation sketch**:
+```python
+parser.add_argument(
+    "--coupled",
+    action="store_true",
+    help="Treat input files as historically coupled, show cross-references"
+)
+
+# In output, highlight shared symbols:
+# CROSS-REF: config.API_KEY used in anthropic.py:L45, L78
+```
+
+---
+
+### 11.3 Debug Output Chain
+
+**Current chain (Phase 1)**:
+```
+generate_warm_start.py --debug → WARM_START_debug/
+```
+
+**Extended chain for Phase 2**:
+```
+Phase 1: deps.json, git.json, WARM_START_debug/
+    ↓
+Phase 2: complexity.py --debug → PRIORITY_debug/
+    ↓
+         smart_read.py --debug → SMART_READ_debug/
+    ↓
+         verify.py --debug → VERIFY_debug/
+    ↓
+         HOT_START.md + HOT_START_debug/
+```
+
+**Implementation**: Each Phase 2 tool should support `--debug` flag following the same pattern as `generate_warm_start.py`.
+
+---
+
+### 11.4 Verbose Error Pattern
+
+All Phase 2 tools should implement the same verbose pattern:
+
+```python
+parser.add_argument("-v", "--verbose", action="store_true")
+
+# In analysis functions:
+if verbose:
+    print(f"Processing {filepath}...", file=sys.stderr)
+
+# On warnings:
+if verbose and not data:
+    print(f"Warning: No data from Phase 1 JSON", file=sys.stderr)
+```
+
+---
+
+### 11.5 Phase 1 JSON Validation in complexity.py
+
+Before consuming Phase 1 outputs, validate them:
+
+```python
+def validate_phase1_inputs(deps: Dict, git: Dict, verbose: bool = False) -> List[str]:
+    """Check Phase 1 JSON for issues before using."""
+    warnings = []
+
+    if not deps.get("modules"):
+        warnings.append("deps.json has no modules - layer classification will fail")
+
+    if not git.get("risk"):
+        warnings.append("git.json has no risk data - risk scores will be 0")
+
+    if not git.get("coupling"):
+        warnings.append("git.json has no coupling data - may indicate git format bug")
+
+    if verbose:
+        for w in warnings:
+            print(f"⚠ Phase 1 input warning: {w}", file=sys.stderr)
+
+    return warnings
+```
+
+---
+
+### 11.6 verify.py Integration with Test Coverage
+
+**Enhancement**: Prioritize verification of untested modules.
+
+```bash
+# New flag
+python verify.py src/ --prioritize-untested --warm-start-debug ./WARM_START_debug
+```
+
+**Rationale**: Untested code with unverified imports is the highest risk. Surface these first.
+
+---
+
+### 11.7 Updated Data Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         PHASE 1                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  dependency_graph.py ──────────────────────► deps.json          │
+│  git_analysis.py ──────────────────────────► git.json           │
+│  generate_warm_start.py --debug ───────────► WARM_START_debug/  │
+│    └── section_13_test_coverage.json  ◄─── NEW INPUT            │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         PHASE 2                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  complexity.py                                                   │
+│    ├── Inputs: deps.json, git.json, WARM_START_debug/           │
+│    ├── Validates Phase 1 inputs                                  │
+│    ├── Adds test_coverage to priority formula                    │
+│    └── Output: priorities.json + PRIORITY_debug/                 │
+│                              │                                   │
+│                              ▼                                   │
+│  smart_read.py                                                   │
+│    ├── Input: priorities.json, coupling data                     │
+│    ├── --coupled mode for related files                          │
+│    └── Output: surgical_read.txt + SMART_READ_debug/             │
+│                              │                                   │
+│                              ▼                                   │
+│  verify.py                                                       │
+│    ├── Input: priorities.json, test_coverage                     │
+│    ├── --prioritize-untested flag                                │
+│    └── Output: verification_report.json + VERIFY_debug/          │
+│                              │                                   │
+│                              ▼                                   │
+│  HOT_START.md                                                    │
+│    └── Companion to WARM_START.md                                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 11.8 Updated File Estimates
+
+| File | Original Lines | Additional Lines | Total |
+|------|----------------|------------------|-------|
+| `complexity.py` | ~200 | +50 (test coverage, validation) | ~250 |
+| `smart_read.py` | ~150 | +30 (coupled mode, debug) | ~180 |
+| `verify.py` | ~150 | +40 (prioritize untested, debug) | ~190 |
+| `SKILL.md` | ~100 | +20 (new flags documented) | ~120 |
+
+---
+
+### 11.9 Implementation Order
+
+1. **First**: Add `-v` and `--debug` flags to all Phase 2 tools (pattern consistency)
+2. **Second**: Add `validate_phase1_inputs()` to complexity.py (defensive)
+3. **Third**: Extend Unified Priority Score with test coverage signal
+4. **Fourth**: Add `--coupled` mode to smart_read.py
+5. **Fifth**: Add `--prioritize-untested` to verify.py
 
 ---
 
