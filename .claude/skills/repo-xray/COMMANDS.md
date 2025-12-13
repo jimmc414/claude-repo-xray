@@ -1,4 +1,6 @@
-# repo-xray Cheatsheet
+# repo-xray Commands
+
+> Quick reference optimized for AI context windows. For detailed documentation with examples, see [reference.md](reference.md).
 
 ## Paths
 

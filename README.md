@@ -249,7 +249,7 @@ repo-xray/
     └── skills/
         └── repo-xray/
             ├── SKILL.md
-            ├── CHEATSHEET.md
+            ├── COMMANDS.md
             ├── reference.md
             ├── configs/
             ├── scripts/
