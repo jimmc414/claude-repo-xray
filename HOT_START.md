@@ -1,5 +1,7 @@
 # kosmos: Semantic Hot Start (Pass 2: Behavioral Analysis)
 
+> **Source**: https://github.com/jimmc414/Kosmos
+>
 > Semantic analysis companion to WARM_START.md
 > Generated: 2025-12-13T14:45:02.329810
 > Priority files analyzed: 10
