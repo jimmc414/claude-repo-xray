@@ -2,6 +2,8 @@
 
 AST-based Python codebase analysis for AI coding assistants.
 
+> **Quick start**: See [Usage](#usage) below. Need to install first? Jump to [Installation](#installation).
+
 ## The Problem
 
 AI coding assistants face a cold start problem: a 200K token context window cannot directly ingest a codebase that may span millions of tokens, yet the assistant must understand the architecture to work effectively.
@@ -22,6 +24,44 @@ Uses Python's built-in AST parser, so currently Python-only. If there's interest
 - `dependency_graph.py` - Import analysis with architectural layer detection, orphan detection, and impact analysis
 - `git_analysis.py` - Git history analysis for risk scoring, hidden coupling, and freshness tracking
 - `configure.py` - Auto-detection of project structure, root package, and ignore patterns
+- `generate_warm_start.py` - Generate complete WARM_START.md documentation
+
+## Usage
+
+### Command Line (after installation)
+
+```bash
+# Survey codebase structure and token usage
+python ~/.claude/skills/repo-xray/scripts/mapper.py /path/to/project --summary
+
+# Extract critical class interfaces (95% token reduction)
+python ~/.claude/skills/repo-xray/scripts/skeleton.py src/ --priority critical
+
+# Generate architecture diagram
+python ~/.claude/skills/repo-xray/scripts/dependency_graph.py src/ --mermaid
+
+# Analyze risk and code health
+python ~/.claude/skills/repo-xray/scripts/git_analysis.py src/ --risk
+
+# Generate complete WARM_START.md
+python ~/.claude/skills/repo-xray/scripts/generate_warm_start.py /path/to/project
+```
+
+### Project-Local Installation
+
+```bash
+python .claude/skills/repo-xray/scripts/mapper.py . --summary
+python .claude/skills/repo-xray/scripts/skeleton.py src/ --priority critical
+python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --mermaid
+```
+
+### Claude Code Agent
+
+```
+@repo_architect generate     # Create WARM_START.md
+@repo_architect refresh      # Update existing documentation
+@repo_architect query "X"    # Answer specific architecture questions
+```
 
 ## Installation
 
@@ -71,37 +111,6 @@ Install repo-xray from /path/to/repo-xray:
 2. cp -r /path/to/repo-xray/.claude/skills/repo-xray ~/.claude/skills/
 3. cp /path/to/repo-xray/.claude/agents/repo_architect.md ~/.claude/agents/
 4. Verify: python ~/.claude/skills/repo-xray/scripts/mapper.py --help
-```
-
-## Usage
-
-### Global Installation
-
-```bash
-# Survey codebase
-python ~/.claude/skills/repo-xray/scripts/mapper.py /path/to/project --summary
-
-# Extract critical interfaces
-python ~/.claude/skills/repo-xray/scripts/skeleton.py src/ --priority critical
-
-# Generate architecture diagram
-python ~/.claude/skills/repo-xray/scripts/dependency_graph.py src/ --mermaid
-```
-
-### Project-Local Installation
-
-```bash
-python .claude/skills/repo-xray/scripts/mapper.py . --summary
-python .claude/skills/repo-xray/scripts/skeleton.py src/ --priority critical
-python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --mermaid
-```
-
-### Claude Code Agent
-
-```
-@repo_architect generate     # Create WARM_START.md
-@repo_architect refresh      # Update existing documentation
-@repo_architect query "X"    # Answer specific architecture questions
 ```
 
 ## Commands
@@ -157,6 +166,16 @@ configure.py [directory]     Detect project structure
   --force                    Overwrite without prompt
 ```
 
+### generate_warm_start.py
+
+```
+generate_warm_start.py [dir] Generate WARM_START.md documentation
+  -o, --output FILE          Output file path (default: WARM_START.md)
+  --debug                    Output raw JSON to WARM_START_debug/
+  --json                     Output raw data as JSON
+  -v, --verbose              Show progress messages
+```
+
 ## Output
 
 ### skeleton.py
@@ -201,6 +220,7 @@ graph TD
 | git_analysis.py --coupling | ~500 |
 | git_analysis.py --freshness | ~500 |
 | git_analysis.py --json | ~3K |
+| generate_warm_start.py | ~8-20K |
 
 ## Auto-Detection
 
@@ -237,8 +257,10 @@ repo-xray/
             │   ├── skeleton.py
             │   ├── dependency_graph.py
             │   ├── git_analysis.py
-            │   └── configure.py
+            │   ├── configure.py
+            │   └── generate_warm_start.py
             ├── templates/
+            ├── tests/
             └── lib/
 ```
 
