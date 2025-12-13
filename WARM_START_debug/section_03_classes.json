@@ -35,6 +35,12 @@
       "file": "./.claude/skills/repo-xray/scripts/skeleton.py",
       "type": "script",
       "description": "Has __main__ block"
+    },
+    {
+      "module": "tests.test_generate_warm_start",
+      "file": "./.claude/skills/repo-xray/tests/test_generate_warm_start.py",
+      "type": "script",
+      "description": "Has __main__ block"
     }
   ],
   "critical_classes": [],

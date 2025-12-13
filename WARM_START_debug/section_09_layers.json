@@ -7,13 +7,15 @@
     "dependency_graph",
     "git_analysis",
     "mapper",
-    "skeleton"
+    "skeleton",
+    "tests.test_generate_warm_start"
   ],
   "orchestration": [
     "generate_warm_start"
   ],
   "leaf": [
     "lib.token_estimator",
-    "lib"
+    "lib",
+    "tests"
   ]
 }

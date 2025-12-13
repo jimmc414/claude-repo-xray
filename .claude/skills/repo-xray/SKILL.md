@@ -67,6 +67,7 @@ python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --root pkg   # 
 python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --focus api  # filter area
 python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --orphans    # dead code candidates
 python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --impact file.py  # blast radius
+python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --source-dir path # override source root
 python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --json       # JSON output
 ```
 
@@ -89,6 +90,24 @@ RISK   FILE                              FACTORS
 0.87   src/api/auth.py                   churn:15 hotfix:3 authors:5
 0.72   src/core/workflow.py              churn:8 hotfix:1 authors:3
 ```
+
+### generate_warm_start.py
+
+Generates complete WARM_START.md documentation by combining all tools.
+
+```bash
+python .claude/skills/repo-xray/scripts/generate_warm_start.py /path/to/repo           # generate
+python .claude/skills/repo-xray/scripts/generate_warm_start.py . -o WARM_START.md      # custom output
+python .claude/skills/repo-xray/scripts/generate_warm_start.py . --debug               # raw JSON per section
+python .claude/skills/repo-xray/scripts/generate_warm_start.py . --json                # JSON instead of markdown
+python .claude/skills/repo-xray/scripts/generate_warm_start.py . -v                    # verbose progress
+```
+
+Features:
+- Combines mapper, skeleton, dependency_graph, git_analysis
+- Auto-detects project name and source directory
+- Handles nested structures (e.g., `.claude/skills/`)
+- `--debug` outputs `WARM_START_debug/*.json` for validation
 
 ## Workflow
 
@@ -117,6 +136,7 @@ RISK   FILE                              FACTORS
 | git_analysis.py --coupling | ~500 |
 | git_analysis.py --freshness | ~500 |
 | git_analysis.py --json | ~3K |
+| generate_warm_start.py | ~8-20K |
 
 ## Priority Levels
 

@@ -51,6 +51,7 @@ dependency_graph.py --root PKG Set root package
 dependency_graph.py --focus X  Filter to area
 dependency_graph.py --orphans  Dead code candidates
 dependency_graph.py --impact F Blast radius for file F
+dependency_graph.py --source-dir P Override source root
 dependency_graph.py --json     JSON output
 ```
 
@@ -62,6 +63,15 @@ git_analysis.py --coupling     Co-modification pairs
 git_analysis.py --freshness    Active/Aging/Stale/Dormant
 git_analysis.py --json         Combined JSON output
 git_analysis.py --months N     History period (default: 6)
+```
+
+### generate_warm_start.py
+```
+generate_warm_start.py [dir]   Generate WARM_START.md
+generate_warm_start.py -o FILE Custom output path
+generate_warm_start.py --debug Output raw JSON to WARM_START_debug/
+generate_warm_start.py --json  JSON instead of markdown
+generate_warm_start.py -v      Verbose progress
 ```
 
 ---
@@ -90,7 +100,10 @@ python SCRIPTS/git_analysis.py src/ --risk
 # 7. Hidden coupling
 python SCRIPTS/git_analysis.py src/ --coupling
 
-# 8. Generate docs
+# 8. Generate docs (automated)
+python SCRIPTS/generate_warm_start.py . -v
+
+# Or via agent (enhanced)
 @repo_architect generate
 ```
 
@@ -112,6 +125,7 @@ python SCRIPTS/git_analysis.py src/ --coupling
 | git_analysis.py --coupling | ~500 |
 | git_analysis.py --freshness | ~500 |
 | git_analysis.py --json | ~3K |
+| generate_warm_start.py | ~8-20K |
 
 ---
 

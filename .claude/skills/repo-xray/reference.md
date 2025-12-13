@@ -203,7 +203,7 @@ Analyzes import relationships between Python modules. Identifies architectural l
 
 ### Usage
 ```
-python dependency_graph.py [directory] [--root PACKAGE] [--focus STRING] [--no-auto-detect] [--mermaid] [--json]
+python dependency_graph.py [directory] [--root PACKAGE] [--focus STRING] [--source-dir PATH] [--no-auto-detect] [--mermaid] [--json]
 ```
 
 ### Arguments
@@ -214,9 +214,15 @@ python dependency_graph.py [directory] [--root PACKAGE] [--focus STRING] [--no-a
 | `--focus` | string | - | Focus on modules matching this string |
 | `--orphans` | flag | - | Find files with zero importers (dead code candidates) |
 | `--impact` | string | - | Calculate blast radius for specified file |
+| `--source-dir` | string | auto | Override source root for module name generation |
 | `--no-auto-detect` | flag | - | Disable auto-detection of root package |
 | `--mermaid` | flag | - | Output as Mermaid.js diagram |
 | `--json` | flag | - | Output as JSON |
+
+### Source Root Detection
+For projects with code in nested directories (e.g., `.claude/skills/repo-xray/scripts/`), the tool auto-detects the logical source root to generate correct module names. This enables proper import matching for sibling imports that use `sys.path` manipulation.
+
+Use `--source-dir` to override if auto-detection fails.
 
 ### Orphan Detection
 Finds files with no internal importers, excluding known entry point patterns:
@@ -411,6 +417,81 @@ DORMANT (>180 days): 12 files
   }
 }
 ```
+
+---
+
+## generate_warm_start.py
+
+### Purpose
+Generates complete WARM_START.md documentation by combining all analysis tools. Automatically detects project structure and handles nested source directories.
+
+### Usage
+```
+python generate_warm_start.py [directory] [-o OUTPUT] [--debug] [--json] [-v]
+```
+
+### Arguments
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `directory` | string | `.` | Repository directory to analyze |
+| `-o, --output` | string | `WARM_START.md` | Output file path |
+| `--debug` | flag | - | Output raw JSON to `WARM_START_debug/` directory |
+| `--json` | flag | - | Output raw data as JSON instead of markdown |
+| `-v, --verbose` | flag | - | Show progress messages |
+
+### Data Collection
+Combines output from all tools:
+- **mapper.py**: Token estimates, large file detection
+- **dependency_graph.py**: Import graph, layers, orphans
+- **git_analysis.py**: Risk scores, coupling, freshness
+- **skeleton.py**: Class/method extraction for critical modules
+
+### Debug Output
+When `--debug` is specified, creates `WARM_START_debug/` with:
+```
+WARM_START_debug/
+├── raw_data.json           # Complete collected data
+├── section_01_context.json # Mermaid diagram data
+├── section_02_overview.json
+├── section_03_classes.json
+├── section_06_hazards.json
+├── section_09_layers.json
+├── section_10_risk.json
+├── section_11_coupling.json
+└── section_12_deadcode.json
+```
+
+### Output Sections
+| Section | Source | Content |
+|---------|--------|---------|
+| 1. System Context | dependency_graph --mermaid | Architecture diagram |
+| 2. Architecture Overview | Pattern detection | Layer counts, patterns |
+| 3. Critical Classes | Entry point detection | CLI scripts, __main__ blocks |
+| 4. Data Flow | Template | Processing pipeline |
+| 5. Entry Points | detect_entry_points() | CLI commands, Python API |
+| 6. Context Hazards | mapper.py | Large files, skip directories |
+| 7. Quick Verification | Template | Health check commands |
+| 8. X-Ray Commands | Template | Tool usage reference |
+| 9. Architecture Layers | dependency_graph | Foundation/Core/Orchestration |
+| 10. Risk Assessment | git_analysis --risk | Volatile files |
+| 11. Hidden Coupling | git_analysis --coupling | Co-modification pairs |
+| 12. Potential Dead Code | --orphans, --freshness | Orphans, dormant files |
+
+### Confidence Markers
+Low-confidence sections include markers for optional enhancement:
+```markdown
+<!-- CONFIDENCE: 0.5 - Pattern-based generation, may benefit from enhancement -->
+```
+
+### Key Functions (API)
+| Function | Purpose |
+|----------|---------|
+| `collect_all_data(directory, verbose)` | Gather all analysis data |
+| `detect_project_name(directory)` | Find project name from pyproject.toml/setup.py |
+| `detect_entry_points(directory, graph, layers)` | Find CLI scripts and __main__ blocks |
+| `generate_architecture_overview(data)` | Create prose from patterns |
+| `render_template(data)` | Fill template placeholders |
+| `write_debug_output(data, output_dir)` | Write section JSON files |
 
 ---
 

@@ -11,6 +11,12 @@
       "module": "lib",
       "confidence": 0.9,
       "notes": "No imports, not entry point pattern"
+    },
+    {
+      "file": "./.claude/skills/repo-xray/tests/__init__.py",
+      "module": "tests",
+      "confidence": 0.9,
+      "notes": "No imports, not entry point pattern"
     }
   ],
   "freshness": {
@@ -36,11 +42,27 @@
         "days": 0
       },
       {
+        "file": ".claude/skills/repo-xray/scripts/generate_warm_start.py",
+        "days": 0
+      },
+      {
+        "file": ".claude/skills/repo-xray/scripts/git_analysis.py",
+        "days": 0
+      },
+      {
         "file": ".claude/skills/repo-xray/scripts/mapper.py",
         "days": 0
       },
       {
         "file": ".claude/skills/repo-xray/scripts/skeleton.py",
+        "days": 0
+      },
+      {
+        "file": ".claude/skills/repo-xray/tests/__init__.py",
+        "days": 0
+      },
+      {
+        "file": ".claude/skills/repo-xray/tests/test_generate_warm_start.py",
         "days": 0
       }
     ],
