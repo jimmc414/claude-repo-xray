@@ -35,7 +35,7 @@ Together, these produce a comprehensive reference (~15-50K tokens depending on c
 
 ## Example Output
 
-See the generated analysis for the [Kosmos](https://github.com/jimmc414/Kosmos) codebase (159M tokens, 633 Python files):
+See the generated analysis for the [Kosmos](https://github.com/jimmc414/Kosmos) codebase (~2.4M tokens in 633 Python files):
 - [WARM_START.md](WARM_START.md) - Pass 1: Structural analysis (~20KB)
 - [HOT_START.md](HOT_START.md) - Pass 2: Behavioral analysis (~48KB, 1231 lines)
 - [examples/WARM_START.md](examples/WARM_START.md) - Additional example output
@@ -540,7 +540,7 @@ claude-repo-xray/
 
 ### Example Output Details
 
-Example files are generated from the [Kosmos](https://github.com/jimmc414/kosmos) codebase (159M tokens):
+Example files are generated from the [Kosmos](https://github.com/jimmc414/kosmos) codebase (~2.4M tokens Python source):
 
 | File | Size | Description |
 |------|------|-------------|

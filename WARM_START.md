@@ -4,7 +4,7 @@
 >
 > Context-efficient onboarding guide for AI programmers.
 > Generated: 2025-12-13
-> Token budget: ~159.9M tokens
+> Python source: ~2.4M tokens (633 files)
 
 ---
 
