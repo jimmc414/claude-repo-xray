@@ -8,60 +8,206 @@ AST-based Python codebase analysis for AI coding assistants.
 
 AI coding assistants face a cold start problem: a 200K token context window cannot directly ingest a codebase that may span millions of tokens, yet the assistant must understand the architecture to work effectively.
 
-## The (Attempted) Solution
+## The Solution
 
-repo-xray atempts to solve this quickly and efficiently by using AST parsing to extract structural information; class signatures, method signatures, type annotations, Pydantic fields, and import relationships without loading implementation details, typically achieving 95% token reduction. The result is that an AI assistant can survey an entire codebase's architecture, identify entry points, and understand data flow within its context budget before reading any full source files.
-
-Optimized for Claude Code via skills and agents, or manual command-line use.
+repo-xray uses AST parsing to extract structural information—class signatures, method signatures, type annotations, Pydantic fields, and import relationships—without loading implementation details, typically achieving 95% token reduction. The result is that an AI assistant can survey an entire codebase's architecture, identify entry points, and understand data flow within its context budget before reading any full source files.
 
 ## Limitations
 
 Uses Python's built-in AST parser, so currently Python-only. If there's interest, I'll expand it to use tree-sitter for multi-language support.
 
-## Tools
-- `mapper.py` - Directory tree with token estimates per file
-- `skeleton.py` - Interface extraction (classes, methods, fields, decorators, line numbers)
-- `dependency_graph.py` - Import analysis with architectural layer detection, orphan detection, and impact analysis
-- `git_analysis.py` - Git history analysis for risk scoring, hidden coupling, and freshness tracking
-- `configure.py` - Auto-detection of project structure, root package, and ignore patterns
-- `generate_warm_start.py` - Generate complete WARM_START.md documentation
+---
 
 ## Usage
 
-### Command Line (after installation)
+### Claude-Driven Analysis (Recommended)
 
-```bash
-# Survey codebase structure and token usage
-python ~/.claude/skills/repo-xray/scripts/mapper.py /path/to/project --summary
+The easiest way to use repo-xray is to let Claude run the analysis. Paste one of these prompts into Claude Code:
 
-# Extract critical class interfaces (95% token reduction)
-python ~/.claude/skills/repo-xray/scripts/skeleton.py src/ --priority critical
-
-# Generate architecture diagram
-python ~/.claude/skills/repo-xray/scripts/dependency_graph.py src/ --mermaid
-
-# Analyze risk and code health
-python ~/.claude/skills/repo-xray/scripts/git_analysis.py src/ --risk
-
-# Generate complete WARM_START.md
-python ~/.claude/skills/repo-xray/scripts/generate_warm_start.py /path/to/project
+**Generate complete onboarding documentation:**
+```
+Analyze this codebase and generate a WARM_START.md using the repo-xray skill.
+Run: python .claude/skills/repo-xray/scripts/generate_warm_start.py . --debug -v
 ```
 
-### Project-Local Installation
-
-```bash
-python .claude/skills/repo-xray/scripts/mapper.py . --summary
-python .claude/skills/repo-xray/scripts/skeleton.py src/ --priority critical
-python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --mermaid
+**Explore architecture interactively:**
+```
+Use the repo-xray skill to help me understand this codebase:
+1. Run mapper.py --summary to see the size
+2. Run dependency_graph.py --mermaid to see the architecture
+3. Run skeleton.py --priority critical to see core interfaces
+4. Explain what you found
 ```
 
-### Claude Code Agent
+**Analyze code health:**
+```
+Use repo-xray to analyze this codebase's health:
+1. Run git_analysis.py --risk to find volatile files
+2. Run git_analysis.py --coupling to find hidden dependencies
+3. Run dependency_graph.py --orphans to find dead code
+4. Summarize the findings and recommend improvements
+```
 
+### Agent Commands
+
+If installed globally, you can use the `@repo_architect` agent:
 ```
 @repo_architect generate     # Create WARM_START.md
 @repo_architect refresh      # Update existing documentation
 @repo_architect query "X"    # Answer specific architecture questions
 ```
+
+### Manual Execution
+
+#### Run All Analysis (Single Command)
+
+```bash
+# Generate complete WARM_START.md with all analyses combined
+python .claude/skills/repo-xray/scripts/generate_warm_start.py . -v
+
+# With debug output (raw JSON for each section)
+python .claude/skills/repo-xray/scripts/generate_warm_start.py . --debug -v
+```
+
+#### Run Individual Tools
+
+For targeted analysis or debugging, run tools individually:
+
+```bash
+# 1. Survey codebase size and find large files
+python .claude/skills/repo-xray/scripts/mapper.py . --summary
+
+# 2. Extract core class interfaces
+python .claude/skills/repo-xray/scripts/skeleton.py . --priority critical
+
+# 3. Generate architecture diagram
+python .claude/skills/repo-xray/scripts/dependency_graph.py . --mermaid
+
+# 4. Analyze code health
+python .claude/skills/repo-xray/scripts/git_analysis.py . --risk
+python .claude/skills/repo-xray/scripts/git_analysis.py . --coupling
+```
+
+---
+
+## Tools
+
+Each tool has a specific strategy for what it extracts, why, and how.
+
+### mapper.py
+
+**What it looks for**: Every file in the directory tree with token count estimates.
+
+**Why**: Before diving into code, you need to know the codebase size and identify files that would consume too much context if read in full.
+
+**How**: Walks the directory tree, calculates tokens per file (characters ÷ 4), flags files >10K tokens as hazards.
+
+**Raw output**: `{path, total_tokens, file_count, tree[], large_files[]}`
+
+```
+mapper.py [directory]        Directory tree with token estimates
+  --summary                  Stats only, no tree output
+  --json                     Machine-readable output
+```
+
+### skeleton.py
+
+**What it looks for**: Class definitions, method signatures, Pydantic/dataclass fields, decorators, global constants, with line numbers.
+
+**Why**: Understanding interfaces doesn't require reading implementations. A 10K token file often has a 500 token skeleton that reveals the same API.
+
+**How**: AST-parses Python files, extracts structural elements, preserves docstring summaries and type annotations. Achieves ~95% token reduction.
+
+**Raw output**: `{files[{file, original_tokens, skeleton_tokens, skeleton}], summary}`
+
+```
+skeleton.py <path>           Extract class/method signatures
+  --priority LEVEL           Filter: critical, high, medium, low
+  --pattern GLOB             Filter by filename pattern
+  --private                  Include _private methods
+  --no-line-numbers          Omit L{n} annotations
+  --json                     Machine-readable output
+```
+
+### dependency_graph.py
+
+**What it looks for**: Import statements between modules, then classifies modules into architectural layers.
+
+**Why**: Understanding which modules depend on which reveals the architecture without reading any code. Layers show what's foundational vs. orchestration.
+
+**How**: Parses imports, builds directed graph, classifies by import patterns:
+- **Foundation**: High `imported_by`, low `imports` (utilities, config)
+- **Core**: Balanced (business logic)
+- **Orchestration**: Low `imported_by`, high `imports` (entry points)
+
+**Raw output**: `{modules{name: {imports[], imported_by[]}}, layers{}, circular[], external{}}`
+
+```
+dependency_graph.py [dir]    Analyze import relationships
+  --root PACKAGE             Set root package explicitly
+  --focus STRING             Filter to modules containing string
+  --orphans                  Find files with zero importers (dead code)
+  --impact FILE              Calculate blast radius for a file
+  --source-dir PATH          Override source root detection
+  --mermaid                  Output Mermaid diagram
+  --json                     Machine-readable output
+```
+
+### git_analysis.py
+
+**What it looks for**: Commit history patterns—churn, hotfix keywords, author counts, co-modification pairs, last-modified dates.
+
+**Why**: Static analysis shows structure; temporal analysis shows behavior. Files with high churn and many hotfixes are risky. Files that always change together have hidden coupling.
+
+**How**: Parses `git log` output, counts commits per file, detects "fix/bug/hotfix" keywords, tracks co-occurrence in commits.
+
+**Raw output**: `{risk[{file, risk_score, churn, hotfixes, authors}], coupling[{file_a, file_b, count}], freshness{active[], aging[], stale[], dormant[]}}`
+
+```
+git_analysis.py [dir]        Analyze git history
+  --risk                     Risk scores (churn, hotfixes, authors)
+  --coupling                 Find co-modification pairs
+  --freshness                Categorize: Active/Aging/Stale/Dormant
+  --json                     Combined JSON output
+  --months N                 History period (default: 6)
+```
+
+### configure.py
+
+**What it looks for**: Project structure indicators—.git, pyproject.toml, setup.py, __init__.py files, import patterns.
+
+**Why**: Auto-detects project configuration so other tools work without manual setup.
+
+**How**: Scans directory for markers, analyzes import statements to find root package, generates ignore patterns and priority configs.
+
+**Raw output**: `configs/ignore_patterns.json`, `configs/priority_modules.json`
+
+```
+configure.py [directory]     Detect project structure
+  --dry-run                  Preview without writing
+  --backup                   Backup existing configs
+  --force                    Overwrite without prompt
+```
+
+### generate_warm_start.py
+
+**What it looks for**: Everything—runs all tools and combines their output.
+
+**Why**: Single command to generate complete onboarding documentation. No manual orchestration needed.
+
+**How**: Imports functions from mapper, skeleton, dependency_graph, git_analysis. Collects all data, renders into markdown template.
+
+**Raw output**: All tool outputs combined. Use `--debug` to save raw JSON in `WARM_START_debug/` for inspection.
+
+```
+generate_warm_start.py [dir] Generate WARM_START.md documentation
+  -o, --output FILE          Output file path (default: WARM_START.md)
+  --debug                    Output raw JSON to WARM_START_debug/
+  --json                     Output raw data as JSON
+  -v, --verbose              Show progress messages
+```
+
+---
 
 ## Installation
 
@@ -70,7 +216,7 @@ python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --mermaid
 Install once, available in all projects:
 
 ```bash
-git clone https://github.com/yourusername/repo-xray.git
+git clone https://github.com/jimmc414/repo-xray.git
 cd repo-xray
 
 mkdir -p ~/.claude/skills ~/.claude/agents
@@ -88,7 +234,7 @@ python ~/.claude/skills/repo-xray/scripts/mapper.py --help
 Install to a specific project:
 
 ```bash
-git clone https://github.com/yourusername/repo-xray.git
+git clone https://github.com/jimmc414/repo-xray.git
 cd repo-xray
 
 cp -r .claude /path/to/your/project/
@@ -97,12 +243,7 @@ cd /path/to/your/project
 python .claude/skills/repo-xray/scripts/configure.py .
 ```
 
-Or use the installer:
-```bash
-./install.sh /path/to/your/project
-```
-
-### Option 3: Claude Code Assisted
+### Option 3: Claude-Assisted Install
 
 Paste into Claude Code:
 ```
@@ -113,70 +254,9 @@ Install repo-xray from /path/to/repo-xray:
 4. Verify: python ~/.claude/skills/repo-xray/scripts/mapper.py --help
 ```
 
-## Commands
+---
 
-### mapper.py
-
-```
-mapper.py [directory]        Directory tree with token estimates
-  --summary                  Stats only, no tree output
-  --json                     Machine-readable output
-```
-
-### skeleton.py
-
-```
-skeleton.py <path>           Extract class/method signatures
-  --priority LEVEL           Filter: critical, high, medium, low
-  --pattern GLOB             Filter by filename pattern
-  --private                  Include _private methods
-  --no-line-numbers          Omit L{n} annotations
-  --json                     Machine-readable output
-```
-
-### dependency_graph.py
-
-```
-dependency_graph.py [dir]    Analyze import relationships
-  --root PACKAGE             Set root package explicitly
-  --focus STRING             Filter to modules containing string
-  --orphans                  Find files with zero importers (dead code)
-  --impact FILE              Calculate blast radius for a file
-  --mermaid                  Output Mermaid diagram
-  --json                     Machine-readable output
-```
-
-### git_analysis.py
-
-```
-git_analysis.py [dir]        Analyze git history
-  --risk                     Risk scores (churn, hotfixes, authors)
-  --coupling                 Find co-modification pairs
-  --freshness                Categorize: Active/Aging/Stale/Dormant
-  --json                     Combined JSON output
-  --months N                 History period (default: 6)
-```
-
-### configure.py
-
-```
-configure.py [directory]     Detect project structure
-  --dry-run                  Preview without writing
-  --backup                   Backup existing configs
-  --force                    Overwrite without prompt
-```
-
-### generate_warm_start.py
-
-```
-generate_warm_start.py [dir] Generate WARM_START.md documentation
-  -o, --output FILE          Output file path (default: WARM_START.md)
-  --debug                    Output raw JSON to WARM_START_debug/
-  --json                     Output raw data as JSON
-  -v, --verbose              Show progress messages
-```
-
-## Output
+## Example Output
 
 ### skeleton.py
 
@@ -245,36 +325,24 @@ RISK   FILE                                    FACTORS
 0.67   kosmos/cli/commands/run.py              churn:11 hotfix:9 authors:2
 ```
 
+---
+
 ## Token Budget
 
-| Operation | Tokens |
-|-----------|--------|
-| mapper.py --summary | ~500 |
-| skeleton.py (1 file) | ~200-500 |
-| skeleton.py --priority critical | ~5K |
-| dependency_graph.py | ~3K |
-| dependency_graph.py --mermaid | ~500 |
-| dependency_graph.py --orphans | ~1K |
-| dependency_graph.py --impact | ~500 |
-| git_analysis.py --risk | ~1K |
-| git_analysis.py --coupling | ~500 |
-| git_analysis.py --freshness | ~500 |
-| git_analysis.py --json | ~3K |
-| generate_warm_start.py | ~8-20K |
+| Operation | Tokens | Use Case |
+|-----------|--------|----------|
+| mapper.py --summary | ~500 | First exploration |
+| skeleton.py (1 file) | ~200-500 | Understanding one interface |
+| skeleton.py --priority critical | ~5K | Core architecture overview |
+| dependency_graph.py | ~3K | Full import analysis |
+| dependency_graph.py --mermaid | ~500 | Documentation diagrams |
+| dependency_graph.py --orphans | ~1K | Dead code detection |
+| git_analysis.py --risk | ~1K | Identify volatile files |
+| git_analysis.py --coupling | ~500 | Hidden dependencies |
+| git_analysis.py --freshness | ~500 | Maintenance activity |
+| generate_warm_start.py | ~8-20K | Complete documentation |
 
-## Auto-Detection
-
-configure.py detects:
-
-**Project root**: .git > pyproject.toml > setup.py > __init__.py density
-
-**Root package**: Most common first-level import across all Python files
-
-**Priority levels**: Folder names mapped to importance
-- critical: main, app, core, workflow, server
-- high: models, schemas, api, services, db
-- medium: utils, lib, common, helpers
-- low: tests, docs, examples
+---
 
 ## Files
 
@@ -289,8 +357,8 @@ repo-xray/
     └── skills/
         └── repo-xray/
             ├── SKILL.md
-            ├── COMMANDS.md
-            ├── reference.md
+            ├── COMMANDS.md          # Quick reference for Claude
+            ├── reference.md         # Detailed API docs
             ├── configs/
             ├── scripts/
             │   ├── mapper.py
