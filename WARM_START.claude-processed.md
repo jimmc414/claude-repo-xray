@@ -1,6 +1,7 @@
 # Kosmos: Developer Warm Start
 
-> **Claude-enhanced** - Python tool output reviewed and corrected for accuracy.
+> **Claude-processed** - Python tool output reviewed, corrected, and filtered for usefulness.
+> May be smaller than raw output due to noise removal (test utilities, redundant details).
 > Raw tool output: `WARM_START.python-only.md`
 
 > Context-efficient onboarding guide for AI programmers.

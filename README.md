@@ -350,7 +350,8 @@ RISK   FILE                                    FACTORS
 repo-xray/
 ├── README.md
 ├── install.sh
-├── WARM_START.example.md
+├── WARM_START.python-only.md      # Raw Python tool output (complete)
+├── WARM_START.claude-processed.md # Claude-reviewed (filtered for usefulness)
 └── .claude/
     ├── agents/
     │   └── repo_architect.md
@@ -371,6 +372,22 @@ repo-xray/
             ├── tests/
             └── lib/
 ```
+
+### Example Output Comparison
+
+Both example files are generated from the [kosmos](https://github.com/jimmc414/kosmos) codebase:
+
+| File | Size | Description |
+|------|------|-------------|
+| `WARM_START.python-only.md` | ~19KB | Raw tool output - complete but includes noise |
+| `WARM_START.claude-processed.md` | ~12KB | Claude-reviewed - filtered for usefulness |
+
+**Why Claude-processed may be smaller:**
+- Removes noise (test utilities detected as entry points, internal `.claude/` modules)
+- Curates Mermaid diagrams to show key modules only
+- Focuses large file warnings on Python source files, not data files
+- Replaces "files with `__main__` blocks" with actual classes you'd instantiate
+- Adds interpretive context (what modules do, risk implications)
 
 ## Requirements
 
