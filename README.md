@@ -130,6 +130,8 @@ Each tool has a specific strategy for what it extracts, why, and how.
 
 **How**: Walks the directory tree, calculates tokens per file (characters ÷ 4), flags files >10K tokens as hazards.
 
+**Technical insight**: The 4 chars/token ratio is calibrated for code (which tokenizes denser than prose due to variable names and syntax). Files >10K tokens (~40KB) risk consuming 5%+ of a 200K context window—reading 20 such files exhausts your budget before analysis begins.
+
 **Raw output**: `{path, total_tokens, file_count, tree[], large_files[]}`
 
 ```
@@ -144,7 +146,9 @@ mapper.py [directory]        Directory tree with token estimates
 
 **Why**: Understanding interfaces doesn't require reading implementations. A 10K token file often has a 500 token skeleton that reveals the same API.
 
-**How**: AST-parses Python files, extracts structural elements, preserves docstring summaries and type annotations. Achieves ~95% token reduction.
+**How**: Uses Python's `ast` module to parse source into an Abstract Syntax Tree, then walks nodes extracting only declarations (not bodies). Preserves type annotations, default values, and first-line docstrings.
+
+**Technical insight**: The skeleton is the "header file" equivalent for Python. By extracting `ClassDef`, `FunctionDef`, `AnnAssign` (type-annotated assignments), and decorator nodes while discarding function bodies, we achieve ~95% token reduction while preserving 100% of the callable interface. Line numbers (`L{n}`) enable direct navigation to implementations when needed.
 
 **Raw output**: `{files[{file, original_tokens, skeleton_tokens, skeleton}], summary}`
 
@@ -163,10 +167,16 @@ skeleton.py <path>           Extract class/method signatures
 
 **Why**: Understanding which modules depend on which reveals the architecture without reading any code. Layers show what's foundational vs. orchestration.
 
-**How**: Parses imports, builds directed graph, classifies by import patterns:
-- **Foundation**: High `imported_by`, low `imports` (utilities, config)
-- **Core**: Balanced (business logic)
-- **Orchestration**: Low `imported_by`, high `imports` (entry points)
+**How**: AST-parses all Python files to extract `Import` and `ImportFrom` nodes. Builds a directed graph where edges represent "A imports B". Calculates in-degree (imported_by) and out-degree (imports) for each module.
+
+**Technical insight**: Layer classification uses the ratio of `imported_by` to `imports`:
+- **Foundation** (high in-degree, low out-degree): These are your utilities, config, and base classes—many modules depend on them, but they depend on little. Changes here have high blast radius.
+- **Core** (balanced): Business logic that both imports foundation and is imported by orchestration.
+- **Orchestration** (low in-degree, high out-degree): Entry points, CLI handlers, API routes—they import everything but nothing imports them.
+
+**Circular dependencies** are detected by finding edges where A→B and B→A both exist, indicating potential initialization issues or architectural coupling that should be refactored.
+
+**Import weight** (how many modules import a given module) is a proxy for "importance"—high-weight modules are foundational and changes to them affect more of the codebase.
 
 **Raw output**: `{modules{name: {imports[], imported_by[]}}, layers{}, circular[], external{}}`
 
@@ -187,7 +197,20 @@ dependency_graph.py [dir]    Analyze import relationships
 
 **Why**: Static analysis shows structure; temporal analysis shows behavior. Files with high churn and many hotfixes are risky. Files that always change together have hidden coupling.
 
-**How**: Parses `git log` output, counts commits per file, detects "fix/bug/hotfix" keywords, tracks co-occurrence in commits.
+**How**: Executes `git log --numstat` and `git log --name-only` to extract per-file commit history. Parses commit messages for bug-fix indicators.
+
+**Technical insight**: The **risk score** combines three signals:
+- **Churn** (commit frequency): Files changed often are either actively developed or chronically buggy. High churn = high attention required.
+- **Hotfix density**: Commits containing "fix", "bug", "hotfix", "patch" in the message indicate reactive maintenance. A file with 14 hotfixes in 23 commits (like `config.py` at 0.96 risk) suggests systemic issues.
+- **Author count**: Files touched by many authors may have inconsistent patterns or be poorly understood. More authors = more coordination overhead.
+
+**Coupling detection** finds files that change together across commits even when they have no import relationship. If `executor.py` and `workflow.py` are modified in the same commit 8+ times, they have hidden coupling—changing one likely requires changing the other.
+
+**Freshness categories**:
+- **Active** (<30 days): Under active development
+- **Aging** (30-90 days): May need attention
+- **Stale** (90-180 days): Potentially stable or abandoned
+- **Dormant** (>180 days): Dead code candidates
 
 **Raw output**: `{risk[{file, risk_score, churn, hotfixes, authors}], coupling[{file_a, file_b, count}], freshness{active[], aging[], stale[], dormant[]}}`
 
@@ -242,6 +265,27 @@ generate_warm_start.py [dir] Generate WARM_START.md documentation
 **Why**: Pass 2 analysis focuses on *how* code behaves rather than *what* it declares. Identifies risky files, hidden coupling, and generates logic maps for complex methods.
 
 **How**: Combines cyclomatic complexity analysis with git history (risk, coupling, freshness), dependency graph analysis, and AST-based logic map generation.
+
+**Technical insight**: The **priority score** ranks files by combining multiple signals:
+
+```
+Priority = (CC × 0.35) + (ImportWeight × 0.25) + (GitRisk × 0.25) + (Freshness × 0.15)
+```
+
+- **Cyclomatic Complexity (CC)**: Counts decision points (`if`, `elif`, `for`, `while`, `except`, `and`, `or`, `case`). CC=10 means 10 independent paths through the code. High CC (>20) indicates methods that are hard to test and understand. CC is calculated per-function then aggregated per-file.
+
+- **Import Weight**: Normalized count of how many modules import this file. High weight = foundational module = changes have wide impact.
+
+- **Git Risk**: Combined churn/hotfix/author score from git history. High risk = historically volatile file.
+
+- **Freshness**: Recency of last modification. Recently changed files may have introduced bugs.
+
+**Logic Maps** are generated for the top complex methods using AST analysis:
+- `->` : Control flow (conditionals, branches)
+- `*` : Loop iteration
+- `!` : Exception handling
+- `{X}` : State mutation (attribute assignment)
+- `[X]` : Side effect (file I/O, API calls, DB writes)
 
 **Raw output**: Priority-ranked files with complexity scores, logic maps, verification status, hidden dependencies.
 
