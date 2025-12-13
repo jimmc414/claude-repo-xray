@@ -46,7 +46,7 @@ See the generated analysis for the [Kosmos](https://github.com/jimmc414/Kosmos) 
 | XML/XSD schemas | ~4M | Duplicated 6x |
 | **Python source** | **~2.4M** | **Target for analysis** |
 
-This is why repo-xray exists—finding the 2.4M tokens of actual code in 160M tokens of repository:
+Part of the cold start problem is finding the 2.4M tokens of actual code in 160M tokens of repository:
 - [WARM_START.md](WARM_START.md) - Pass 1: Structural analysis (~20KB)
 - [HOT_START.md](HOT_START.md) - Pass 2: Behavioral analysis (~48KB, 1231 lines)
 - [examples/WARM_START.md](examples/WARM_START.md) - Additional example output
