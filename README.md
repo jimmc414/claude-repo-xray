@@ -181,15 +181,30 @@ generate_warm_start.py [dir] Generate WARM_START.md documentation
 ### skeleton.py
 
 ```python
-@dataclass
-class User:  # L34
-    id: int  # L36
-    name: str  # L37
-    email: str = Field(...)  # L38
+# From kosmos/models/hypothesis.py (3275 -> 1538 tokens, 53% reduction)
 
-class UserService:  # L45
-    def __init__(self, db: Database): ...  # L47
-    async def get_user(self, user_id: int) -> User: ...  # L52
+class ExperimentType(str, Enum):  # L15
+    COMPUTATIONAL = "computational"  # L17
+    DATA_ANALYSIS = "data_analysis"  # L18
+    LITERATURE_SYNTHESIS = "literature_synthesis"  # L19
+
+class HypothesisStatus(str, Enum):  # L22
+    GENERATED = "generated"  # L24
+    UNDER_REVIEW = "under_review"  # L25
+    TESTING = "testing"  # L26
+    SUPPORTED = "supported"  # L27
+    REJECTED = "rejected"  # L28
+
+class Hypothesis(BaseModel):  # L32
+    id: Optional[str] = None  # L50
+    research_question: str = Field(...)  # L51
+    statement: str = Field(...)  # L52
+    rationale: str = Field(...)  # L53
+    domain: str = Field(...)  # L55
+    status: HypothesisStatus = Field(...)  # L56
+    testability_score: Optional[float] = Field(...)  # L59
+    novelty_score: Optional[float] = Field(...)  # L60
+    suggested_experiment_types: List[ExperimentType] = Field(...)  # L65
 ```
 
 ### dependency_graph.py --mermaid
@@ -197,12 +212,37 @@ class UserService:  # L45
 ```mermaid
 graph TD
     subgraph ORCHESTRATION
-        workflow_main[main]
+        kosmos_core_workflow[workflow]
+        kosmos_workflow_research_loop[research_loop]
+        kosmos_agents_literature_analyzer[literature_analyzer]
+        kosmos_agents_experiment_designer[experiment_designer]
+    end
+    subgraph CORE
+        kosmos_agents_research_director[research_director]
+        kosmos_execution_executor[executor]
+        kosmos_knowledge_graph[graph]
+        kosmos_cli_main[main]
     end
     subgraph FOUNDATION
-        utils_config[config]
+        kosmos_core_logging[logging]
+        kosmos_config[config]
+        kosmos_models_hypothesis[hypothesis]
+        kosmos_core_llm[llm]
     end
-    workflow_main --> utils_config
+    kosmos_core_workflow --> kosmos_core_logging
+    kosmos_core_workflow --> kosmos_config
+    kosmos_workflow_research_loop --> kosmos_core_logging
+```
+
+### git_analysis.py --risk
+
+```
+RISK   FILE                                    FACTORS
+0.96   kosmos/config.py                        churn:23 hotfix:14 authors:4
+0.82   kosmos/agents/research_director.py      churn:17 hotfix:13 authors:3
+0.71   kosmos/core/llm.py                      churn:11 hotfix:5 authors:3
+0.68   kosmos/execution/executor.py            churn:9 hotfix:5 authors:3
+0.67   kosmos/cli/commands/run.py              churn:11 hotfix:9 authors:2
 ```
 
 ## Token Budget
