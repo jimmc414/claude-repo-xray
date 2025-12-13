@@ -78,23 +78,36 @@ Use repo-xray to analyze this codebase's health:
 
 ### Agent Commands
 
-If installed globally, you can use the `@repo_architect` agent:
+If installed globally, you can use the agents:
+
+**@repo_architect** - Pass 1: Structural analysis
 ```
 @repo_architect generate     # Create WARM_START.md
 @repo_architect refresh      # Update existing documentation
 @repo_architect query "X"    # Answer specific architecture questions
 ```
 
+**@repo_investigator** - Pass 2: Behavioral analysis
+```
+@repo_investigator           # Create HOT_START.md with logic maps
+```
+
+Both agents are defined in `.claude/agents/` and can be invoked directly in Claude Code.
+
 ### Manual Execution
 
 #### Run All Analysis (Single Command)
 
 ```bash
-# Generate complete WARM_START.md with all analyses combined
+# Pass 1: Generate WARM_START.md (structural analysis)
 python .claude/skills/repo-xray/scripts/generate_warm_start.py . -v
+
+# Pass 2: Generate HOT_START.md (behavioral analysis)
+python .claude/skills/repo-investigator/scripts/generate_hot_start.py . -v --detail 4
 
 # With debug output (raw JSON for each section)
 python .claude/skills/repo-xray/scripts/generate_warm_start.py . --debug -v
+python .claude/skills/repo-investigator/scripts/generate_hot_start.py . --debug -v
 ```
 
 #### Run Individual Tools
@@ -348,17 +361,24 @@ generate_hot_start.py [dir]  Generate HOT_START.md documentation
 Install once, available in all projects:
 
 ```bash
-git clone https://github.com/jimmc414/repo-xray.git
-cd repo-xray
+git clone https://github.com/jimmc414/claude-repo-xray.git
+cd claude-repo-xray
 
 mkdir -p ~/.claude/skills ~/.claude/agents
+
+# Copy both skills (Pass 1 and Pass 2)
 cp -r .claude/skills/repo-xray ~/.claude/skills/
+cp -r .claude/skills/repo-investigator ~/.claude/skills/
+
+# Copy both agents
 cp .claude/agents/repo_architect.md ~/.claude/agents/
+cp .claude/agents/repo_investigator.md ~/.claude/agents/
 ```
 
 Verify:
 ```bash
 python ~/.claude/skills/repo-xray/scripts/mapper.py --help
+python ~/.claude/skills/repo-investigator/scripts/generate_hot_start.py --help
 ```
 
 ### Option 2: Project-Local
@@ -366,9 +386,10 @@ python ~/.claude/skills/repo-xray/scripts/mapper.py --help
 Install to a specific project:
 
 ```bash
-git clone https://github.com/jimmc414/repo-xray.git
-cd repo-xray
+git clone https://github.com/jimmc414/claude-repo-xray.git
+cd claude-repo-xray
 
+# Copy entire .claude directory (includes both skills and agents)
 cp -r .claude /path/to/your/project/
 
 cd /path/to/your/project
@@ -379,11 +400,12 @@ python .claude/skills/repo-xray/scripts/configure.py .
 
 Paste into Claude Code:
 ```
-Install repo-xray from /path/to/repo-xray:
+Install repo-xray from /path/to/claude-repo-xray:
 1. mkdir -p ~/.claude/skills ~/.claude/agents
-2. cp -r /path/to/repo-xray/.claude/skills/repo-xray ~/.claude/skills/
-3. cp /path/to/repo-xray/.claude/agents/repo_architect.md ~/.claude/agents/
-4. Verify: python ~/.claude/skills/repo-xray/scripts/mapper.py --help
+2. cp -r /path/to/claude-repo-xray/.claude/skills/repo-xray ~/.claude/skills/
+3. cp -r /path/to/claude-repo-xray/.claude/skills/repo-investigator ~/.claude/skills/
+4. cp /path/to/claude-repo-xray/.claude/agents/*.md ~/.claude/agents/
+5. Verify: python ~/.claude/skills/repo-xray/scripts/mapper.py --help
 ```
 
 ---
@@ -482,18 +504,22 @@ RISK   FILE                                    FACTORS
 ## Files
 
 ```
-repo-xray/
+claude-repo-xray/
 ├── README.md
+├── install.sh                     # Installation script
 ├── WARM_START.md                  # Example Pass 1 output (Kosmos)
 ├── HOT_START.md                   # Example Pass 2 output (Kosmos)
 ├── examples/
 │   └── WARM_START.md              # Additional example
 └── .claude/
     ├── agents/
-    │   └── repo_architect.md
+    │   ├── repo_architect.md      # Pass 1 agent (@repo_architect)
+    │   └── repo_investigator.md   # Pass 2 agent (@repo_investigator)
     └── skills/
-        ├── repo-xray/             # Pass 1 tools
+        ├── repo-xray/             # Pass 1: Structural analysis
         │   ├── SKILL.md
+        │   ├── COMMANDS.md
+        │   ├── reference.md
         │   ├── scripts/
         │   │   ├── mapper.py
         │   │   ├── skeleton.py
@@ -501,8 +527,10 @@ repo-xray/
         │   │   ├── git_analysis.py
         │   │   ├── configure.py
         │   │   └── generate_warm_start.py
-        │   └── lib/
-        └── repo-investigator/     # Pass 2 tools
+        │   ├── lib/
+        │   └── tests/
+        └── repo-investigator/     # Pass 2: Behavioral analysis
+            ├── SKILL.md
             └── scripts/
                 ├── generate_hot_start.py
                 ├── complexity.py
