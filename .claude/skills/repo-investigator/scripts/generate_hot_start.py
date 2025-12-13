@@ -80,10 +80,17 @@ from verify import (
 
 # Import Phase 1 tools (for direct data generation)
 try:
-    from dependency_graph import build_dependency_graph
+    from dependency_graph import build_dependency_graph, find_orphans, identify_layers
     PHASE1_AVAILABLE = True
 except ImportError:
     PHASE1_AVAILABLE = False
+
+# Import git analysis tools
+try:
+    from git_analysis import analyze_risk, analyze_coupling, analyze_freshness, get_tracked_files
+    GIT_ANALYSIS_AVAILABLE = True
+except ImportError:
+    GIT_ANALYSIS_AVAILABLE = False
 
 
 # =============================================================================
@@ -507,6 +514,15 @@ def collect_analysis_data(
             "modules": {},
             "edges": [],
             "import_weights": {},
+            "external_deps": {},
+            "circular": [],
+            "orphans": [],
+            "layers": {},
+        },
+        "git_analysis": {
+            "risk": [],
+            "coupling": [],
+            "freshness": {},
         },
     }
 
@@ -565,12 +581,55 @@ def collect_analysis_data(
             }
             data["dependency_graph"]["edges"] = edges
             data["dependency_graph"]["import_weights"] = import_weights
+            data["dependency_graph"]["external_deps"] = dep_graph.get("external_deps", {})
+            data["dependency_graph"]["circular"] = dep_graph.get("circular", [])
+            # Generate layer classification
+            layers = identify_layers(dep_graph)
+            data["dependency_graph"]["layers"] = layers
+
+            # Find orphans
+            try:
+                orphans = find_orphans(dep_graph)
+                data["dependency_graph"]["orphans"] = orphans
+            except Exception:
+                pass
 
             if verbose:
                 print(f"  Found {len(modules)} modules, {len(edges)} internal edges", file=sys.stderr)
+                if data["dependency_graph"]["circular"]:
+                    print(f"  Circular dependencies: {len(data['dependency_graph']['circular'])}", file=sys.stderr)
         except Exception as e:
             if verbose:
                 print(f"  Warning: Could not generate dependency graph: {e}", file=sys.stderr)
+
+    # Generate Git analysis data directly
+    if GIT_ANALYSIS_AVAILABLE:
+        if verbose:
+            print("Running git analysis...", file=sys.stderr)
+        try:
+            # Get tracked files
+            tracked_files = get_tracked_files(directory)
+
+            # Analyze risk
+            risk_data = analyze_risk(directory, tracked_files, months=6, verbose=False)
+            data["git_analysis"]["risk"] = risk_data
+            for r in risk_data:
+                rel_path = r.get("file", "")
+                risks[rel_path] = r.get("risk_score", 0)
+
+            # Analyze coupling
+            coupling_data = analyze_coupling(directory, max_commits=200, min_cooccurrences=3, verbose=False)
+            data["git_analysis"]["coupling"] = coupling_data
+
+            # Analyze freshness
+            freshness_data = analyze_freshness(directory, tracked_files, verbose=False)
+            data["git_analysis"]["freshness"] = freshness_data
+
+            if verbose:
+                print(f"  Risk files: {len(risk_data)}, Coupling pairs: {len(coupling_data)}", file=sys.stderr)
+        except Exception as e:
+            if verbose:
+                print(f"  Warning: Could not run git analysis: {e}", file=sys.stderr)
 
     # Fall back to JSON files if direct generation failed
     if not imports and deps_path and os.path.exists(deps_path) and git_path and os.path.exists(git_path):
@@ -768,12 +827,15 @@ def generate_hot_start_md(data: Dict, detail_level: int = 2) -> str:
     level_names = {1: 'compact', 2: 'normal', 3: 'verbose', 4: 'full'}
 
     # Header
-    lines.append(f"# {data['project_name']}: Semantic Hot Start")
+    lines.append(f"# {data['project_name']}: Semantic Hot Start (Pass 2: Behavioral Analysis)")
     lines.append("")
-    lines.append(f"> Phase 2 semantic analysis companion to WARM_START.md")
+    lines.append(f"> Semantic analysis companion to WARM_START.md")
     lines.append(f"> Generated: {data['timestamp']}")
     lines.append(f"> Priority files analyzed: {len(data['priorities'])}")
     lines.append(f"> Detail level: {detail_level} ({level_names.get(detail_level, 'unknown')})")
+    lines.append(">")
+    lines.append("> **Pass 2** extracts behavioral metadata: control flow, logic maps, method signatures, and module relationships.")
+    lines.append("> See **WARM_START.md** for Pass 1 (structural analysis).")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -800,6 +862,42 @@ def generate_hot_start_md(data: Dict, detail_level: int = 2) -> str:
     lines.append("")
     lines.append("**Factor Legend**: CC=Cyclomatic Complexity, Imp=Import Weight (how many modules depend on this), Risk=Git churn risk score, Untested=No test coverage detected")
     lines.append("")
+
+    # Add Mermaid architecture diagram
+    dep_graph = data.get("dependency_graph", {})
+    edges = dep_graph.get("edges", [])
+    layers = dep_graph.get("layers", {})
+
+    if edges or layers:
+        lines.append("### Architecture Overview")
+        lines.append("")
+        lines.append("```mermaid")
+        lines.append("graph TD")
+
+        # Group by layers if available
+        if layers:
+            for layer_name in ["orchestration", "core", "foundation"]:
+                layer_modules = layers.get(layer_name, [])
+                if layer_modules:
+                    lines.append(f"    subgraph {layer_name.upper()}")
+                    for mod in layer_modules[:8]:  # Limit to 8 per layer
+                        short = mod.split(".")[-1] if "." in mod else mod
+                        lines.append(f"        {mod.replace('.', '_').replace('-', '_')}[{short}]")
+                    lines.append("    end")
+
+        # Add edges (limited to keep diagram readable)
+        shown_edges = set()
+        for a, b in edges[:20]:
+            a_id = a.replace(".", "_").replace("-", "_")
+            b_id = b.replace(".", "_").replace("-", "_")
+            edge_key = f"{a_id}->{b_id}"
+            if edge_key not in shown_edges:
+                lines.append(f"    {a_id} --> {b_id}")
+                shown_edges.add(edge_key)
+
+        lines.append("```")
+        lines.append("")
+
     lines.append("---")
     lines.append("")
 
@@ -963,6 +1061,9 @@ def generate_hot_start_md(data: Dict, detail_level: int = 2) -> str:
     dep_graph = data.get("dependency_graph", {})
     edges = dep_graph.get("edges", [])
     import_weights = dep_graph.get("import_weights", {})
+    external_deps = dep_graph.get("external_deps", {})
+    circular = dep_graph.get("circular", [])
+    orphans = dep_graph.get("orphans", [])
 
     if edges or import_weights:
         # Show most-imported modules (foundation modules)
@@ -974,7 +1075,7 @@ def generate_hot_start_md(data: Dict, detail_level: int = 2) -> str:
             lines.append("| Module | Imported By |")
             lines.append("|--------|-------------|")
             sorted_weights = sorted(import_weights.items(), key=lambda x: -x[1])
-            for mod, count in sorted_weights[:10]:
+            for mod, count in sorted_weights[:15]:  # Show more
                 if count > 0:
                     lines.append(f"| `{mod}` | {count} modules |")
             lines.append("")
@@ -1001,12 +1102,120 @@ def generate_hot_start_md(data: Dict, detail_level: int = 2) -> str:
                 lines.append(f"{short_source} -> {', '.join(short_targets)}")
             lines.append("```")
             lines.append("")
+
+        # External dependencies
+        if external_deps:
+            all_external = set()
+            for deps in external_deps.values():
+                all_external.update(deps)
+            if all_external:
+                lines.append("### External Dependencies")
+                lines.append("")
+                lines.append("Third-party packages detected (inferred from imports):")
+                lines.append("")
+                lines.append(f"`{', '.join(sorted(all_external))}`")
+                lines.append("")
+
+        # Circular dependencies
+        if circular:
+            lines.append("### Circular Dependencies ⚠️")
+            lines.append("")
+            lines.append("| Module A | Module B |")
+            lines.append("|----------|----------|")
+            for a, b in circular[:10]:
+                short_a = a.split(".")[-1] if "." in a else a
+                short_b = b.split(".")[-1] if "." in b else b
+                lines.append(f"| `{short_a}` | `{short_b}` |")
+            lines.append("")
+
+        # Orphan files
+        if orphans:
+            lines.append("### Orphan Candidates")
+            lines.append("")
+            lines.append("Files with zero importers (may be entry points, dead code, or utility scripts):")
+            lines.append("")
+            lines.append("| File | Confidence | Notes |")
+            lines.append("|------|------------|-------|")
+            for o in orphans[:10]:
+                lines.append(f"| `{o.get('file', '')}` | {o.get('confidence', 0):.2f} | {o.get('notes', '')} |")
+            lines.append("")
     else:
         lines.append("*No internal dependencies detected (Phase 1 data not available)*")
         lines.append("")
 
     lines.append("---")
     lines.append("")
+
+    # Section 5.5: Git Analysis
+    git_data = data.get("git_analysis", {})
+    risk_data = git_data.get("risk", [])
+    coupling_data = git_data.get("coupling", [])
+    freshness_data = git_data.get("freshness", {})
+
+    if risk_data or coupling_data or freshness_data:
+        lines.append("## 5.5 Git Analysis")
+        lines.append("")
+
+        # Risk analysis
+        if risk_data:
+            lines.append("### High-Risk Files")
+            lines.append("")
+            lines.append("Files with high churn and hotfix density (volatile):")
+            lines.append("")
+            lines.append("| Risk | File | Factors |")
+            lines.append("|------|------|---------|")
+            for r in risk_data[:15]:
+                risk_score = r.get("risk_score", 0)
+                filepath = r.get("file", "")
+                churn = r.get("churn", 0)
+                hotfixes = r.get("hotfixes", 0)
+                authors = r.get("authors", 0)
+                lines.append(f"| {risk_score:.2f} | `{filepath}` | churn:{churn} hotfix:{hotfixes} authors:{authors} |")
+            lines.append("")
+
+        # Coupling analysis
+        if coupling_data:
+            lines.append("### Hidden Coupling")
+            lines.append("")
+            lines.append("Files that change together (hidden dependencies):")
+            lines.append("")
+            lines.append("| File A | File B | Co-commits |")
+            lines.append("|--------|--------|------------|")
+            for c in coupling_data[:15]:
+                file_a = c.get("file_a", "")
+                file_b = c.get("file_b", "")
+                count = c.get("count", 0)
+                lines.append(f"| `{file_a}` | `{file_b}` | {count} |")
+            lines.append("")
+
+        # Freshness analysis
+        if freshness_data:
+            lines.append("### Freshness Summary")
+            lines.append("")
+            lines.append("| Category | Count | Description |")
+            lines.append("|----------|-------|-------------|")
+            active = freshness_data.get("active", [])
+            aging = freshness_data.get("aging", [])
+            stale = freshness_data.get("stale", [])
+            dormant = freshness_data.get("dormant", [])
+            lines.append(f"| Active | {len(active)} | Changed in last 30 days |")
+            lines.append(f"| Aging | {len(aging)} | Changed 30-90 days ago |")
+            lines.append(f"| Stale | {len(stale)} | Changed 90-180 days ago |")
+            lines.append(f"| Dormant | {len(dormant)} | Not changed in 180+ days |")
+            lines.append("")
+
+            # Show dormant files if any
+            if dormant:
+                lines.append("**Dormant files** (potential dead code):")
+                lines.append("")
+                for d in dormant[:10]:
+                    filepath = d.get("file", "")
+                    days = d.get("days_since_change", 0)
+                    lines.append(f"- `{filepath}` ({days} days)")
+                lines.append("")
+
+        lines.append("---")
+        lines.append("")
 
     # Section 6: Logic Map Legend
     lines.append("## 6. Logic Map Legend")
@@ -1024,8 +1233,22 @@ def generate_hot_start_md(data: Dict, detail_level: int = 2) -> str:
     lines.append("---")
     lines.append("")
 
-    # Section 7: Reference
-    lines.append("## 7. Reference")
+    # Section 7: Developer Activity (Placeholder)
+    lines.append("## 7. Developer Activity")
+    lines.append("")
+    lines.append("*Coming soon: Behavioral analysis from Claude Code sessions*")
+    lines.append("")
+    lines.append("This section will show:")
+    lines.append("- **Reference Hotspots**: Files most frequently read for context")
+    lines.append("- **Change Hotspots**: Files most frequently edited")
+    lines.append("- **Behavioral Coupling**: Files modified together across sessions")
+    lines.append("- **Iteration Intensity**: Files with many revisions during development")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Section 8: Reference
+    lines.append("## 8. Reference")
     lines.append("")
     lines.append("This document complements:")
     lines.append("- WARM_START.md (structural architecture)")
