@@ -4,7 +4,7 @@
 >
 > Context-efficient onboarding guide for AI programmers.
 > Generated: 2025-12-13
-> Python source: ~2.4M tokens (633 files)
+> Repository: ~160M tokens total | Python source: ~2.4M tokens (633 files)
 
 ---
 

@@ -35,7 +35,18 @@ Together, these produce a comprehensive reference (~15-50K tokens depending on c
 
 ## Example Output
 
-See the generated analysis for the [Kosmos](https://github.com/jimmc414/Kosmos) codebase (~2.4M tokens in 633 Python files):
+See the generated analysis for the [Kosmos](https://github.com/jimmc414/Kosmos) codebase:
+
+**Repository size: ~160M tokens total**
+| Content | Tokens | Note |
+|---------|--------|------|
+| Neo4j database | ~134M | Binary transaction logs |
+| CSV/data files | ~15M | Research datasets |
+| Binaries (JAR, coverage) | ~4M | Skip these |
+| XML/XSD schemas | ~4M | Duplicated 6x |
+| **Python source** | **~2.4M** | **Target for analysis** |
+
+This is why repo-xray exists—finding the 2.4M tokens of actual code in 160M tokens of repository:
 - [WARM_START.md](WARM_START.md) - Pass 1: Structural analysis (~20KB)
 - [HOT_START.md](HOT_START.md) - Pass 2: Behavioral analysis (~48KB, 1231 lines)
 - [examples/WARM_START.md](examples/WARM_START.md) - Additional example output
@@ -540,7 +551,7 @@ claude-repo-xray/
 
 ### Example Output Details
 
-Example files are generated from the [Kosmos](https://github.com/jimmc414/kosmos) codebase (~2.4M tokens Python source):
+Example files are generated from the [Kosmos](https://github.com/jimmc414/kosmos) codebase (~160M total, ~2.4M Python):
 
 | File | Size | Description |
 |------|------|-------------|
