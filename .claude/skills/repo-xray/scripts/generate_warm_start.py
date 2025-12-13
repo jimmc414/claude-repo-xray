@@ -142,6 +142,15 @@ def collect_all_data(directory: str, verbose: bool = False) -> Dict[str, Any]:
     mermaid = generate_mermaid(graph)
     orphans = find_orphans(graph)
 
+    # Get the detected root package (for imports)
+    root_package = graph.get("root_package", "")
+    if not root_package:
+        # Try to infer from module names
+        modules = graph.get("modules", {})
+        if modules:
+            first_module = list(modules.keys())[0]
+            root_package = first_module.split(".")[0] if "." in first_module else first_module
+
     # Git analysis
     if verbose:
         print("  Analyzing git history...", file=sys.stderr)
@@ -153,7 +162,7 @@ def collect_all_data(directory: str, verbose: bool = False) -> Dict[str, Any]:
     # Detect entry points and critical classes
     if verbose:
         print("  Detecting entry points...", file=sys.stderr)
-    entry_points = detect_entry_points(directory, graph, layers)
+    entry_points = detect_entry_points(directory, graph, layers, root_package)
 
     if verbose:
         print("  Extracting critical classes...", file=sys.stderr)
@@ -162,6 +171,7 @@ def collect_all_data(directory: str, verbose: bool = False) -> Dict[str, Any]:
 
     return {
         "project_name": project_name,
+        "root_package": root_package,
         "source_dir": source_dir,
         "timestamp": datetime.now().strftime("%Y-%m-%d"),
         "token_budget": map_result["total_tokens"],
@@ -184,10 +194,18 @@ def collect_all_data(directory: str, verbose: bool = False) -> Dict[str, Any]:
 # Entry Point Detection
 # =============================================================================
 
-def detect_entry_points(directory: str, graph: Dict, layers: Dict) -> List[Dict]:
+def detect_entry_points(directory: str, graph: Dict, layers: Dict, root_package: str = "") -> List[Dict]:
     """Find CLI and API entry points."""
     entry_points = []
     modules = graph.get("modules", {})
+
+    # Directories to skip for entry point detection (utility/test scripts)
+    skip_dirs = {".claude", "tests", "test", "examples", "scripts", "tools", "utils", "alembic"}
+
+    def should_skip_file(filepath: str) -> bool:
+        """Check if file is in a directory we should skip."""
+        path_parts = filepath.replace("\\", "/").lower().split("/")
+        return any(skip_dir in path_parts for skip_dir in skip_dirs)
 
     # Common entry point patterns
     entry_patterns = ["main.py", "cli.py", "__main__.py", "app.py", "wsgi.py", "asgi.py"]
@@ -196,18 +214,39 @@ def detect_entry_points(directory: str, graph: Dict, layers: Dict) -> List[Dict]
         filepath = info.get("file", "")
         filename = os.path.basename(filepath)
 
-        # Check filename patterns
+        # Skip files in test/utility directories
+        if should_skip_file(filepath):
+            continue
+
+        # Check filename patterns - prioritize if in root package
         if filename in entry_patterns:
+            # Skip if we already have this filename from another location
+            existing_filenames = [os.path.basename(e.get("file", "")) for e in entry_points]
+            if filename in existing_filenames:
+                continue
+
+            # Higher priority if in detected root package
+            is_in_root = root_package and root_package in module_name
             entry_points.append({
                 "module": module_name,
                 "file": filepath,
                 "type": "cli" if "cli" in filename.lower() else "main",
                 "description": f"Entry point ({filename})",
+                "priority": 1 if is_in_root else 2,
             })
             continue
 
-        # Check for if __name__ == "__main__"
+        # Check for if __name__ == "__main__" - only for root package files
         if filepath and os.path.exists(filepath):
+            # Only check __main__ for files in root package or workflow directories
+            is_relevant = (
+                (root_package and root_package in module_name) or
+                "workflow" in module_name.lower() or
+                "cli" in module_name.lower()
+            )
+            if not is_relevant:
+                continue
+
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -218,20 +257,31 @@ def detect_entry_points(directory: str, graph: Dict, layers: Dict) -> List[Dict]
                             "file": filepath,
                             "type": "script",
                             "description": "Has __main__ block",
+                            "priority": 3,
                         })
             except Exception:
                 pass
 
-    # Add top orchestration modules
-    for module_name in layers.get("orchestration", [])[:3]:
-        if module_name not in [e["module"] for e in entry_points]:
-            info = modules.get(module_name, {})
-            entry_points.append({
-                "module": module_name,
-                "file": info.get("file", ""),
-                "type": "orchestration",
-                "description": "Orchestration layer",
-            })
+    # Sort by priority (lower is better)
+    entry_points.sort(key=lambda x: x.get("priority", 99))
+
+    # Add top orchestration modules with workflow/research/main in name
+    workflow_keywords = ["workflow", "research", "main", "app", "run"]
+    for module_name in layers.get("orchestration", []):
+        if any(kw in module_name.lower() for kw in workflow_keywords):
+            if module_name not in [e["module"] for e in entry_points]:
+                info = modules.get(module_name, {})
+                entry_points.append({
+                    "module": module_name,
+                    "file": info.get("file", ""),
+                    "type": "orchestration",
+                    "description": "Orchestration layer",
+                    "priority": 4,
+                })
+
+    # Remove priority field before returning
+    for ep in entry_points:
+        ep.pop("priority", None)
 
     return entry_points[:10]  # Limit to 10
 
@@ -599,6 +649,35 @@ def load_template() -> str:
 """
 
 
+def _get_best_entry_class(data: Dict) -> str:
+    """Get the best entry point class name for data flow diagram."""
+    # Priority order for keywords (most specific first)
+    keyword_priority = [
+        ["research_loop", "research_workflow"],  # Highest priority
+        ["workflow", "research"],
+        ["main", "app"],
+    ]
+
+    # Check orchestration layer first (more likely to have the main workflow)
+    for keywords in keyword_priority:
+        for module in data.get("layers", {}).get("orchestration", []):
+            if any(kw in module.lower() for kw in keywords):
+                return module.split(".")[-1]
+
+    # Check entry points
+    for keywords in keyword_priority:
+        for ep in data.get("entry_points", []):
+            module = ep.get("module", "")
+            if any(kw in module.lower() for kw in keywords):
+                return module.split(".")[-1]
+
+    # Fall back to first entry point or "Main"
+    if data.get("entry_points"):
+        return data["entry_points"][0]["module"].split(".")[-1]
+
+    return "Main"
+
+
 def render_template(data: Dict) -> str:
     """Fill all template placeholders with collected data."""
     template = load_template()
@@ -631,8 +710,8 @@ def render_template(data: Dict) -> str:
         "{DATA_MODELS}": format_data_models(data["data_models"]),
         "{EXECUTOR_CLASSES_TABLE}": "*Use skeleton.py to find Executor/Runner classes*",
 
-        # Section 4 - Data flow (template-based)
-        "{ENTRY_POINT_CLASS}": data["entry_points"][0]["module"].split(".")[-1] if data["entry_points"] else "Main",
+        # Section 4 - Data flow (use best entry point or orchestration module)
+        "{ENTRY_POINT_CLASS}": _get_best_entry_class(data),
         "{MAIN_METHOD}": "run",
         "{STATE_OR_CONTEXT_SETUP}": "Initialize state/context",
         "{CORE_PROCESSING_STEP}": "Core processing",
@@ -640,20 +719,20 @@ def render_template(data: Dict) -> str:
         "{VALIDATION_OR_ANALYSIS}": "Validation/Analysis",
         "{OUTPUT_OR_RESULT}": "Generate output",
 
-        # Section 5
-        "{CLI_COMMANDS}": f"```bash\n# Run the main entry point\npython -m {data['project_name']}\n```",
-        "{PYTHON_API}": f"```python\nfrom {data['project_name']} import main\n# See entry points above for specific imports\n```",
-        "{KEY_IMPORTS}": f"```python\nfrom {data['project_name']} import *\n```",
+        # Section 5 - Use root_package for valid Python imports
+        "{CLI_COMMANDS}": f"```bash\n# Run the main entry point\npython -m {data['root_package'] or data['project_name'].replace('-', '_')}\n```",
+        "{PYTHON_API}": f"```python\nfrom {data['root_package'] or data['project_name'].replace('-', '_')} import main\n# See entry points above for specific imports\n```",
+        "{KEY_IMPORTS}": f"```python\nfrom {data['root_package'] or data['project_name'].replace('-', '_')} import *\n```",
 
         # Section 6
         "{HAZARD_DIRECTORIES}": "- `__pycache__/`, `.git/`, `venv/`, `node_modules/`\n- `artifacts/`, `data/`, `logs/`",
         "{HAZARD_FILES}": format_hazard_files(data["large_files"]),
         "{HAZARD_EXTENSIONS}": "`.pyc`, `.pkl`, `.log`, `.jsonl`, `.csv`, `.h5`",
 
-        # Section 7
-        "{HEALTH_CHECK_COMMAND}": f"python -m {data['project_name']} --help",
+        # Section 7 - Use root_package for valid Python
+        "{HEALTH_CHECK_COMMAND}": f"python -m {data['root_package'] or data['project_name'].replace('-', '_')} --help",
         "{TEST_COMMAND}": "pytest tests/ -x -q",
-        "{IMPORT_VERIFICATION}": f'python -c "import {data["project_name"]}; print(\'OK\')"',
+        "{IMPORT_VERIFICATION}": f'python -c "import {data["root_package"] or data["project_name"].replace("-", "_")}; print(\'OK\')"',
 
         # Section 9
         "{FOUNDATION_MODULES_TABLE}": format_layers_table(data["layers"], "foundation", data["graph"]),
