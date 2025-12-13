@@ -18,9 +18,14 @@ Replace `SCRIPT.py` with the tool name below.
 
 ---
 
-## Commands
+## Tools
 
 ### configure.py
+
+**Strategy**: Bootstrap the skill for a new project. Scans directory structure, detects root package from import patterns, generates ignore/priority configs.
+
+**Raw output**: `configs/ignore_patterns.json`, `configs/priority_modules.json`
+
 ```
 configure.py [dir]        Detect project structure
 configure.py --dry-run    Preview without writing
@@ -29,6 +34,11 @@ configure.py --force      Overwrite without prompt
 ```
 
 ### mapper.py
+
+**Strategy**: Estimate context budget before diving in. Walks directory tree, calculates tokens per file (chars/4), flags large files that would consume excessive context.
+
+**Raw output**: `{path, total_tokens, file_count, tree[], large_files[]}`
+
 ```
 mapper.py [dir]           Directory tree with token counts
 mapper.py --summary       Stats only
@@ -36,6 +46,11 @@ mapper.py --json          JSON output
 ```
 
 ### skeleton.py
+
+**Strategy**: Understand interfaces without reading implementations. AST-parses Python files to extract class/method signatures, Pydantic fields, decorators, and line numbers. Achieves ~95% token reduction.
+
+**Raw output**: `{files[{file, original_tokens, skeleton_tokens, skeleton}], summary}`
+
 ```
 skeleton.py <path>             Extract interfaces
 skeleton.py --priority LEVEL   Filter: critical, high, medium, low
@@ -46,6 +61,11 @@ skeleton.py --json             JSON output
 ```
 
 ### dependency_graph.py
+
+**Strategy**: Map the architecture without reading code. Parses imports to build a directed graph, then classifies modules into layers (foundation/core/orchestration) based on import patterns and naming conventions.
+
+**Raw output**: `{modules{name: {imports[], imported_by[]}}, layers{}, circular[], external{}}`
+
 ```
 dependency_graph.py [dir]      Import analysis
 dependency_graph.py --mermaid  Mermaid diagram
@@ -58,6 +78,11 @@ dependency_graph.py --json     JSON output
 ```
 
 ### git_analysis.py
+
+**Strategy**: Extract temporal signals from git history. Identifies volatile files (risk), hidden dependencies not visible in imports (coupling), and maintenance activity (freshness).
+
+**Raw output**: `{risk[{file, risk_score, churn, hotfixes, authors}], coupling[{file_a, file_b, count}], freshness{active[], aging[], stale[], dormant[]}}`
+
 ```
 git_analysis.py [dir]          Git history analysis
 git_analysis.py --risk         Risk scores (churn, hotfixes, authors)
@@ -68,6 +93,11 @@ git_analysis.py --months N     History period (default: 6)
 ```
 
 ### generate_warm_start.py
+
+**Strategy**: Orchestrate all tools into unified documentation. Calls mapper, dependency_graph, git_analysis, and skeleton, then renders collected data into a markdown template.
+
+**Raw output**: All tool outputs combined. Use `--debug` to retain raw JSON in `WARM_START_debug/` for inspection or validation.
+
 ```
 generate_warm_start.py [dir]   Generate WARM_START.md
 generate_warm_start.py -o FILE Custom output path
