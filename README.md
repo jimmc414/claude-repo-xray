@@ -54,8 +54,8 @@ See the generated analysis for the [Kosmos](https://github.com/jimmc414/Kosmos) 
 | **Python source** | **~2.4M** | **Target for analysis** |
 
 One aspect of the cold start problem is finding the 2.4M tokens of actual code in 160M tokens of repository:
-- [WARM_START.md](WARM_START.md) - Pass 1: Structural analysis (~5K tokens)
-- [HOT_START.md](HOT_START.md) - Pass 2: Behavioral analysis (~12K tokens, full detail)
+- [WARM_START_kosmos.md](WARM_START.md) - Pass 1: Structural analysis (~5K tokens)
+- [HOT_START_kosmos.md](HOT_START.md) - Pass 2: Behavioral analysis (~12K tokens, full detail)
 - **Combined: ~17K tokens** (vs 2.4M source = **141x compression**)
 
 **Output size by detail level:**
@@ -66,7 +66,7 @@ One aspect of the cold start problem is finding the 2.4M tokens of actual code i
 | 3 (verbose) | ~11.5K | ~17K |
 | 4 (full) | ~12K | ~17K |
 
-See also: [examples/WARM_START.md](examples/WARM_START.md)
+For raw data output see: [WARM_START_debug.md](WARM_START_debug.md) and [HOT_START_debug.md](HOT_START_debug.md)
 
 ## Limitations
 
