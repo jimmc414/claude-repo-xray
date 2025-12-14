@@ -30,6 +30,9 @@ __all__ = [
     'analyze_risk',
     'analyze_coupling',
     'analyze_freshness',
+    'analyze_commit_sizes',
+    'get_file_expertise',
+    'get_codebase_expertise',
     'get_tracked_files',
     'run_git',
 ]
@@ -235,6 +238,101 @@ def analyze_freshness(cwd: str, files: List[str], verbose: bool = False) -> Dict
     result["dormant"].sort(key=lambda x: x["days"], reverse=True)
 
     return result
+
+
+def analyze_commit_sizes(cwd: str, months: int = 6, verbose: bool = False) -> List[Dict]:
+    """
+    Analyze commit sizes (lines added/removed) per file.
+
+    Returns list of {file, total_added, total_removed, net_change, commits}
+    """
+    log = run_git(
+        ["log", f"--since={months}.months", "--numstat", "--pretty=format:"],
+        cwd,
+        verbose
+    )
+
+    if not log:
+        return []
+
+    file_stats = defaultdict(lambda: {'added': 0, 'removed': 0, 'commits': 0})
+
+    for line in log.splitlines():
+        if not line.strip():
+            continue
+
+        parts = line.split('\t')
+        if len(parts) == 3:
+            added, removed, filepath = parts
+            if filepath.endswith('.py'):
+                try:
+                    add_count = int(added) if added != '-' else 0
+                    rem_count = int(removed) if removed != '-' else 0
+                    file_stats[filepath]['added'] += add_count
+                    file_stats[filepath]['removed'] += rem_count
+                    file_stats[filepath]['commits'] += 1
+                except ValueError:
+                    continue
+
+    # Convert to list and sort by total changes
+    results = []
+    for filepath, stats in file_stats.items():
+        results.append({
+            'file': filepath,
+            'total_added': stats['added'],
+            'total_removed': stats['removed'],
+            'net_change': stats['added'] - stats['removed'],
+            'commits': stats['commits'],
+        })
+
+    return sorted(results, key=lambda x: -(x['total_added'] + x['total_removed']))[:20]
+
+
+def get_file_expertise(filepath: str, cwd: str, verbose: bool = False) -> Dict[str, float]:
+    """
+    Get author ownership percentages for a file via git blame.
+
+    Returns: {author_name: percentage_of_lines}
+
+    WARNING: Slow for large files. Use sparingly.
+    """
+    result = run_git(["blame", "--line-porcelain", filepath], cwd, verbose)
+
+    if not result:
+        return {}
+
+    author_lines = defaultdict(int)
+    total_lines = 0
+
+    for line in result.splitlines():
+        if line.startswith('author '):
+            author = line[7:]  # Remove 'author ' prefix
+            author_lines[author] += 1
+            total_lines += 1
+
+    if total_lines == 0:
+        return {}
+
+    # Convert to percentages, top 5 authors
+    expertise = {
+        author: round((count / total_lines) * 100, 1)
+        for author, count in author_lines.items()
+    }
+
+    return dict(sorted(expertise.items(), key=lambda x: -x[1])[:5])
+
+
+def get_codebase_expertise(files: List[str], cwd: str, verbose: bool = False) -> Dict[str, Dict]:
+    """Get expertise for multiple files. Returns {file: {author: %}}.
+
+    Limits to first 10 files to avoid slowdown.
+    """
+    results = {}
+    for filepath in files[:10]:  # Limit to avoid slowdown
+        expertise = get_file_expertise(filepath, cwd, verbose)
+        if expertise:
+            results[filepath] = expertise
+    return results
 
 
 def print_risk(results: List[Dict]):

@@ -56,6 +56,9 @@ output.txt
 **/.tmp
 tmp/
 
+# Archived files
+archived/
+
 # Files that commonly contain secrets
 **/*.key
 **/*.pem

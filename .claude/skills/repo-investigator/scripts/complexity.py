@@ -75,6 +75,45 @@ def calculate_cc(filepath: str, verbose: bool = False) -> Tuple[int, Dict[str, i
     return total_score, methods
 
 
+def count_async_patterns(filepath: str) -> Dict:
+    """Count async/await patterns in a file."""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            source = f.read()
+        tree = ast.parse(source)
+    except Exception:
+        return {}
+
+    async_funcs = sum(1 for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef))
+    sync_funcs = sum(1 for n in ast.walk(tree) if isinstance(n, ast.FunctionDef))
+    async_fors = sum(1 for n in ast.walk(tree) if isinstance(n, ast.AsyncFor))
+    async_withs = sum(1 for n in ast.walk(tree) if isinstance(n, ast.AsyncWith))
+
+    return {
+        'async_functions': async_funcs,
+        'sync_functions': sync_funcs,
+        'async_for_loops': async_fors,
+        'async_context_managers': async_withs,
+    }
+
+
+def calculate_codebase_async_patterns(files: list) -> Dict:
+    """Aggregate async patterns across codebase."""
+    totals = {
+        'async_functions': 0,
+        'sync_functions': 0,
+        'async_for_loops': 0,
+        'async_context_managers': 0,
+    }
+
+    for filepath in files:
+        patterns = count_async_patterns(filepath)
+        for key in totals:
+            totals[key] += patterns.get(key, 0)
+
+    return totals
+
+
 def normalize_dict(values: Dict[str, float]) -> Dict[str, float]:
     """Normalize dictionary values to 0-1 range."""
     if not values:

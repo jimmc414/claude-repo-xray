@@ -10,7 +10,14 @@ AI coding assistants face a cold start problem: a 200K token context window cann
 
 ## The Solution
 
-A two-pass analysis system that extracts 18 signals from 14 metadata sources:
+A two-pass analysis system that analyzes 14 metadata sources to extract 28+ signals across 6 dimensions:
+
+- **Structure** (4): tokens, files, interfaces, dependencies
+- **Architecture** (4): layers, orphans, circulars, impact analysis
+- **History** (3): risk scores, coupling pairs, freshness
+- **Complexity** (3): cyclomatic complexity, method hotspots, priority scores
+- **Behavior** (8): side effects (5 types), inputs, mutations, logic maps
+- **Coverage** (6): test files, functions, types, tested/untested dirs, fixtures
 
 **Pass 1: Structural Analysis (WARM_START.md)**
 - Architecture layers and module classification
@@ -302,6 +309,12 @@ generate_warm_start.py [dir] Generate WARM_START.md documentation
 
 **Technical insight**: The **priority score** ranks files by combining multiple signals:
 
+**5-signal formula** (when test coverage data available):
+```
+Priority = (CC × 0.30) + (ImportWeight × 0.20) + (GitRisk × 0.20) + (Freshness × 0.15) + (Untested × 0.15)
+```
+
+**4-signal formula** (fallback):
 ```
 Priority = (CC × 0.35) + (ImportWeight × 0.25) + (GitRisk × 0.25) + (Freshness × 0.15)
 ```
@@ -333,10 +346,10 @@ generate_hot_start.py [dir]  Generate HOT_START.md documentation
 ```
 
 **Detail levels:**
-- `1/compact`: Priority table only (~500 tokens)
-- `2/normal`: Standard with logic maps (~2,700 tokens)
-- `3/verbose`: Preserve literals (~5,000 tokens)
-- `4/full`: Add signatures and docstrings (~8,000+ tokens)
+- `1/compact`: Priority table only (~1.2K tokens)
+- `2/normal`: Standard with logic maps (~11K tokens)
+- `3/verbose`: Preserve literals (~11.5K tokens)
+- `4/full`: Add signatures and docstrings (~12K tokens)
 
 ### Test Coverage Analysis (Section 13)
 

@@ -1,0 +1,153 @@
+[
+  {
+    "file": "alembic/env.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: alembic, kosmos.db.models, kosmos.config",
+      "External dependencies: sqlalchemy, sqlalchemy"
+    ]
+  },
+  {
+    "file": "alembic/versions/2ec489a3eb6b_initial_schema.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: alembic",
+      "External dependencies: sqlalchemy"
+    ]
+  },
+  {
+    "file": "alembic/versions/dc24ead48293_add_profiling_tables.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: alembic",
+      "External dependencies: sqlalchemy, sqlalchemy.dialects"
+    ]
+  },
+  {
+    "file": "alembic/versions/fb9e61f33cbf_add_performance_indexes.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: alembic",
+      "External dependencies: sqlalchemy"
+    ]
+  },
+  {
+    "file": "docs/conf.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": []
+  },
+  {
+    "file": "examples/01_biology_metabolic_pathways.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: kosmos, kosmos.config, kosmos.cli.views.results_viewer, kosmos.cli.utils"
+    ]
+  },
+  {
+    "file": "examples/02_biology_gene_expression.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": []
+  },
+  {
+    "file": "examples/03_placeholder.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": []
+  },
+  {
+    "file": "examples/04_placeholder.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": []
+  },
+  {
+    "file": "examples/05_placeholder.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": []
+  },
+  {
+    "file": "examples/06_placeholder.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": []
+  },
+  {
+    "file": "examples/07_placeholder.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": []
+  },
+  {
+    "file": "examples/10_placeholder.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": []
+  },
+  {
+    "file": "kosmos/config.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: pydantic_settings, kosmos.utils.compat",
+      "External dependencies: pydantic"
+    ]
+  },
+  {
+    "file": "kosmos/__init__.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: kosmos.config, kosmos.agents.research_director"
+    ]
+  },
+  {
+    "file": "kosmos/agents/base.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: kosmos.config, kosmos.config",
+      "External dependencies: pydantic"
+    ]
+  },
+  {
+    "file": "kosmos/agents/data_analyst.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: kosmos.agents.base, kosmos.core.llm, kosmos.models.result, kosmos.models.hypothesis",
+      "External dependencies: numpy"
+    ]
+  },
+  {
+    "file": "kosmos/agents/experiment_designer.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: kosmos.agents.base, kosmos.core.llm, kosmos.core.prompts, kosmos.utils.compat, kosmos.models.hypothesis"
+    ]
+  },
+  {
+    "file": "kosmos/agents/hypothesis_generator.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: kosmos.agents.base, kosmos.core.llm, kosmos.utils.compat, kosmos.core.prompts, kosmos.models.hypothesis"
+    ]
+  },
+  {
+    "file": "kosmos/agents/literature_analyzer.py",
+    "status": "OK",
+    "message": "AST Valid",
+    "warnings": [
+      "Potential missing imports: kosmos.agents.base, kosmos.core.llm, kosmos.knowledge.graph, kosmos.knowledge.vector_db, kosmos.knowledge.embeddings"
+    ]
+  }
+]

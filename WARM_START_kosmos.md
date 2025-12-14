@@ -1,10 +1,8 @@
 # kosmos-ai-scientist: Developer Warm Start
 
-> **Source**: https://github.com/jimmc414/Kosmos
->
 > Context-efficient onboarding guide for AI programmers.
 > Generated: 2025-12-13
-> Repository: ~160M tokens total | Python source: ~2.4M tokens (633 files)
+> Token budget: ~159.9M tokens
 
 ---
 

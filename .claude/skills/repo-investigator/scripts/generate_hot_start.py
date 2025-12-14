@@ -47,10 +47,10 @@ DETAIL_LEVELS = {
 
 DETAIL_LEVEL_HELP = """
 Detail levels (name or number):
-  1/compact  - Priority table + verification summary only (~500 tokens)
-  2/normal   - Standard output with logic maps (~2,700 tokens) [default]
-  3/verbose  - Preserve literals in logic maps (~5,000 tokens)
-  4/full     - Add docstrings and method signatures (~8,000 tokens)
+  1/compact  - Priority table + verification summary only (~1.2K tokens)
+  2/normal   - Standard output with logic maps (~11K tokens) [default]
+  3/verbose  - Preserve literals in logic maps (~11.5K tokens)
+  4/full     - Add docstrings and method signatures (~12K tokens)
 """
 
 # Add scripts directory to path for imports
@@ -67,6 +67,7 @@ from complexity import (
     scan_directory,
     normalize_dict,
     validate_phase1_inputs,
+    calculate_codebase_async_patterns,
 )
 from smart_read import (
     smart_read,
@@ -87,10 +88,20 @@ except ImportError:
 
 # Import git analysis tools
 try:
-    from git_analysis import analyze_risk, analyze_coupling, analyze_freshness, get_tracked_files
+    from git_analysis import (
+        analyze_risk, analyze_coupling, analyze_freshness, analyze_commit_sizes,
+        get_file_expertise, get_tracked_files
+    )
     GIT_ANALYSIS_AVAILABLE = True
 except ImportError:
     GIT_ANALYSIS_AVAILABLE = False
+
+# Import type coverage and decorator analysis
+try:
+    from skeleton import calculate_codebase_type_coverage, calculate_codebase_decorators
+    TYPE_COVERAGE_AVAILABLE = True
+except ImportError:
+    TYPE_COVERAGE_AVAILABLE = False
 
 
 # =============================================================================
@@ -432,6 +443,91 @@ class LogicMapGenerator:
             return "..."
 
 
+# =============================================================================
+# Technical Debt Detection
+# =============================================================================
+
+TODO_PATTERNS = [
+    r'#\s*(TODO|FIXME|HACK|XXX|BUG|OPTIMIZE)\b[:\s]*(.*)$',
+]
+
+
+# =============================================================================
+# Call Graph Analysis
+# =============================================================================
+
+class CallGraphVisitor(ast.NodeVisitor):
+    """Build call graph from AST."""
+
+    def __init__(self):
+        self.current_function = None
+        self.current_class = None
+        self.calls = []  # [(caller, callee)]
+        self.functions = set()
+
+    def visit_ClassDef(self, node):
+        old_class = self.current_class
+        self.current_class = node.name
+        self.generic_visit(node)
+        self.current_class = old_class
+
+    def visit_FunctionDef(self, node):
+        old = self.current_function
+        if self.current_class:
+            self.current_function = f"{self.current_class}.{node.name}"
+        else:
+            self.current_function = node.name
+        self.functions.add(self.current_function)
+        self.generic_visit(node)
+        self.current_function = old
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Call(self, node):
+        if self.current_function:
+            callee = None
+            if isinstance(node.func, ast.Name):
+                callee = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+                # Handle self.method() calls
+                if isinstance(node.func.value, ast.Name) and node.func.value.id == 'self':
+                    if self.current_class:
+                        callee = f"{self.current_class}.{node.func.attr}"
+                    else:
+                        callee = node.func.attr
+                else:
+                    callee = node.func.attr
+
+            if callee:
+                self.calls.append((self.current_function, callee))
+
+        self.generic_visit(node)
+
+
+def build_call_graph(filepath: str) -> Dict:
+    """Build call graph for a single file."""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            source = f.read()
+        tree = ast.parse(source)
+    except Exception:
+        return {'functions': [], 'calls': []}
+
+    visitor = CallGraphVisitor()
+    visitor.visit(tree)
+
+    # Only keep calls where callee is a known function
+    internal_calls = [
+        (caller, callee) for caller, callee in visitor.calls
+        if callee in visitor.functions
+    ]
+
+    return {
+        'functions': list(visitor.functions),
+        'calls': internal_calls,
+    }
+
+
 def generate_logic_map_text(logic_map: Dict) -> str:
     """Convert a logic map dictionary to arrow notation text."""
     lines = [f"{logic_map['method']}():"]
@@ -625,6 +721,10 @@ def collect_analysis_data(
             freshness_data = analyze_freshness(directory, tracked_files, verbose=False)
             data["git_analysis"]["freshness"] = freshness_data
 
+            # Analyze commit sizes
+            commit_sizes = analyze_commit_sizes(directory, months=6, verbose=False)
+            data["git_analysis"]["commit_sizes"] = commit_sizes
+
             if verbose:
                 print(f"  Risk files: {len(risk_data)}, Coupling pairs: {len(coupling_data)}", file=sys.stderr)
         except Exception as e:
@@ -728,6 +828,31 @@ def collect_analysis_data(
                 logic_map["priority_score"] = priority["score"]
                 data["logic_maps"].append(logic_map)
 
+    # Analyze author expertise for top priority files (slow - limit to 5)
+    if GIT_ANALYSIS_AVAILABLE and data["priorities"]:
+        if verbose:
+            print("Analyzing author expertise for top priority files...", file=sys.stderr)
+        author_expertise = {}
+        for priority in data["priorities"][:5]:
+            rel_path = priority["path"]
+            expertise = get_file_expertise(rel_path, directory, verbose=False)
+            if expertise:
+                author_expertise[rel_path] = expertise
+        data["author_expertise"] = author_expertise
+
+    # Build call graphs for top priority files
+    if data["priorities"]:
+        if verbose:
+            print("Building call graphs for top priority files...", file=sys.stderr)
+        call_graphs = {}
+        for priority in data["priorities"][:5]:
+            filepath = priority["full_path"]
+            rel_path = priority["path"]
+            graph = build_call_graph(filepath)
+            if graph.get("calls"):  # Only include if there are internal calls
+                call_graphs[rel_path] = graph
+        data["call_graphs"] = call_graphs
+
     # Run verification
     if verbose:
         print("Running import verification...", file=sys.stderr)
@@ -747,6 +872,32 @@ def collect_analysis_data(
         print("Detecting hidden dependencies...", file=sys.stderr)
 
     data["hidden_deps"] = detect_hidden_dependencies(files, verbose)
+
+    # Detect technical debt markers
+    if verbose:
+        print("Detecting technical debt markers...", file=sys.stderr)
+    tech_debt = detect_technical_debt(files, verbose)
+    data["tech_debt"] = tech_debt
+
+    # Calculate type annotation coverage
+    if TYPE_COVERAGE_AVAILABLE:
+        if verbose:
+            print("Calculating type annotation coverage...", file=sys.stderr)
+        type_coverage = calculate_codebase_type_coverage(files)
+        data["type_coverage"] = type_coverage
+
+    # Calculate async/await patterns
+    if verbose:
+        print("Analyzing async patterns...", file=sys.stderr)
+    async_patterns = calculate_codebase_async_patterns(files)
+    data["async_patterns"] = async_patterns
+
+    # Calculate decorator inventory
+    if TYPE_COVERAGE_AVAILABLE:
+        if verbose:
+            print("Analyzing decorator usage...", file=sys.stderr)
+        decorators = calculate_codebase_decorators(files)
+        data["decorators"] = decorators
 
     return data
 
@@ -812,6 +963,38 @@ def detect_hidden_dependencies(files: List[str], verbose: bool = False) -> Dict:
         "external_services": sorted(hidden["external_services"]),
         "config_files": sorted(hidden["config_files"]),
     }
+
+
+def detect_technical_debt(files: List[str], verbose: bool = False) -> Dict:
+    """Detect TODO/FIXME/HACK/XXX markers in source files."""
+    markers = {
+        'TODO': [],
+        'FIXME': [],
+        'HACK': [],
+        'XXX': [],
+        'BUG': [],
+        'OPTIMIZE': [],
+    }
+
+    for filepath in files:
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f, 1):
+                    for pattern in TODO_PATTERNS:
+                        match = re.search(pattern, line, re.IGNORECASE)
+                        if match:
+                            marker_type = match.group(1).upper()
+                            text = match.group(2).strip()[:60]  # Limit length
+                            if marker_type in markers:
+                                markers[marker_type].append({
+                                    'file': filepath,
+                                    'line': line_num,
+                                    'text': text
+                                })
+        except Exception:
+            continue
+
+    return {k: v for k, v in markers.items() if v}  # Only return non-empty
 
 
 def generate_hot_start_md(data: Dict, detail_level: int = 2) -> str:
@@ -1051,6 +1234,62 @@ def generate_hot_start_md(data: Dict, detail_level: int = 2) -> str:
         lines.append("*None detected*")
     lines.append("")
 
+    # Technical Debt Markers
+    tech_debt = data.get("tech_debt", {})
+    if tech_debt:
+        lines.append("### Technical Debt Markers")
+        lines.append("")
+        lines.append("| Type | Count | Sample |")
+        lines.append("|------|-------|--------|")
+        for marker_type, items in sorted(tech_debt.items()):
+            count = len(items)
+            sample = items[0]['text'][:40] if items else ""
+            sample_file = items[0]['file'].split('/')[-1] if items else ""
+            lines.append(f"| {marker_type} | {count} | `{sample_file}`: {sample} |")
+        lines.append("")
+
+    # Type Annotation Coverage
+    type_cov = data.get("type_coverage", {})
+    if type_cov:
+        lines.append("### Type Annotation Coverage")
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
+        lines.append(f"| Total functions | {type_cov.get('total_functions', 0):,} |")
+        lines.append(f"| Typed functions | {type_cov.get('typed_functions', 0):,} |")
+        lines.append(f"| Coverage | {type_cov.get('coverage_percent', 0):.1f}% |")
+        lines.append("")
+
+    # Async/Await Patterns
+    async_patterns = data.get("async_patterns", {})
+    if async_patterns and (async_patterns.get('async_functions', 0) > 0 or async_patterns.get('sync_functions', 0) > 0):
+        lines.append("### Async/Await Patterns")
+        lines.append("")
+        lines.append("| Pattern | Count |")
+        lines.append("|---------|-------|")
+        lines.append(f"| Sync functions | {async_patterns.get('sync_functions', 0):,} |")
+        lines.append(f"| Async functions | {async_patterns.get('async_functions', 0):,} |")
+        if async_patterns.get('async_for_loops', 0) > 0:
+            lines.append(f"| Async for loops | {async_patterns.get('async_for_loops', 0):,} |")
+        if async_patterns.get('async_context_managers', 0) > 0:
+            lines.append(f"| Async with blocks | {async_patterns.get('async_context_managers', 0):,} |")
+        total = async_patterns.get('sync_functions', 0) + async_patterns.get('async_functions', 0)
+        if total > 0:
+            async_pct = (async_patterns.get('async_functions', 0) / total) * 100
+            lines.append(f"| Async ratio | {async_pct:.1f}% |")
+        lines.append("")
+
+    # Decorator Inventory
+    decorators = data.get("decorators", {})
+    if decorators:
+        lines.append("### Decorator Inventory")
+        lines.append("")
+        lines.append("| Decorator | Usage |")
+        lines.append("|-----------|-------|")
+        for dec_name, count in list(decorators.items())[:15]:  # Top 15
+            lines.append(f"| `@{dec_name}` | {count:,} |")
+        lines.append("")
+
     lines.append("---")
     lines.append("")
 
@@ -1214,6 +1453,68 @@ def generate_hot_start_md(data: Dict, detail_level: int = 2) -> str:
                     lines.append(f"- `{filepath}` ({days} days)")
                 lines.append("")
 
+        # Commit size analysis
+        commit_sizes = git_data.get("commit_sizes", [])
+        if commit_sizes:
+            lines.append("### Commit Sizes (LOC Changes)")
+            lines.append("")
+            lines.append("Files with most lines changed (last 6 months):")
+            lines.append("")
+            lines.append("| File | Added | Removed | Net | Commits |")
+            lines.append("|------|-------|---------|-----|---------|")
+            for cs in commit_sizes[:10]:
+                filepath = cs.get("file", "")
+                added = cs.get("total_added", 0)
+                removed = cs.get("total_removed", 0)
+                net = cs.get("net_change", 0)
+                commits = cs.get("commits", 0)
+                net_str = f"+{net}" if net >= 0 else str(net)
+                lines.append(f"| `{filepath}` | +{added} | -{removed} | {net_str} | {commits} |")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("")
+
+    # Author expertise (from git blame)
+    author_expertise = data.get("author_expertise", {})
+    if author_expertise:
+        lines.append("## 5.6 Code Ownership")
+        lines.append("")
+        lines.append("Primary authors for top priority files (by line count):")
+        lines.append("")
+        for filepath, authors in author_expertise.items():
+            lines.append(f"**`{filepath}`**")
+            for author, pct in authors.items():
+                lines.append(f"- {author}: {pct}%")
+            lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # Call graphs (internal function calls)
+    call_graphs = data.get("call_graphs", {})
+    if call_graphs:
+        lines.append("## 5.7 Internal Call Graph")
+        lines.append("")
+        lines.append("Function call relationships within top priority files:")
+        lines.append("")
+        for filepath, graph in call_graphs.items():
+            calls = graph.get("calls", [])
+            if calls:
+                lines.append(f"**`{filepath}`**")
+                lines.append("")
+                lines.append("| Caller | Calls |")
+                lines.append("|--------|-------|")
+                # Group calls by caller
+                from collections import defaultdict
+                caller_to_callees = defaultdict(list)
+                for caller, callee in calls:
+                    caller_to_callees[caller].append(callee)
+                for caller, callees in sorted(caller_to_callees.items()):
+                    callee_str = ", ".join(callees[:5])  # Limit to 5 callees
+                    if len(callees) > 5:
+                        callee_str += f" (+{len(callees)-5} more)"
+                    lines.append(f"| `{caller}` | {callee_str} |")
+                lines.append("")
         lines.append("---")
         lines.append("")
 

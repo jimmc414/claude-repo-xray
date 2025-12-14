@@ -1,0 +1,75 @@
+{
+  "risk_entries": 147,
+  "files": [
+    {
+      "file": "kosmos/config.py",
+      "risk_score": 0.96,
+      "churn": 23,
+      "hotfixes": 14,
+      "authors": 4
+    },
+    {
+      "file": "kosmos/agents/research_director.py",
+      "risk_score": 0.82,
+      "churn": 17,
+      "hotfixes": 13,
+      "authors": 3
+    },
+    {
+      "file": "kosmos/core/llm.py",
+      "risk_score": 0.71,
+      "churn": 11,
+      "hotfixes": 5,
+      "authors": 3
+    },
+    {
+      "file": "kosmos/execution/executor.py",
+      "risk_score": 0.68,
+      "churn": 9,
+      "hotfixes": 5,
+      "authors": 3
+    },
+    {
+      "file": "kosmos/cli/commands/run.py",
+      "risk_score": 0.67,
+      "churn": 11,
+      "hotfixes": 9,
+      "authors": 2
+    },
+    {
+      "file": "kosmos/core/providers/anthropic.py",
+      "risk_score": 0.66,
+      "churn": 8,
+      "hotfixes": 4,
+      "authors": 3
+    },
+    {
+      "file": "kosmos/cli/main.py",
+      "risk_score": 0.65,
+      "churn": 10,
+      "hotfixes": 6,
+      "authors": 2
+    },
+    {
+      "file": "kosmos/core/async_llm.py",
+      "risk_score": 0.62,
+      "churn": 6,
+      "hotfixes": 3,
+      "authors": 3
+    },
+    {
+      "file": "kosmos/core/providers/openai.py",
+      "risk_score": 0.62,
+      "churn": 8,
+      "hotfixes": 4,
+      "authors": 2
+    },
+    {
+      "file": "kosmos/execution/sandbox.py",
+      "risk_score": 0.62,
+      "churn": 6,
+      "hotfixes": 3,
+      "authors": 3
+    }
+  ]
+}
