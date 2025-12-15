@@ -5,165 +5,139 @@ description: AST-based Python codebase analysis. Use for exploring architecture,
 
 # repo-xray
 
-Extracts structural information from Python codebases via AST parsing. Produces class signatures, method signatures, Pydantic fields, decorators, and import graphs without implementation details.
+Unified codebase analysis tool for AI coding assistants. Extracts structural, behavioral, and historical signals from Python codebases via AST parsing.
 
-## Tools
-
-### configure.py
-
-Detects project structure and generates config files.
+## Quick Start
 
 ```bash
-python .claude/skills/repo-xray/scripts/configure.py --dry-run   # preview
-python .claude/skills/repo-xray/scripts/configure.py .           # generate
-python .claude/skills/repo-xray/scripts/configure.py . --backup  # backup first
+# Full analysis (default)
+python xray.py /path/to/project --verbose
+
+# With preset for smaller output
+python xray.py /path/to/project --preset minimal      # ~2K tokens
+python xray.py /path/to/project --preset standard     # ~8K tokens
+
+# Write to files
+python xray.py /path/to/project --output both --out ./analysis
 ```
+
+## Main Tool: xray.py
+
+The unified entry point for all analysis.
+
+### Presets
+
+```bash
+python xray.py . --preset minimal      # skeleton, imports only (~2K tokens)
+python xray.py . --preset standard     # + complexity, git, calls, tests (~8K tokens)
+python xray.py . --preset full         # all signals (~15K tokens, default)
+```
+
+### Individual Switches
+
+```bash
+python xray.py . --skeleton            # Code interfaces
+python xray.py . --complexity          # Cyclomatic complexity
+python xray.py . --git                 # Git history analysis
+python xray.py . --imports             # Dependency graph
+python xray.py . --calls               # Cross-module calls
+python xray.py . --side-effects        # I/O operations
+python xray.py . --tests               # Test coverage
+python xray.py . --tech-debt           # TODO/FIXME markers
+python xray.py . --types               # Type annotation coverage
+python xray.py . --decorators          # Decorator inventory
+```
+
+### Output Formats
+
+```bash
+python xray.py . --output json         # JSON only (default)
+python xray.py . --output markdown     # Markdown only
+python xray.py . --output both         # Both formats
+python xray.py . --out ./analysis      # Write to analysis.json, analysis.md
+```
+
+## Legacy Tools
+
+Individual tools are still available for targeted analysis:
 
 ### mapper.py
 
-Directory tree with token estimates per file.
+Directory tree with token estimates.
 
 ```bash
 python .claude/skills/repo-xray/scripts/mapper.py              # full tree
 python .claude/skills/repo-xray/scripts/mapper.py --summary    # stats only
-python .claude/skills/repo-xray/scripts/mapper.py src/         # specific dir
-python .claude/skills/repo-xray/scripts/mapper.py --json       # JSON output
 ```
 
 ### skeleton.py
 
-Extracts interfaces: classes, methods, fields, decorators, line numbers.
+Extract interfaces: classes, methods, fields, decorators.
 
 ```bash
-python .claude/skills/repo-xray/scripts/skeleton.py src/file.py              # single file
-python .claude/skills/repo-xray/scripts/skeleton.py src/ --priority critical # by priority
-python .claude/skills/repo-xray/scripts/skeleton.py src/ --pattern "*.py"    # by pattern
-python .claude/skills/repo-xray/scripts/skeleton.py src/ --private           # include _private
-python .claude/skills/repo-xray/scripts/skeleton.py src/ --no-line-numbers   # omit L{n}
-python .claude/skills/repo-xray/scripts/skeleton.py src/ --json              # JSON output
-```
-
-Output example:
-```python
-@dataclass
-class User:  # L34
-    id: int  # L36
-    name: str  # L37
-    email: str = Field(...)  # L38
-
-class UserService:  # L45
-    def __init__(self, db: Database): ...  # L47
-    async def get_user(self, user_id: int) -> User: ...  # L52
+python .claude/skills/repo-xray/scripts/skeleton.py src/file.py
+python .claude/skills/repo-xray/scripts/skeleton.py src/ --priority critical
 ```
 
 ### dependency_graph.py
 
-Maps import relationships. Auto-detects root package.
+Map import relationships.
 
 ```bash
-python .claude/skills/repo-xray/scripts/dependency_graph.py src/              # text output
-python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --mermaid    # Mermaid diagram
-python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --root pkg   # explicit root
-python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --focus api  # filter area
-python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --orphans    # dead code candidates
-python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --impact file.py  # blast radius
-python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --source-dir path # override source root
-python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --json       # JSON output
+python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --mermaid
+python .claude/skills/repo-xray/scripts/dependency_graph.py src/ --orphans
 ```
 
 ### git_analysis.py
 
-Analyzes git history for temporal signals.
+Analyze git history.
 
 ```bash
-python .claude/skills/repo-xray/scripts/git_analysis.py src/                  # show usage
-python .claude/skills/repo-xray/scripts/git_analysis.py src/ --risk           # risk scores
-python .claude/skills/repo-xray/scripts/git_analysis.py src/ --coupling       # co-modification pairs
-python .claude/skills/repo-xray/scripts/git_analysis.py src/ --freshness      # activity categories
-python .claude/skills/repo-xray/scripts/git_analysis.py src/ --json           # combined JSON output
-python .claude/skills/repo-xray/scripts/git_analysis.py src/ --months 12      # custom history period
+python .claude/skills/repo-xray/scripts/git_analysis.py src/ --risk
+python .claude/skills/repo-xray/scripts/git_analysis.py src/ --coupling
+python .claude/skills/repo-xray/scripts/git_analysis.py src/ --freshness
 ```
-
-Output example (--risk):
-```
-RISK   FILE                              FACTORS
-0.87   src/api/auth.py                   churn:15 hotfix:3 authors:5
-0.72   src/core/workflow.py              churn:8 hotfix:1 authors:3
-```
-
-### generate_warm_start.py
-
-Generates complete WARM_START.md documentation by combining all tools.
-
-```bash
-python .claude/skills/repo-xray/scripts/generate_warm_start.py /path/to/repo           # generate
-python .claude/skills/repo-xray/scripts/generate_warm_start.py . -o WARM_START.md      # custom output
-python .claude/skills/repo-xray/scripts/generate_warm_start.py . --debug               # raw JSON per section
-python .claude/skills/repo-xray/scripts/generate_warm_start.py . --json                # JSON instead of markdown
-python .claude/skills/repo-xray/scripts/generate_warm_start.py . -v                    # verbose progress
-```
-
-Features:
-- Combines mapper, skeleton, dependency_graph, git_analysis
-- Auto-detects project name and source directory
-- Handles nested structures (e.g., `.claude/skills/`)
-- `--debug` outputs `WARM_START_debug/*.json` for validation
-
-## Workflow
-
-1. `configure.py --dry-run` - understand project structure
-2. `mapper.py --summary` - survey codebase size
-3. `dependency_graph.py --mermaid` - architecture diagram
-4. `skeleton.py --priority critical` - core interfaces
-5. Verify imports work
-6. `git_analysis.py --risk` - identify volatile files
-7. `git_analysis.py --coupling` - find hidden dependencies
-8. `@repo_architect generate` - full documentation
 
 ## Token Budget
 
 | Operation | Tokens |
 |-----------|--------|
-| configure.py --dry-run | ~200 |
-| mapper.py --summary | ~500 |
-| skeleton.py (1 file) | ~200-500 |
-| skeleton.py --priority critical | ~5K |
-| dependency_graph.py | ~3K |
-| dependency_graph.py --mermaid | ~500 |
-| dependency_graph.py --orphans | ~1K |
-| dependency_graph.py --impact | ~500 |
-| git_analysis.py --risk | ~1K |
-| git_analysis.py --coupling | ~500 |
-| git_analysis.py --freshness | ~500 |
-| git_analysis.py --json | ~3K |
-| generate_warm_start.py | ~8-20K |
+| `--preset minimal` | ~2K |
+| `--preset standard` | ~8K |
+| `--preset full` | ~15K |
+| `--skeleton` only | ~5K |
+| `--imports` only | ~3K |
+| `--git` only | ~2K |
 
-## Priority Levels
+## Analysis Signals
 
-Defined in `configs/priority_modules.json`:
+The tool extracts 28+ signals across 6 dimensions:
 
-| Level | Typical Folders |
-|-------|-----------------|
-| critical | main, app, core, workflow |
-| high | models, schemas, api, services |
-| medium | utils, lib, common |
-| low | tests, docs, examples |
+- **Structure**: skeleton, tokens, files, interfaces
+- **Architecture**: layers, orphans, circulars, import aliases
+- **History**: risk scores, coupling pairs, freshness
+- **Complexity**: cyclomatic complexity, hotspots, async patterns
+- **Behavior**: side effects, cross-module calls, reverse lookup
+- **Coverage**: test files, functions, fixtures
 
 ## Configuration
 
 Files in `configs/`:
-- `ignore_patterns.json` - directories and extensions to skip
-- `priority_modules.json` - module priority patterns
+- `presets.json` - Analysis preset definitions
+- `ignore_patterns.json` - Directories and extensions to skip
 
-Both auto-generated by configure.py. Can be edited manually.
-
-## Agent Integration
+## File Structure
 
 ```
-@repo_architect generate    # create WARM_START.md
-@repo_architect refresh     # update existing
-@repo_architect query "X"   # answer questions
+claude-repo-xray/
+├── xray.py                     # Main entry point
+├── lib/                        # Analysis modules
+│   ├── ast_analysis.py         # Skeleton, complexity, types
+│   ├── import_analysis.py      # Dependencies, aliases
+│   ├── call_analysis.py        # Cross-module calls
+│   ├── git_analysis.py         # Risk, coupling, freshness
+│   ├── tech_debt_analysis.py   # TODO/FIXME markers
+│   └── test_analysis.py        # Test coverage
+├── formatters/                 # Output formatting
+└── configs/                    # Configuration
 ```
-
-See [reference.md](reference.md) for API details.
-See [COMMANDS.md](COMMANDS.md) for quick command reference.

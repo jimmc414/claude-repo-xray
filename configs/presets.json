@@ -1,0 +1,53 @@
+{
+  "minimal": {
+    "description": "Quick structural overview (~2K tokens)",
+    "includes": ["skeleton", "imports"],
+    "skeleton_options": {
+      "include_private": false,
+      "include_docstrings": false,
+      "include_line_numbers": true
+    }
+  },
+  "standard": {
+    "description": "Balanced analysis for most tasks (~8K tokens)",
+    "includes": [
+      "skeleton",
+      "complexity",
+      "git",
+      "imports",
+      "calls",
+      "side-effects",
+      "tests",
+      "tech-debt"
+    ],
+    "skeleton_options": {
+      "include_private": false,
+      "include_docstrings": false,
+      "include_line_numbers": true
+    }
+  },
+  "full": {
+    "default": true,
+    "description": "Complete analysis with all signals (~15K tokens) [DEFAULT]",
+    "includes": [
+      "skeleton",
+      "complexity",
+      "git",
+      "imports",
+      "calls",
+      "side-effects",
+      "tests",
+      "tech-debt",
+      "types",
+      "decorators",
+      "author-expertise",
+      "commit-sizes"
+    ],
+    "skeleton_options": {
+      "include_private": true,
+      "include_docstrings": true,
+      "include_line_numbers": true
+    }
+  },
+  "_comment": "Analysis presets for repo-xray. 'full' is the default when no switches are specified."
+}
