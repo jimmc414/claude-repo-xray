@@ -1,0 +1,60 @@
+{
+  "_version": "1.0",
+  "_comment": "All sections enabled by default. Set to false to disable.",
+
+  "analysis": {
+    "skeleton": true,
+    "complexity": true,
+    "git": true,
+    "imports": true,
+    "calls": true,
+    "side_effects": true,
+    "tests": true,
+    "tech_debt": true,
+    "types": true,
+    "decorators": true,
+    "author_expertise": true,
+    "commit_sizes": true
+  },
+
+  "sections": {
+    "summary": true,
+    "prose": true,
+    "mermaid": true,
+    "architectural_pillars": true,
+    "maintenance_hotspots": true,
+    "complexity_hotspots": true,
+    "critical_classes": {
+      "enabled": true,
+      "count": 10
+    },
+    "data_models": true,
+    "logic_maps": {
+      "enabled": true,
+      "count": 5
+    },
+    "import_analysis": true,
+    "layer_details": true,
+    "git_risk": true,
+    "coupling": true,
+    "freshness": true,
+    "side_effects": true,
+    "side_effects_detail": true,
+    "entry_points": true,
+    "environment_variables": true,
+    "hazards": true,
+    "test_coverage": true,
+    "tech_debt_markers": true,
+    "verify_imports": true,
+    "signatures": true,
+    "state_mutations": true,
+    "verify_commands": true,
+    "persona_map": true,
+    "explain": true
+  },
+
+  "output": {
+    "format": "markdown",
+    "relative_paths": true
+  }
+}

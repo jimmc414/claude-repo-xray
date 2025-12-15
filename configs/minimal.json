@@ -1,0 +1,60 @@
+{
+  "_version": "1.0",
+  "_comment": "Minimal preset - quick structural overview (~2K tokens)",
+
+  "analysis": {
+    "skeleton": true,
+    "complexity": true,
+    "git": false,
+    "imports": true,
+    "calls": false,
+    "side_effects": false,
+    "tests": false,
+    "tech_debt": false,
+    "types": true,
+    "decorators": false,
+    "author_expertise": false,
+    "commit_sizes": false
+  },
+
+  "sections": {
+    "summary": true,
+    "prose": false,
+    "mermaid": false,
+    "architectural_pillars": false,
+    "maintenance_hotspots": false,
+    "complexity_hotspots": true,
+    "critical_classes": {
+      "enabled": false,
+      "count": 5
+    },
+    "data_models": false,
+    "logic_maps": {
+      "enabled": false,
+      "count": 3
+    },
+    "import_analysis": true,
+    "layer_details": false,
+    "git_risk": false,
+    "coupling": false,
+    "freshness": false,
+    "side_effects": false,
+    "side_effects_detail": false,
+    "entry_points": false,
+    "environment_variables": false,
+    "hazards": false,
+    "test_coverage": false,
+    "tech_debt_markers": false,
+    "verify_imports": false,
+    "signatures": false,
+    "state_mutations": false,
+    "verify_commands": false,
+    "persona_map": false,
+    "explain": false
+  },
+
+  "output": {
+    "format": "markdown",
+    "relative_paths": true
+  }
+}

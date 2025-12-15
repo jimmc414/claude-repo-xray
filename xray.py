@@ -6,16 +6,23 @@ Generates comprehensive analysis of Python codebases for AI coding agents.
 Combines structural, behavioral, and historical signals in a single pass.
 
 Usage:
-    python xray.py ./target                       # Full analysis (default)
-    python xray.py ./target --preset minimal      # Quick structural overview
-    python xray.py ./target --preset standard     # Balanced analysis
-    python xray.py ./target --output both         # JSON + Markdown output
-    python xray.py ./target --out ./analysis      # Custom output path
+    python xray.py ./target                       # Full analysis (all sections)
+    python xray.py ./target --config my.json      # Use custom config
+    python xray.py ./target --preset minimal      # Use minimal preset
+    python xray.py ./target --no-mermaid          # Disable specific section
+    python xray.py --init-config > .xray.json     # Generate config file
+
+The tool uses a config-driven approach where all sections are enabled by default.
+Users can customize output by:
+  1. Creating a config file (--init-config) and modifying it
+  2. Placing .xray.json in the project root
+  3. Using --no-<section> flags to disable specific sections
 
 Examples:
     python xray.py /path/to/repo
-    python xray.py . --skeleton --git --imports
-    python xray.py . --preset full --verbose
+    python xray.py . --config configs/minimal.json
+    python xray.py . --no-explain --no-persona-map
+    python xray.py --init-config > .xray.json
 """
 
 import argparse
@@ -31,7 +38,7 @@ SCRIPT_DIR = Path(__file__).parent
 LIB_DIR = SCRIPT_DIR / "lib"
 sys.path.insert(0, str(LIB_DIR))
 
-VERSION = "2.0.0"
+VERSION = "3.0.0"  # Major version bump for config-driven approach
 
 # Analysis switches
 ANALYSIS_SWITCHES = [
@@ -101,16 +108,23 @@ def create_parser() -> argparse.ArgumentParser:
         description="Unified codebase analysis tool for AI coding agents",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Configuration:
+  By default, all sections are enabled. Customize output by:
+  1. Using --config to load a config file
+  2. Placing .xray.json in the project root (auto-detected)
+  3. Using --no-<section> flags to disable specific sections
+  4. Using --preset for predefined configurations
+
 Presets:
   minimal   Quick structural overview (~2K tokens)
   standard  Balanced analysis for most tasks (~8K tokens)
-  full      Complete analysis with all signals (~15K tokens) [DEFAULT]
+  full      Complete analysis with all signals [DEFAULT]
 
 Examples:
-  %(prog)s /path/to/repo
-  %(prog)s . --preset standard
-  %(prog)s . --skeleton --git --imports
-  %(prog)s . --output both --out ./analysis
+  %(prog)s /path/to/repo                    # All sections enabled
+  %(prog)s . --config my_config.json        # Use custom config
+  %(prog)s . --no-explain --no-persona-map  # Disable specific sections
+  %(prog)s --init-config > .xray.json       # Generate config template
 """
     )
 
@@ -122,16 +136,47 @@ Examples:
         help="Directory to analyze (default: current directory)"
     )
 
-    # Preset selection
-    parser.add_argument(
+    # Configuration options
+    config_group = parser.add_argument_group("Configuration")
+    config_group.add_argument(
+        "--config",
+        metavar="PATH",
+        help="Load configuration from JSON file"
+    )
+    config_group.add_argument(
+        "--init-config",
+        action="store_true",
+        dest="init_config",
+        help="Print default config to stdout and exit"
+    )
+    config_group.add_argument(
         "--preset",
         choices=["minimal", "standard", "full"],
         default=None,
-        help="Analysis preset (default: full if no switches specified)"
+        help="Use predefined configuration preset"
     )
 
-    # Individual analysis switches
-    switches = parser.add_argument_group("Analysis Switches (override preset)")
+    # Section disable flags (--no-<section>)
+    disable = parser.add_argument_group("Disable Sections (override config)")
+    disable.add_argument("--no-prose", action="store_true", dest="no_prose", help="Disable prose summary")
+    disable.add_argument("--no-mermaid", action="store_true", dest="no_mermaid", help="Disable Mermaid diagram")
+    disable.add_argument("--no-priority-scores", action="store_true", dest="no_priority_scores", help="Disable priority scores")
+    disable.add_argument("--no-critical-classes", action="store_true", dest="no_critical_classes", help="Disable critical classes")
+    disable.add_argument("--no-data-models", action="store_true", dest="no_data_models", help="Disable data models")
+    disable.add_argument("--no-logic-maps", action="store_true", dest="no_logic_maps", help="Disable logic maps")
+    disable.add_argument("--no-hazards", action="store_true", dest="no_hazards", help="Disable hazards section")
+    disable.add_argument("--no-entry-points", action="store_true", dest="no_entry_points", help="Disable entry points")
+    disable.add_argument("--no-side-effects-detail", action="store_true", dest="no_side_effects_detail", help="Disable detailed side effects")
+    disable.add_argument("--no-layer-details", action="store_true", dest="no_layer_details", help="Disable layer details")
+    disable.add_argument("--no-verify-imports", action="store_true", dest="no_verify_imports", help="Disable import verification")
+    disable.add_argument("--no-signatures", action="store_true", dest="no_signatures", help="Disable signatures")
+    disable.add_argument("--no-state-mutations", action="store_true", dest="no_state_mutations", help="Disable state mutations")
+    disable.add_argument("--no-verify-commands", action="store_true", dest="no_verify_commands", help="Disable verification commands")
+    disable.add_argument("--no-explain", action="store_true", dest="no_explain", help="Disable explanatory text")
+    disable.add_argument("--no-persona-map", action="store_true", dest="no_persona_map", help="Disable persona map")
+
+    # Legacy analysis switches (for backwards compatibility)
+    switches = parser.add_argument_group("Analysis Switches (legacy, for backwards compatibility)")
     switches.add_argument("--skeleton", action="store_true", help="Extract code skeletons (classes, functions)")
     switches.add_argument("--complexity", action="store_true", help="Calculate cyclomatic complexity")
     switches.add_argument("--git", action="store_true", help="Analyze git history (risk, coupling, freshness)")
@@ -145,8 +190,8 @@ Examples:
     switches.add_argument("--author-expertise", action="store_true", dest="author_expertise", help="Git blame expertise")
     switches.add_argument("--commit-sizes", action="store_true", dest="commit_sizes", help="Commit size analysis")
 
-    # Gap Analysis Features (markdown enhancements)
-    gap = parser.add_argument_group("Gap Analysis Features (markdown enhancements)")
+    # Legacy gap feature flags (for backwards compatibility)
+    gap = parser.add_argument_group("Section Enable Flags (legacy, for backwards compatibility)")
     gap.add_argument("--mermaid", action="store_true", help="Include Mermaid architecture diagram")
     gap.add_argument("--priority-scores", action="store_true", dest="priority_scores", help="Calculate composite priority scores")
     gap.add_argument("--inline-skeletons", type=int, metavar="N", dest="inline_skeletons", help="Include skeleton code for top N classes")
@@ -161,7 +206,7 @@ Examples:
     gap.add_argument("--signatures", action="store_true", help="Full method signatures for hotspots")
     gap.add_argument("--state-mutations", action="store_true", dest="state_mutations", help="Track attribute modifications")
     gap.add_argument("--verify-commands", action="store_true", dest="verify_commands", help="Generate verification commands")
-    gap.add_argument("--explain", action="store_true", help="Add explanatory text before each section (verbose output)")
+    gap.add_argument("--explain", action="store_true", help="Add explanatory text before each section")
     gap.add_argument("--persona-map", action="store_true", dest="persona_map", help="Show agent prompts and personas")
 
     # Output options
@@ -169,8 +214,8 @@ Examples:
     output.add_argument(
         "--output",
         choices=["json", "markdown", "both"],
-        default="json",
-        help="Output format (default: json)"
+        default="markdown",
+        help="Output format (default: markdown)"
     )
     output.add_argument(
         "--out",
@@ -411,59 +456,147 @@ def output_markdown(
         print(md_str)
 
 
+def config_to_gap_features(config: Dict[str, Any], target_dir: str) -> Dict[str, Any]:
+    """
+    Convert config sections to gap_features dict for backwards compatibility with formatter.
+
+    This bridges the new config system with the existing formatter that expects gap_features dict.
+    """
+    sections = config.get("sections", {})
+
+    # Helper to check if section is enabled
+    def is_enabled(key):
+        val = sections.get(key)
+        if isinstance(val, dict):
+            return val.get("enabled", True)
+        return bool(val)
+
+    # Helper to get count parameter
+    def get_count(key, default=10):
+        val = sections.get(key)
+        if isinstance(val, dict):
+            return val.get("count", default)
+        return default
+
+    return {
+        "mermaid": is_enabled("mermaid"),
+        "priority_scores": is_enabled("architectural_pillars") or is_enabled("maintenance_hotspots"),
+        "architectural_pillars": is_enabled("architectural_pillars"),
+        "maintenance_hotspots": is_enabled("maintenance_hotspots"),
+        "inline_skeletons": get_count("critical_classes", 10) if is_enabled("critical_classes") else None,
+        "hazards": is_enabled("hazards"),
+        "data_models": is_enabled("data_models"),
+        "logic_maps": get_count("logic_maps", 5) if is_enabled("logic_maps") else None,
+        "entry_points": is_enabled("entry_points"),
+        "side_effects_detail": is_enabled("side_effects_detail"),
+        "verify_imports": is_enabled("verify_imports"),
+        "layer_details": is_enabled("layer_details"),
+        "prose": is_enabled("prose"),
+        "signatures": is_enabled("signatures"),
+        "state_mutations": is_enabled("state_mutations"),
+        "verify_commands": is_enabled("verify_commands"),
+        "explain": is_enabled("explain"),
+        "persona_map": is_enabled("persona_map"),
+        "environment_variables": is_enabled("environment_variables"),
+        "target_dir": target_dir,
+    }
+
+
+def apply_disable_flags(config: Dict[str, Any], args) -> Dict[str, Any]:
+    """Apply --no-<section> flags to disable sections in config."""
+    import copy
+    result = copy.deepcopy(config)
+    sections = result.setdefault("sections", {})
+
+    # Map --no-* flags to section keys
+    disable_map = {
+        "no_prose": "prose",
+        "no_mermaid": "mermaid",
+        "no_priority_scores": ["architectural_pillars", "maintenance_hotspots"],
+        "no_critical_classes": "critical_classes",
+        "no_data_models": "data_models",
+        "no_logic_maps": "logic_maps",
+        "no_hazards": "hazards",
+        "no_entry_points": "entry_points",
+        "no_side_effects_detail": "side_effects_detail",
+        "no_layer_details": "layer_details",
+        "no_verify_imports": "verify_imports",
+        "no_signatures": "signatures",
+        "no_state_mutations": "state_mutations",
+        "no_verify_commands": "verify_commands",
+        "no_explain": "explain",
+        "no_persona_map": "persona_map",
+    }
+
+    for flag, section_keys in disable_map.items():
+        if getattr(args, flag, False):
+            if isinstance(section_keys, list):
+                for key in section_keys:
+                    if isinstance(sections.get(key), dict):
+                        sections[key]["enabled"] = False
+                    else:
+                        sections[key] = False
+            else:
+                if isinstance(sections.get(section_keys), dict):
+                    sections[section_keys]["enabled"] = False
+                else:
+                    sections[section_keys] = False
+
+    return result
+
+
 def main():
     """Main entry point."""
+    from config_loader import load_config, generate_config_template, get_active_analyses as config_get_analyses
+
     parser = create_parser()
     args = parser.parse_args()
+
+    # Handle --init-config
+    if args.init_config:
+        print(generate_config_template())
+        sys.exit(0)
 
     # Validate target directory
     if not os.path.isdir(args.target):
         print(f"Error: '{args.target}' is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    # Load presets and determine active analyses
-    presets = load_presets()
-    analyses = get_active_analyses(args, presets)
+    # Load configuration
+    config_path = args.config
+    if args.preset:
+        # Map preset to config file
+        preset_configs = {
+            "minimal": SCRIPT_DIR / "configs" / "minimal.json",
+            "standard": SCRIPT_DIR / "configs" / "standard.json",
+            "full": SCRIPT_DIR / "configs" / "default_config.json",
+        }
+        preset_config = preset_configs.get(args.preset)
+        if preset_config and preset_config.exists():
+            config_path = str(preset_config)
+
+    # Load config (checks .xray.json in target dir if no explicit config)
+    config = load_config(config_path, args.target)
+
+    # Apply --no-<section> flags
+    config = apply_disable_flags(config, args)
+
+    # Get active analyses from config
+    analyses = config_get_analyses(config)
 
     if args.verbose:
         print(f"X-Ray v{VERSION}", file=sys.stderr)
+        print(f"Config: {config_path or 'defaults'}", file=sys.stderr)
 
     # Run analysis
     result = run_analysis(args.target, analyses, args.verbose)
 
-    # Add preset info if used
-    if args.preset or not any(
-        getattr(args, sw.replace("-", "_"), False)
-        for sw in ANALYSIS_SWITCHES
-    ):
-        result["metadata"]["preset"] = args.preset or "full"
+    # Add config info to metadata
+    result["metadata"]["config"] = config_path or "defaults"
+    result["metadata"]["preset"] = args.preset
 
-    # Collect gap feature flags
-    gap_features = {
-        "mermaid": getattr(args, "mermaid", False),
-        "priority_scores": getattr(args, "priority_scores", False),
-        "inline_skeletons": getattr(args, "inline_skeletons", None),
-        "hazards": getattr(args, "hazards", False),
-        "data_models": getattr(args, "data_models", False),
-        "logic_maps": getattr(args, "logic_maps", None),
-        "entry_points": getattr(args, "entry_points", False),
-        "side_effects_detail": getattr(args, "side_effects_detail", False),
-        "verify_imports": getattr(args, "verify_imports", False),
-        "layer_details": getattr(args, "layer_details", False),
-        "prose": getattr(args, "prose", False),
-        "signatures": getattr(args, "signatures", False),
-        "state_mutations": getattr(args, "state_mutations", False),
-        "verify_commands": getattr(args, "verify_commands", False),
-        "explain": getattr(args, "explain", False),
-        "persona_map": getattr(args, "persona_map", False),
-        "target_dir": args.target,
-    }
-
-    # Check if any gap features are enabled
-    has_gap_features = any(
-        v for k, v in gap_features.items()
-        if k != "target_dir" and v
-    )
+    # Convert config to gap_features for formatter compatibility
+    gap_features = config_to_gap_features(config, args.target)
 
     # Output results
     output_path = args.out or "./analysis"
@@ -471,10 +604,10 @@ def main():
     if args.output == "json":
         output_json(result, args.out)
     elif args.output == "markdown":
-        output_markdown(result, args.out, gap_features if has_gap_features else None)
+        output_markdown(result, args.out, gap_features)
     elif args.output == "both":
         output_json(result, output_path)
-        output_markdown(result, output_path, gap_features if has_gap_features else None)
+        output_markdown(result, output_path, gap_features)
 
 
 if __name__ == "__main__":

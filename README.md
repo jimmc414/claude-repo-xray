@@ -2,7 +2,7 @@
 
 Unified AST-based Python codebase analysis for AI coding assistants.
 
-> **Quick start**: `python xray.py /path/to/project --verbose`
+> **Quick start**: `python xray.py /path/to/project` (all sections enabled by default)
 
 ## The Problem
 
@@ -23,101 +23,140 @@ The tool produces a comprehensive reference (~2K-15K tokens depending on preset)
 
 ## Usage
 
-### Basic Usage
+### Basic Usage (v3.0 - Config-Driven)
+
+**All sections are enabled by default.** No need to remember flags - just run:
 
 ```bash
-# Full analysis (default)
 python xray.py /path/to/project
-
-# With preset for smaller output
-python xray.py /path/to/project --preset minimal      # ~2K tokens
-python xray.py /path/to/project --preset standard     # ~8K tokens
-python xray.py /path/to/project --preset full         # ~15K tokens (default)
-
-# With specific analyses only
-python xray.py /path/to/project --skeleton --imports --git
-
-# Output formats
-python xray.py /path/to/project --output json         # JSON only (default)
-python xray.py /path/to/project --output markdown     # Markdown only
-python xray.py /path/to/project --output both         # Both formats
-
-# Write to files
-python xray.py /path/to/project --output both --out ./analysis
-# Creates: analysis.json, analysis.md
-
-# Verbose progress
-python xray.py /path/to/project --verbose
 ```
 
-### Claude-Driven Analysis
+This generates a complete analysis with all 25+ sections. To customize, disable what you don't need:
 
-Paste one of these prompts into Claude Code:
+```bash
+# Disable specific sections
+python xray.py . --no-explain --no-persona-map
 
+# Use a preset for smaller output
+python xray.py . --preset minimal      # ~2K tokens
+python xray.py . --preset standard     # ~8K tokens
+
+# Use a custom config file
+python xray.py . --config my_config.json
+
+# Generate a config template to customize
+python xray.py --init-config > .xray.json
 ```
-Analyze this codebase using xray.py:
-python xray.py . --verbose --preset standard
+
+### Configuration
+
+The tool supports three ways to customize output:
+
+1. **Project config**: Place `.xray.json` in your project root (auto-detected)
+2. **Explicit config**: Use `--config path/to/config.json`
+3. **CLI flags**: Use `--no-<section>` to disable specific sections
+
+Generate a config template:
+
+```bash
+python xray.py --init-config > .xray.json
 ```
 
+Example config (all sections shown, set to `false` to disable):
+
+```json
+{
+  "sections": {
+    "summary": true,
+    "prose": true,
+    "mermaid": true,
+    "architectural_pillars": true,
+    "maintenance_hotspots": true,
+    "complexity_hotspots": true,
+    "critical_classes": {"enabled": true, "count": 10},
+    "data_models": true,
+    "logic_maps": {"enabled": true, "count": 5},
+    "hazards": true,
+    "entry_points": true,
+    "explain": true,
+    "persona_map": true
+  }
+}
 ```
-Generate complete analysis documentation:
-python xray.py . --output both --out ./analysis --verbose
-```
 
-### Analysis Switches
+### Disable Flags
 
-Individual switches override presets:
+Quickly disable sections without a config file:
 
-| Switch | Description |
-|--------|-------------|
-| `--skeleton` | Extract code skeletons (classes, functions, signatures) |
-| `--complexity` | Calculate cyclomatic complexity hotspots |
-| `--git` | Analyze git history (risk, coupling, freshness) |
-| `--imports` | Build import graph, detect orphans, alias tracking |
-| `--calls` | Cross-module call analysis, reverse lookup |
-| `--side-effects` | Detect I/O, network, DB operations |
-| `--tests` | Test coverage and fixture analysis |
-| `--tech-debt` | TODO/FIXME/HACK marker detection |
-| `--types` | Type annotation coverage |
-| `--decorators` | Decorator inventory |
-| `--author-expertise` | Git blame expertise analysis |
-| `--commit-sizes` | Commit size analysis |
+| Flag | Disables |
+|------|----------|
+| `--no-prose` | Natural language summary |
+| `--no-mermaid` | Architecture diagram |
+| `--no-priority-scores` | Architectural Pillars + Maintenance Hotspots |
+| `--no-critical-classes` | Critical class skeletons |
+| `--no-data-models` | Pydantic/dataclass models |
+| `--no-logic-maps` | Complex function logic maps |
+| `--no-hazards` | Large file warnings |
+| `--no-entry-points` | CLI entry points |
+| `--no-explain` | Explanatory blockquotes |
+| `--no-persona-map` | Agent prompts/personas |
 
 ### Presets
 
-| Preset | Includes | Token Estimate |
-|--------|----------|----------------|
-| `minimal` | skeleton, imports | ~2K |
-| `standard` | + complexity, git, calls, side-effects, tests, tech-debt | ~8K |
-| `full` | All signals | ~15K |
+| Preset | Description | Token Estimate |
+|--------|-------------|----------------|
+| `minimal` | Structure + imports only | ~2K |
+| `standard` | Core analysis, balanced output | ~8K |
+| (default) | All sections enabled | ~15-20K |
 
-### Gap Analysis Features (Markdown Enhancements)
-
-These features enhance the markdown output with additional context:
-
-| Switch | Description |
-|--------|-------------|
-| `--mermaid` | Include Mermaid architecture diagram |
-| `--priority-scores` | Show Architectural Pillars (by import weight) + Maintenance Hotspots (by git risk) |
-| `--inline-skeletons N` | Include skeleton code for top N critical classes (with docstrings) |
-| `--hazards` | List large files and directories that may waste context |
-| `--data-models` | Show Pydantic/dataclass/TypedDict models grouped by domain |
-| `--logic-maps N` | Include logic maps for top N complex functions (with heuristics) |
-| `--entry-points` | Highlight CLI entry points and main functions |
-| `--side-effects-detail` | Show detailed side effects per file |
-| `--layer-details` | Show import weight and file details per architectural layer |
-| `--prose` | Generate natural language summary of the codebase |
-| `--verify-imports` | Verify and count internal/external imports |
-| `--explain` | Add explanatory blockquotes before each major section |
-| `--persona-map` | Scan for and display agent prompts/personas |
-
-**Example with gap analysis:**
+### Output Options
 
 ```bash
-python xray.py /path/to/project --output markdown --out ./analysis \
-  --preset full --mermaid --priority-scores --hazards --data-models \
-  --entry-points --prose --inline-skeletons 10 --layer-details --explain
+# Output formats
+python xray.py . --output markdown     # Markdown (default)
+python xray.py . --output json         # JSON
+python xray.py . --output both         # Both formats
+
+# Write to files
+python xray.py . --out ./analysis      # Creates analysis.md (and .json if both)
+
+# Verbose progress
+python xray.py . --verbose
 ```
+
+### Available Sections
+
+All sections are enabled by default. Here's what's included:
+
+| Section | Description |
+|---------|-------------|
+| `summary` | File counts, lines, tokens, type coverage |
+| `prose` | Natural language architecture overview |
+| `mermaid` | Architecture diagram (viewable in GitHub/VS Code) |
+| `architectural_pillars` | Most-imported files (understand these first) |
+| `maintenance_hotspots` | High-risk files by git history |
+| `complexity_hotspots` | Functions with highest cyclomatic complexity |
+| `critical_classes` | Top N classes with skeleton code + docstrings |
+| `data_models` | Pydantic/dataclass/TypedDict models by domain |
+| `logic_maps` | Control flow analysis for complex functions |
+| `import_analysis` | Architectural layers, orphans, circulars |
+| `layer_details` | Import weight per layer |
+| `git_risk` | Risk scores per file |
+| `coupling` | Files that change together |
+| `freshness` | Active/aging/stale/dormant files |
+| `side_effects` | I/O, network, DB operations |
+| `side_effects_detail` | Per-function side effects |
+| `entry_points` | CLI and main() entry points |
+| `environment_variables` | Env vars used in code |
+| `hazards` | Large files that waste context |
+| `test_coverage` | Test files, fixtures, coverage |
+| `tech_debt_markers` | TODO/FIXME/HACK comments |
+| `verify_imports` | Import path verification |
+| `signatures` | Full method signatures |
+| `state_mutations` | Attribute modifications |
+| `verify_commands` | Verification commands |
+| `explain` | Explanatory text before sections |
+| `persona_map` | Agent prompts and personas |
 
 ## Example Output
 
@@ -284,6 +323,7 @@ claude-repo-xray/
 ├── README.md
 ├── lib/                        # Analysis modules
 │   ├── __init__.py
+│   ├── config_loader.py        # Configuration loading and merging
 │   ├── file_discovery.py       # File finding, ignore patterns
 │   ├── ast_analysis.py         # Skeleton, complexity, types, decorators
 │   ├── import_analysis.py      # Dependencies, aliases, distances
@@ -297,7 +337,10 @@ claude-repo-xray/
 │   ├── json_formatter.py       # JSON output
 │   └── markdown_formatter.py   # Markdown output
 ├── configs/                    # Configuration
-│   ├── presets.json            # minimal/standard/full definitions
+│   ├── default_config.json     # Full config (all sections enabled)
+│   ├── minimal.json            # Minimal preset config
+│   ├── standard.json           # Standard preset config
+│   ├── presets.json            # Legacy preset definitions
 │   └── ignore_patterns.json    # Files/dirs to skip
 ├── tests/                      # Unit tests
 │   └── test_gap_features.py    # Tests for gap analysis features
