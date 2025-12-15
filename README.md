@@ -10,20 +10,21 @@ AI coding assistants face a cold start problem: a 200K token context window cann
 
 ## The Solution
 
-A **unified analysis tool** that extracts 28+ signals across 6 dimensions in a single pass:
+A **unified analysis tool** that extracts 37+ signals across 7 dimensions in a single pass:
 
 - **Structure** (4): skeleton, tokens, files, interfaces
-- **Architecture** (4): layers, orphans, circulars, import aliases
+- **Architecture** (5): layers, orphans, circulars, import aliases, data flow
 - **History** (5): risk scores, coupling pairs, freshness, commit sizes, expertise
 - **Complexity** (4): cyclomatic complexity, hotspots, async patterns, type coverage
 - **Behavior** (6): side effects (5 types), cross-module calls, reverse lookup
 - **Coverage** (5): test files, functions, fixtures, tested/untested dirs
+- **Context** (8): CLI args, instance vars, Pydantic validators, env defaults, test idioms, linter rules, hazard patterns, GitHub metadata
 
 The tool produces a comprehensive reference (~2K-15K tokens depending on preset) that helps an AI effectively understand a multimillion token repository within a limited context window.
 
 ## Usage
 
-### Basic Usage (v3.0 - Config-Driven)
+### Basic Usage (v3.1 - Config-Driven)
 
 **All sections are enabled by default.** No need to remember flags - just run:
 
@@ -79,7 +80,16 @@ Example config (all sections shown, set to `false` to disable):
     "hazards": true,
     "entry_points": true,
     "explain": true,
-    "persona_map": true
+    "persona_map": true,
+    "github_about": true,
+    "data_flow": true,
+    "cli_arguments": true,
+    "instance_vars": true,
+    "pydantic_validators": true,
+    "hazard_patterns": true,
+    "env_defaults": true,
+    "test_example": true,
+    "linter_rules": true
   }
 }
 ```
@@ -167,6 +177,179 @@ All sections are enabled by default. Here's what's included:
 | `env_defaults` | Environment variable default values |
 | `test_example` | One-shot test file example ("Rosetta Stone") |
 | `linter_rules` | Linter rules from pyproject.toml/ruff.toml |
+
+---
+
+## v3.1 Features (New)
+
+### 1. GitHub About (`github_about`)
+
+Pulls repository description and topics from GitHub to provide immediate context.
+
+**How it works:**
+1. Tries `gh` CLI first (works for private repos with auth)
+2. Falls back to GitHub API (public repos only)
+3. Shows error message if unavailable
+
+**Output:**
+```markdown
+## Summary
+
+> **About:** AST-based Python codebase analysis for AI coding assistants.
+> **Topics:** python, ast, codebase-analysis, ai-tools
+```
+
+### 2. Data Flow Annotations (`data_flow`)
+
+Adds data flow direction analysis to the Mermaid architecture diagram.
+
+**How it works:**
+- Analyzes cross-module call patterns
+- Determines if system is push-based (higher layers call lower) or pull-based (lower call higher)
+
+**Output:**
+```markdown
+*Data Flow: Foundation → Core → Orchestration (push-based)*
+```
+
+### 3. CLI Arguments Extraction (`cli_arguments`)
+
+Extracts command-line arguments from entry points, supporting argparse, click, and typer.
+
+**Output:**
+```markdown
+### CLI Arguments
+
+**main.py:**
+
+| Argument | Required | Default | Help |
+|----------|----------|---------|------|
+| `--query` | Yes | - | Query to execute |
+| `--config` | No | config.json | Config file path |
+| `--verbose` | No | False | Enable verbose output |
+```
+
+### 4. Instance Variables (`instance_vars`)
+
+Shows `self.x = ...` assignments from `__init__` methods in class skeletons, helping AI understand object state.
+
+**Output:**
+```python
+class DatabaseManager:  # L42
+    def __init__(self, host: str, port: int = 5432)
+
+    # Instance variables:
+    self.connection = None
+    self.pool_size = 10
+    self.timeout = 30.0
+    self._cache = {}
+
+    def connect(self) -> Connection: ...
+```
+
+### 5. Pydantic Validators (`pydantic_validators`)
+
+Extracts `Field()` constraints and `@validator` decorators from Pydantic models.
+
+**Output:**
+```markdown
+**Config** [Pydantic] (config.py)
+
+| Field | Type | Constraints |
+|-------|------|-------------|
+| `max_cost_usd` | float | gt=0, le=1000 |
+| `timeout` | int | ge=1, default=30 |
+| `name` | str | min_length=1 |
+
+*Validators:* `validate_name`, `check_cost`
+```
+
+### 6. Hazard Glob Patterns (`hazard_patterns`)
+
+Derives glob patterns from large file paths, making it easy to exclude them.
+
+**Output:**
+```markdown
+### Patterns to Exclude
+
+*Use these glob patterns to skip large files:*
+
+- `data/artifacts/**` (3 files, ~50K tokens)
+- `logs/*.json` (5 files, ~100K tokens)
+- `cache/*.pkl` (2 files, ~20K tokens)
+```
+
+### 7. Environment Variable Defaults (`env_defaults`)
+
+Extracts default values from `os.getenv()` calls, showing which vars are required vs optional.
+
+**Output:**
+```markdown
+## Environment Variables
+
+| Variable | Default | Required | Location |
+|----------|---------|----------|----------|
+| `DATABASE_URL` | - | **Yes** | config.py:10 |
+| `LOG_LEVEL` | "INFO" | No | logging.py:5 |
+| `TIMEOUT` | 30 | No | client.py:20 |
+```
+
+### 8. Test Example ("Rosetta Stone") (`test_example`)
+
+Includes one complete, representative test file (≤50 lines) showing the project's testing patterns.
+
+**Output:**
+```markdown
+## Testing Idioms
+
+> **How to use:** Use this test as a template for writing new tests.
+
+**Patterns used:** `pytest.fixture`, `unittest.mock.patch`, `pytest.mark`
+
+**Example:** `tests/unit/test_service.py` (45 lines)
+
+\`\`\`python
+import pytest
+from unittest.mock import Mock, patch
+from myapp.service import MyService
+
+@pytest.fixture
+def mock_db():
+    return Mock()
+
+@pytest.mark.unit
+def test_create_record(mock_db):
+    with patch("myapp.service.database", mock_db):
+        svc = MyService()
+        result = svc.create("test")
+        mock_db.insert.assert_called_once()
+        assert result.id is not None
+\`\`\`
+```
+
+### 9. Linter Rules (`linter_rules`)
+
+Extracts linter configuration from pyproject.toml, ruff.toml, or .flake8 to help AI write compliant code.
+
+**Output:**
+```markdown
+## Project Idioms
+
+> **How to use:** Follow these rules to ensure your code passes CI.
+
+**Linter:** ruff (from `pyproject.toml`)
+
+| Rule | Value |
+|------|-------|
+| line_length | 100 |
+| select | E, W, F, I, B |
+| ignore | E501, B008 |
+
+**Banned patterns:**
+- `print()` - use logging instead
+```
+
+---
 
 ## Example Output
 
@@ -355,11 +538,13 @@ claude-repo-xray/
 ├── tests/                      # Unit tests
 │   └── test_gap_features.py    # Tests for gap analysis features
 ├── examples/                   # Example outputs
-│   ├── WARM_START.md           # Legacy example
-│   └── HOT_START.md            # Legacy example
+│   ├── repo_xray_output_v31.md # v3.1 output for this repo
+│   └── kosmos_xray_output_v31.md # v3.1 output for kosmos project
 ├── archived/                   # Legacy scripts (for reference)
 │   ├── generate_warm_start.py  # Old Phase 1 generator
 │   └── generate_hot_start.py   # Old Phase 2 generator
+├── plans/                      # Implementation plans
+│   └── deep-leaping-fern.md    # v3.1 feature plan
 └── .claude/                    # Claude skill integration
     └── skills/
         └── repo-xray/
