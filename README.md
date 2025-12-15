@@ -157,6 +157,16 @@ All sections are enabled by default. Here's what's included:
 | `verify_commands` | Verification commands |
 | `explain` | Explanatory text before sections |
 | `persona_map` | Agent prompts and personas |
+| **v3.1 Features** | |
+| `github_about` | GitHub repo description and topics |
+| `data_flow` | Data flow direction annotation in Mermaid |
+| `cli_arguments` | CLI argument extraction (argparse/click/typer) |
+| `instance_vars` | Instance variables from `__init__` in class skeletons |
+| `pydantic_validators` | Pydantic Field() constraints and validators |
+| `hazard_patterns` | Glob patterns for hazard files |
+| `env_defaults` | Environment variable default values |
+| `test_example` | One-shot test file example ("Rosetta Stone") |
+| `linter_rules` | Linter rules from pyproject.toml/ruff.toml |
 
 ## Example Output
 
@@ -165,7 +175,7 @@ All sections are enabled by default. Here's what's included:
 ```json
 {
   "metadata": {
-    "tool_version": "3.0.0",
+    "tool_version": "3.1.0",
     "generated_at": "2025-12-15T...",
     "target_directory": "/path/to/project",
     "config": "defaults",

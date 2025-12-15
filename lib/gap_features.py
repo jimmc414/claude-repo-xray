@@ -18,11 +18,138 @@ Features:
 """
 
 import ast
+import json
 import os
 import re
+import subprocess
+import urllib.request
+import urllib.error
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+
+# =============================================================================
+# GitHub About Section
+# =============================================================================
+
+def _parse_git_remote_url(target_dir: str) -> Optional[Tuple[str, str]]:
+    """
+    Parse the GitHub owner/repo from .git/config remote URL.
+
+    Supports formats:
+    - git@github.com:owner/repo.git
+    - https://github.com/owner/repo.git
+    - https://github.com/owner/repo
+
+    Returns (owner, repo) tuple or None if not a GitHub repo.
+    """
+    git_config = Path(target_dir) / ".git" / "config"
+    if not git_config.exists():
+        return None
+
+    try:
+        with open(git_config, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Find remote "origin" URL
+        import re
+        # Match [remote "origin"] section
+        match = re.search(r'\[remote "origin"\][^\[]*url\s*=\s*([^\n]+)', content)
+        if not match:
+            return None
+
+        url = match.group(1).strip()
+
+        # Parse SSH format: git@github.com:owner/repo.git
+        ssh_match = re.match(r'git@github\.com:([^/]+)/(.+?)(?:\.git)?$', url)
+        if ssh_match:
+            return (ssh_match.group(1), ssh_match.group(2))
+
+        # Parse HTTPS format: https://github.com/owner/repo.git
+        https_match = re.match(r'https?://github\.com/([^/]+)/(.+?)(?:\.git)?$', url)
+        if https_match:
+            return (https_match.group(1), https_match.group(2))
+
+    except (IOError, OSError):
+        pass
+
+    return None
+
+
+def get_github_about(target_dir: str) -> Dict[str, Any]:
+    """
+    Extract GitHub repo description and topics.
+
+    Strategy:
+    1. Try gh CLI first (works for private repos with auth)
+    2. Fall back to GitHub API (public repos only)
+    3. Return error message if both fail
+
+    Returns dict with:
+    - description: str - repo description
+    - topics: list - repo topics/tags
+    - error: str - error message if failed
+    """
+    # Method 1: Try gh CLI (handles auth automatically)
+    try:
+        result = subprocess.run(
+            ["gh", "repo", "view", "--json", "description,repositoryTopics"],
+            cwd=target_dir,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            topics = []
+            # repositoryTopics is a list of {"name": "topic"} objects
+            if "repositoryTopics" in data:
+                for topic in data.get("repositoryTopics", []):
+                    if isinstance(topic, dict) and "name" in topic:
+                        topics.append(topic["name"])
+                    elif isinstance(topic, str):
+                        topics.append(topic)
+            return {
+                "description": data.get("description", ""),
+                "topics": topics,
+                "source": "gh-cli"
+            }
+    except FileNotFoundError:
+        pass  # gh not installed
+    except subprocess.TimeoutExpired:
+        pass  # gh timed out
+    except (json.JSONDecodeError, KeyError):
+        pass  # Invalid response
+
+    # Method 2: Fall back to GitHub API
+    repo_info = _parse_git_remote_url(target_dir)
+    if not repo_info:
+        return {"error": "Not a GitHub repository"}
+
+    owner, repo = repo_info
+
+    try:
+        url = f"https://api.github.com/repos/{owner}/{repo}"
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "repo-xray"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            return {
+                "description": data.get("description", ""),
+                "topics": data.get("topics", []),
+                "source": "github-api"
+            }
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {"error": "Private repository or not found (requires gh CLI with auth)"}
+        return {"error": f"GitHub API error: {e.code}"}
+    except urllib.error.URLError:
+        return {"error": "Unable to reach GitHub API"}
+    except Exception as e:
+        return {"error": f"Failed to fetch repo info: {str(e)}"}
 
 
 # =============================================================================
@@ -335,11 +462,94 @@ def calculate_priority_scores(results: Dict[str, Any]) -> List[Dict[str, Any]]:
 # Mermaid Diagram Generation
 # =============================================================================
 
-def generate_mermaid_diagram(import_data: Dict[str, Any], max_nodes: int = 30) -> str:
+def _infer_data_flow(call_data: Dict[str, Any], layers: Dict[str, List]) -> str:
+    """
+    Infer data flow direction from call analysis.
+
+    Analyzes cross-module calls to determine if the system is:
+    - Push-based: Higher layers call lower layers (orchestration → core → foundation)
+    - Pull-based: Lower layers call higher layers (foundation → core → orchestration)
+    - Bidirectional: Mixed call patterns
+
+    Returns a string describing the data flow pattern.
+    """
+    if not call_data:
+        return ""
+
+    # Get module sets for each layer
+    def get_layer_modules(layer_name: str) -> Set[str]:
+        mods = layers.get(layer_name, [])
+        result = set()
+        for mod in mods:
+            if isinstance(mod, dict):
+                mod = mod.get("module", mod.get("name", str(mod)))
+            result.add(mod)
+            # Also add short name
+            if "." in mod:
+                result.add(mod.split(".")[-1])
+        return result
+
+    orch_mods = get_layer_modules("orchestration")
+    core_mods = get_layer_modules("core")
+    found_mods = get_layer_modules("foundation")
+
+    # Count calls between layers
+    cross_module = call_data.get("cross_module", {})
+
+    orch_to_core = 0
+    core_to_orch = 0
+    core_to_found = 0
+    found_to_core = 0
+
+    for caller, callees in cross_module.items():
+        caller_short = caller.split(".")[-1] if "." in caller else caller
+
+        for callee_info in callees:
+            callee = callee_info.get("callee", "") if isinstance(callee_info, dict) else str(callee_info)
+            callee_short = callee.split(".")[-1] if "." in callee else callee
+
+            # Orchestration → Core
+            if (caller in orch_mods or caller_short in orch_mods) and \
+               (callee in core_mods or callee_short in core_mods):
+                orch_to_core += 1
+            # Core → Orchestration
+            elif (caller in core_mods or caller_short in core_mods) and \
+                 (callee in orch_mods or callee_short in orch_mods):
+                core_to_orch += 1
+            # Core → Foundation
+            elif (caller in core_mods or caller_short in core_mods) and \
+                 (callee in found_mods or callee_short in found_mods):
+                core_to_found += 1
+            # Foundation → Core
+            elif (caller in found_mods or caller_short in found_mods) and \
+                 (callee in core_mods or callee_short in core_mods):
+                found_to_core += 1
+
+    # Determine flow direction
+    downward = orch_to_core + core_to_found
+    upward = core_to_orch + found_to_core
+
+    if downward == 0 and upward == 0:
+        return ""
+
+    if downward > upward * 2:
+        return "Foundation → Core → Orchestration (push-based)"
+    elif upward > downward * 2:
+        return "Orchestration → Core → Foundation (pull-based)"
+    else:
+        return "Bidirectional (mixed data flow)"
+
+
+def generate_mermaid_diagram(
+    import_data: Dict[str, Any],
+    call_data: Optional[Dict[str, Any]] = None,
+    max_nodes: int = 30
+) -> str:
     """
     Generate a Mermaid architecture diagram from import analysis.
 
     Creates subgraphs for ORCHESTRATION, CORE, and FOUNDATION layers.
+    Optionally includes data flow annotations based on call analysis.
     """
     layers = import_data.get("layers", {})
     graph = import_data.get("graph", {})
@@ -404,6 +614,13 @@ def generate_mermaid_diagram(import_data: Dict[str, Any], max_nodes: int = 30) -
             lines.append(f"    {a_id} <-.-> {b_id}")
 
     lines.append("```")
+
+    # Add data flow annotation if call data is available
+    if call_data:
+        data_flow = _infer_data_flow(call_data, layers)
+        if data_flow:
+            lines.append("")
+            lines.append(f"*Data Flow: {data_flow}*")
 
     return "\n".join(lines)
 
@@ -473,6 +690,149 @@ DATA_MODEL_BASES = {
 }
 
 DATA_MODEL_DECORATORS = {"dataclass", "dataclasses.dataclass", "attrs.define", "attr.s"}
+
+# Pydantic Field constraint keywords
+FIELD_CONSTRAINTS = {
+    "gt", "ge", "lt", "le",  # Numeric constraints
+    "min_length", "max_length",  # String constraints
+    "regex", "pattern",  # Regex validation
+    "strict", "frozen",  # Behavior modifiers
+    "default", "default_factory",  # Defaults
+    "alias", "validation_alias", "serialization_alias",  # Aliases
+    "title", "description",  # Documentation
+    "examples",  # Examples
+}
+
+
+def _extract_field_constraints(filepath: str, class_name: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Extract Pydantic Field() constraints for a class.
+
+    Looks for patterns like:
+        field_name: type = Field(..., gt=0, le=100)
+
+    Returns dict mapping field names to their constraints.
+    """
+    constraints = {}
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            source = f.read()
+
+        tree = ast.parse(source)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                for item in node.body:
+                    # Look for annotated assignments: field: type = Field(...)
+                    if isinstance(item, ast.AnnAssign):
+                        if isinstance(item.target, ast.Name):
+                            field_name = item.target.id
+
+                            # Get the type annotation
+                            type_str = None
+                            if item.annotation:
+                                if isinstance(item.annotation, ast.Name):
+                                    type_str = item.annotation.id
+                                elif isinstance(item.annotation, ast.Subscript):
+                                    try:
+                                        type_str = ast.unparse(item.annotation)
+                                    except:
+                                        type_str = "..."
+
+                            # Check if value is a Field() call
+                            if item.value and isinstance(item.value, ast.Call):
+                                func = item.value.func
+                                # Check for Field() or pydantic.Field()
+                                is_field = False
+                                if isinstance(func, ast.Name) and func.id == "Field":
+                                    is_field = True
+                                elif isinstance(func, ast.Attribute) and func.attr == "Field":
+                                    is_field = True
+
+                                if is_field:
+                                    field_constraints = {"type": type_str}
+
+                                    # Extract constraint keyword arguments
+                                    for kw in item.value.keywords:
+                                        if kw.arg in FIELD_CONSTRAINTS:
+                                            if isinstance(kw.value, ast.Constant):
+                                                field_constraints[kw.arg] = kw.value.value
+                                            elif isinstance(kw.value, ast.Name):
+                                                field_constraints[kw.arg] = kw.value.id
+                                            elif isinstance(kw.value, ast.Call):
+                                                # e.g., default_factory=list
+                                                if isinstance(kw.value.func, ast.Name):
+                                                    field_constraints[kw.arg] = f"{kw.value.func.id}()"
+
+                                    # Only add if we found any constraints
+                                    if len(field_constraints) > 1:  # More than just 'type'
+                                        constraints[field_name] = field_constraints
+
+                break  # Found the class, stop searching
+
+    except (IOError, OSError, SyntaxError):
+        pass
+
+    return constraints
+
+
+def _extract_validators(filepath: str, class_name: str) -> List[Dict[str, Any]]:
+    """
+    Extract @validator/@field_validator decorators for a class.
+
+    Returns list of validator definitions.
+    """
+    validators = []
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            source = f.read()
+
+        tree = ast.parse(source)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef):
+                        for decorator in item.decorator_list:
+                            # Check for @validator or @field_validator
+                            dec_name = None
+                            fields = []
+
+                            if isinstance(decorator, ast.Call):
+                                func = decorator.func
+                                if isinstance(func, ast.Name):
+                                    if func.id in ("validator", "field_validator"):
+                                        dec_name = func.id
+                                elif isinstance(func, ast.Attribute):
+                                    if func.attr in ("validator", "field_validator"):
+                                        dec_name = func.attr
+
+                                # Get validated field names from positional args
+                                if dec_name:
+                                    for arg in decorator.args:
+                                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                                            fields.append(arg.value)
+
+                            elif isinstance(decorator, ast.Name):
+                                if decorator.id in ("validator", "field_validator"):
+                                    dec_name = decorator.id
+
+                            if dec_name:
+                                validators.append({
+                                    "name": item.name,
+                                    "type": dec_name,
+                                    "fields": fields,
+                                    "line": item.lineno
+                                })
+
+                break  # Found the class, stop searching
+
+    except (IOError, OSError, SyntaxError):
+        pass
+
+    return validators
 
 
 def extract_data_models(results: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -544,6 +904,13 @@ def extract_data_models(results: Dict[str, Any]) -> List[Dict[str, Any]]:
                     else:
                         domain = "Other"
 
+                # Extract Pydantic-specific features if applicable
+                field_constraints = {}
+                validators = []
+                if model_type == "Pydantic":
+                    field_constraints = _extract_field_constraints(filepath, cls_name)
+                    validators = _extract_validators(filepath, cls_name)
+
                 models.append({
                     "name": cls_name,
                     "file": filepath,
@@ -551,6 +918,8 @@ def extract_data_models(results: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "type": model_type,
                     "bases": bases,
                     "fields": cls.get("fields", []),
+                    "field_constraints": field_constraints,
+                    "validators": validators,
                     "methods": [m.get("name") for m in cls.get("methods", [])],
                     "domain": domain
                 })
@@ -619,6 +988,226 @@ def detect_entry_points(results: Dict[str, Any], target_dir: str = ".") -> List[
                 })
 
     return entry_points
+
+
+# =============================================================================
+# CLI Arguments Extraction
+# =============================================================================
+
+def _extract_argparse_args(tree: ast.AST) -> List[Dict[str, Any]]:
+    """
+    Extract arguments from argparse.ArgumentParser.add_argument() calls.
+
+    Returns list of argument definitions.
+    """
+    arguments = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            # Look for .add_argument() calls
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "add_argument":
+                arg_info = {"source": "argparse"}
+
+                # Get argument name from first positional arg
+                if node.args:
+                    first_arg = node.args[0]
+                    if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
+                        arg_info["name"] = first_arg.value
+
+                # Extract keyword arguments
+                for kw in node.keywords:
+                    if kw.arg == "help":
+                        if isinstance(kw.value, ast.Constant):
+                            arg_info["help"] = kw.value.value
+                    elif kw.arg == "required":
+                        if isinstance(kw.value, ast.Constant):
+                            arg_info["required"] = kw.value.value
+                    elif kw.arg == "default":
+                        arg_info["default"] = _get_env_default_value(kw.value)
+                    elif kw.arg == "type":
+                        if isinstance(kw.value, ast.Name):
+                            arg_info["type"] = kw.value.id
+
+                if "name" in arg_info:
+                    # Determine if required (positional args or explicit required=True)
+                    if "required" not in arg_info:
+                        name = arg_info["name"]
+                        arg_info["required"] = not name.startswith("-")
+                    arguments.append(arg_info)
+
+    return arguments
+
+
+def _extract_click_args(tree: ast.AST) -> List[Dict[str, Any]]:
+    """
+    Extract arguments from @click.option() and @click.argument() decorators.
+
+    Returns list of argument definitions.
+    """
+    arguments = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for decorator in node.decorator_list:
+                if isinstance(decorator, ast.Call):
+                    func = decorator.func
+                    # Check for click.option or click.argument
+                    if isinstance(func, ast.Attribute):
+                        if func.attr in ("option", "argument"):
+                            is_option = func.attr == "option"
+                            arg_info = {
+                                "source": "click",
+                                "required": not is_option  # arguments are required by default
+                            }
+
+                            # Get name from first positional arg
+                            if decorator.args:
+                                first_arg = decorator.args[0]
+                                if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
+                                    arg_info["name"] = first_arg.value
+
+                            # Extract keyword arguments
+                            for kw in decorator.keywords:
+                                if kw.arg == "help":
+                                    if isinstance(kw.value, ast.Constant):
+                                        arg_info["help"] = kw.value.value
+                                elif kw.arg == "required":
+                                    if isinstance(kw.value, ast.Constant):
+                                        arg_info["required"] = kw.value.value
+                                elif kw.arg == "default":
+                                    arg_info["default"] = _get_env_default_value(kw.value)
+                                elif kw.arg == "type":
+                                    if isinstance(kw.value, ast.Name):
+                                        arg_info["type"] = kw.value.id
+
+                            if "name" in arg_info:
+                                arguments.append(arg_info)
+
+    return arguments
+
+
+def _extract_typer_args(tree: ast.AST) -> List[Dict[str, Any]]:
+    """
+    Extract arguments from typer.Option() and typer.Argument() in function signatures.
+
+    Example: def main(name: str = typer.Argument(...), verbose: bool = typer.Option(False))
+
+    Returns list of argument definitions.
+    """
+    arguments = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Check function parameters for typer.Option/typer.Argument defaults
+            for arg in node.args.args + node.args.kwonlyargs:
+                # Skip 'self' and 'cls'
+                if arg.arg in ("self", "cls"):
+                    continue
+
+                # Check for typer.Option() or typer.Argument() in defaults
+                # We need to find the default for this argument
+                pass  # Defaults are paired with args differently
+
+            # Match defaults to arguments
+            all_args = node.args.args + node.args.kwonlyargs
+            defaults = []
+
+            # Regular defaults (right-aligned with args)
+            num_required = len(node.args.args) - len(node.args.defaults)
+            for i, arg in enumerate(node.args.args):
+                if i >= num_required:
+                    defaults.append((arg, node.args.defaults[i - num_required]))
+                else:
+                    defaults.append((arg, None))
+
+            # Keyword-only defaults
+            for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults):
+                defaults.append((arg, default))
+
+            for arg, default in defaults:
+                if arg.arg in ("self", "cls"):
+                    continue
+
+                if default and isinstance(default, ast.Call):
+                    # Check if it's typer.Option() or typer.Argument()
+                    func = default.func
+                    if isinstance(func, ast.Attribute):
+                        if func.attr in ("Option", "Argument"):
+                            is_option = func.attr == "Option"
+                            arg_info = {
+                                "source": "typer",
+                                "name": f"--{arg.arg.replace('_', '-')}" if is_option else arg.arg,
+                                "required": not is_option
+                            }
+
+                            # Get type annotation
+                            if arg.annotation:
+                                if isinstance(arg.annotation, ast.Name):
+                                    arg_info["type"] = arg.annotation.id
+                                elif isinstance(arg.annotation, ast.Subscript):
+                                    try:
+                                        arg_info["type"] = ast.unparse(arg.annotation)
+                                    except:
+                                        pass
+
+                            # Extract keyword arguments from typer call
+                            for kw in default.keywords:
+                                if kw.arg == "help":
+                                    if isinstance(kw.value, ast.Constant):
+                                        arg_info["help"] = kw.value.value
+
+                            # First positional arg is often the default value
+                            if default.args and is_option:
+                                arg_info["default"] = _get_env_default_value(default.args[0])
+
+                            arguments.append(arg_info)
+
+    return arguments
+
+
+def extract_cli_arguments(entry_points: List[Dict[str, Any]], structure: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Extract CLI arguments from entry point files.
+
+    Supports:
+    - argparse: ArgumentParser.add_argument()
+    - click: @click.option(), @click.argument()
+    - typer: typer.Option(), typer.Argument()
+
+    Returns list of entry points with their CLI arguments.
+    """
+    results = []
+
+    for entry in entry_points:
+        filepath = entry.get("file", "")
+        if not filepath:
+            continue
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                source = f.read()
+
+            tree = ast.parse(source)
+
+            # Extract arguments from all supported frameworks
+            argparse_args = _extract_argparse_args(tree)
+            click_args = _extract_click_args(tree)
+            typer_args = _extract_typer_args(tree)
+
+            all_args = argparse_args + click_args + typer_args
+
+            if all_args:
+                results.append({
+                    "file": filepath,
+                    "entry_point": entry.get("entry_point", ""),
+                    "usage": entry.get("usage", ""),
+                    "arguments": all_args
+                })
+
+        except (IOError, OSError, SyntaxError):
+            continue
+
+    return results
 
 
 # =============================================================================
@@ -1283,6 +1872,103 @@ def _extract_init_signature(filepath: str, class_name: str) -> Optional[str]:
     return None
 
 
+def _get_instance_var_repr(node: ast.AST) -> str:
+    """Get string representation of an instance variable value."""
+    if isinstance(node, ast.Constant):
+        if node.value is None:
+            return "None"
+        if isinstance(node.value, str):
+            if len(node.value) > 25:
+                return f'"{node.value[:22]}..."'
+            return f'"{node.value}"'
+        return repr(node.value)
+    elif isinstance(node, ast.Name):
+        return node.id
+    elif isinstance(node, ast.List):
+        if not node.elts:
+            return "[]"
+        return "[...]"
+    elif isinstance(node, ast.Dict):
+        if not node.keys:
+            return "{}"
+        return "{...}"
+    elif isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name):
+            return f"{node.func.id}(...)"
+        elif isinstance(node.func, ast.Attribute):
+            return f"{node.func.attr}(...)"
+        return "..."
+    elif isinstance(node, ast.Attribute):
+        # e.g., self.other_var or config.value
+        parts = []
+        current = node
+        while isinstance(current, ast.Attribute):
+            parts.append(current.attr)
+            current = current.value
+        if isinstance(current, ast.Name):
+            parts.append(current.id)
+        return ".".join(reversed(parts))
+    return "..."
+
+
+def _extract_instance_vars(filepath: str, class_name: str) -> List[Dict[str, Any]]:
+    """
+    Extract instance variables (self.x = y) from __init__ method.
+
+    Returns list of instance variables with their assigned values.
+    """
+    instance_vars = []
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            source = f.read()
+
+        tree = ast.parse(source)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                # Find __init__ method
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == "__init__":
+                        # Walk through __init__ body to find self.x = y assignments
+                        for stmt in ast.walk(item):
+                            if isinstance(stmt, ast.Assign):
+                                for target in stmt.targets:
+                                    if isinstance(target, ast.Attribute):
+                                        if isinstance(target.value, ast.Name) and target.value.id == "self":
+                                            var_name = target.attr
+                                            var_value = _get_instance_var_repr(stmt.value)
+                                            instance_vars.append({
+                                                "name": var_name,
+                                                "value": var_value,
+                                                "line": stmt.lineno
+                                            })
+                            # Also handle augmented assignments (self.x += y) - rare but possible
+                            elif isinstance(stmt, ast.AugAssign):
+                                if isinstance(stmt.target, ast.Attribute):
+                                    if isinstance(stmt.target.value, ast.Name) and stmt.target.value.id == "self":
+                                        var_name = stmt.target.attr
+                                        instance_vars.append({
+                                            "name": var_name,
+                                            "value": "...",  # Can't determine initial value
+                                            "line": stmt.lineno
+                                        })
+                        break  # Found __init__, stop searching
+                break  # Found class, stop searching
+
+    except (IOError, OSError, SyntaxError):
+        pass
+
+    # Deduplicate by name (keep first occurrence)
+    seen = set()
+    unique_vars = []
+    for var in instance_vars:
+        if var["name"] not in seen:
+            seen.add(var["name"])
+            unique_vars.append(var)
+
+    return unique_vars
+
+
 def format_inline_skeletons(results: Dict[str, Any], n: int = 10) -> List[Dict[str, Any]]:
     """
     Get top N critical classes for inline skeleton display.
@@ -1378,6 +2064,9 @@ def format_inline_skeletons(results: Dict[str, Any], n: int = 10) -> List[Dict[s
             # Extract __init__ signature
             init_sig = _extract_init_signature(filepath, cls_name)
 
+            # Extract instance variables from __init__
+            instance_vars = _extract_instance_vars(filepath, cls_name)
+
             all_classes.append({
                 "name": cls_name,
                 "file": filepath,
@@ -1389,7 +2078,8 @@ def format_inline_skeletons(results: Dict[str, Any], n: int = 10) -> List[Dict[s
                 "method_count": method_count,
                 "importance_score": round(score, 2),
                 "docstring": docstring,
-                "init_signature": init_sig
+                "init_signature": init_sig,
+                "instance_vars": instance_vars
             })
 
     # Sort by importance score descending
@@ -1521,90 +2211,524 @@ def get_external_dependencies(results: Dict[str, Any]) -> List[str]:
 
 
 # =============================================================================
-# Environment Variables
+# Environment Variables (AST-based with defaults)
 # =============================================================================
+
+def _get_string_value(node: ast.AST) -> Optional[str]:
+    """Extract string value from an AST node."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _get_env_default_value(node: ast.AST) -> Optional[str]:
+    """Get string representation of env var default value."""
+    if isinstance(node, ast.Constant):
+        if node.value is None:
+            return "None"
+        if isinstance(node.value, str):
+            if len(node.value) > 30:
+                return f'"{node.value[:27]}..."'
+            return f'"{node.value}"'
+        return repr(node.value)
+    elif isinstance(node, ast.Name):
+        return node.id
+    elif isinstance(node, ast.Call):
+        func_name = node.func.id if isinstance(node.func, ast.Name) else "..."
+        return f"{func_name}(...)"
+    return "..."
+
+
+def _is_getenv_call(node: ast.Call) -> bool:
+    """Check if a Call node is os.getenv() or os.environ.get()."""
+    # os.getenv(...)
+    if isinstance(node.func, ast.Attribute):
+        if node.func.attr == "getenv":
+            if isinstance(node.func.value, ast.Name) and node.func.value.id == "os":
+                return True
+        # os.environ.get(...)
+        if node.func.attr == "get":
+            if isinstance(node.func.value, ast.Attribute):
+                if node.func.value.attr == "environ":
+                    if isinstance(node.func.value.value, ast.Name):
+                        if node.func.value.value.id == "os":
+                            return True
+            # environ.get(...) - for `from os import environ`
+            if isinstance(node.func.value, ast.Name) and node.func.value.id == "environ":
+                return True
+    return False
+
+
+def _extract_env_vars_from_file_ast(filepath: str) -> List[Dict[str, Any]]:
+    """
+    Extract environment variables from a file using AST parsing.
+
+    Captures:
+    - Variable name
+    - Default value (if any)
+    - Whether it's required (no default)
+    - Line number
+    """
+    env_vars = []
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            source = f.read()
+
+        tree = ast.parse(source)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and _is_getenv_call(node):
+                if node.args:
+                    var_name = _get_string_value(node.args[0])
+                    if var_name:
+                        default = None
+                        # Check for second positional argument (default value)
+                        if len(node.args) > 1:
+                            default = _get_env_default_value(node.args[1])
+                        # Check for 'default' keyword argument
+                        else:
+                            for kw in node.keywords:
+                                if kw.arg == "default":
+                                    default = _get_env_default_value(kw.value)
+                                    break
+
+                        env_vars.append({
+                            "variable": var_name,
+                            "default": default,
+                            "required": default is None,
+                            "file": filepath,
+                            "line": node.lineno
+                        })
+
+            # Also detect os.environ["VAR"] and os.environ["VAR"] = ...
+            elif isinstance(node, ast.Subscript):
+                if isinstance(node.value, ast.Attribute):
+                    if node.value.attr == "environ":
+                        var_name = _get_string_value(node.slice)
+                        if var_name:
+                            env_vars.append({
+                                "variable": var_name,
+                                "default": None,
+                                "required": True,  # Direct access is always required
+                                "file": filepath,
+                                "line": node.lineno
+                            })
+
+    except (IOError, OSError, SyntaxError):
+        pass
+
+    return env_vars
+
 
 def get_environment_variables(results: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Extract environment variables from side effects analysis and source scan.
+    Extract environment variables using AST parsing with default values.
 
-    Combines:
-    1. ENV side effects data (quick extraction from known locations)
-    2. Full source scan of key files for comprehensive coverage
+    Uses AST analysis to capture:
+    - Variable names from os.getenv(), os.environ.get(), os.environ[]
+    - Default values (second argument to getenv/get)
+    - Whether variable is required (no default = required)
 
-    Returns list of environment variables with file locations.
+    Returns list of environment variables with file locations and defaults.
     """
     env_vars = []
-    seen = set()
+    seen = set()  # Track (var_name, file) to avoid duplicates
 
-    # Patterns to match env var access
-    env_patterns = [
-        re.compile(r'os\.environ\.get\s*\(\s*["\']([^"\']+)["\']'),
-        re.compile(r'os\.environ\s*\[\s*["\']([^"\']+)["\']'),
-        re.compile(r'os\.getenv\s*\(\s*["\']([^"\']+)["\']'),
-        re.compile(r'environ\.get\s*\(\s*["\']([^"\']+)["\']'),
-        re.compile(r'environ\s*\[\s*["\']([^"\']+)["\']'),
-    ]
-
-    def extract_from_file(filepath: str) -> None:
-        """Extract env vars from a single file."""
-        try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                for line_num, line_content in enumerate(f, 1):
-                    for pattern in env_patterns:
-                        for match in pattern.finditer(line_content):
-                            var_name = match.group(1)
-                            if var_name and var_name not in seen:
-                                seen.add(var_name)
-                                env_vars.append({
-                                    "variable": var_name,
-                                    "file": filepath,
-                                    "line": line_num
-                                })
-        except (IOError, OSError):
-            pass
-
-    # Method 1: Extract from ENV side effects (known locations)
-    side_effects = results.get("side_effects", {})
-    by_type = side_effects.get("by_type", {})
-
-    env_effects = []
-    for key, effects in by_type.items():
-        if key.lower() == "env":
-            env_effects = effects
-            break
-
-    # Get unique files from side effects
-    effect_files = set()
-    for effect in env_effects:
-        filepath = effect.get("file", "")
-        if filepath:
-            effect_files.add(filepath)
-
-    # Scan files with known ENV side effects
-    for filepath in effect_files:
-        extract_from_file(filepath)
-
-    # Method 2: Scan key configuration/setup files for comprehensive coverage
     structure = results.get("structure", {})
     files = structure.get("files", {})
 
-    # Prioritize config files, setup files, and files with "config" or "env" in name
-    key_files = []
+    # Prioritize config files, then scan all files
+    priority_files = []
+    other_files = []
+
     for filepath in files.keys():
         fname = Path(filepath).name.lower()
         if any(kw in fname for kw in ["config", "env", "settings", "setup", "provider"]):
-            key_files.append(filepath)
+            priority_files.append(filepath)
+        else:
+            other_files.append(filepath)
 
-    # Scan up to 50 key files (avoid scanning entire codebase)
-    for filepath in key_files[:50]:
-        if filepath not in effect_files:  # Don't re-scan
-            extract_from_file(filepath)
+    # Scan priority files first, then others
+    all_files = priority_files + other_files
 
-    # Sort by variable name
-    env_vars.sort(key=lambda x: x["variable"])
+    for filepath in all_files:
+        file_env_vars = _extract_env_vars_from_file_ast(filepath)
+        for env_var in file_env_vars:
+            key = (env_var["variable"], env_var["file"])
+            if key not in seen:
+                seen.add(key)
+                env_vars.append(env_var)
 
-    return env_vars
+    # Deduplicate by variable name (keep first occurrence with most info)
+    final_vars = {}
+    for ev in env_vars:
+        var_name = ev["variable"]
+        if var_name not in final_vars:
+            final_vars[var_name] = ev
+        else:
+            # Keep the one with a default value if available
+            existing = final_vars[var_name]
+            if existing["default"] is None and ev["default"] is not None:
+                final_vars[var_name] = ev
+
+    # Sort by required (required first), then by name
+    result = sorted(final_vars.values(), key=lambda x: (not x["required"], x["variable"]))
+
+    return result
+
+
+# =============================================================================
+# Linter Rules Extraction
+# =============================================================================
+
+def _parse_toml_value(value: str) -> Any:
+    """
+    Parse a simple TOML value.
+
+    Handles strings, integers, booleans, and simple lists.
+    """
+    value = value.strip()
+
+    # Boolean
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+
+    # Integer
+    if value.isdigit() or (value.startswith("-") and value[1:].isdigit()):
+        return int(value)
+
+    # String (with quotes)
+    if (value.startswith('"') and value.endswith('"')) or \
+       (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+
+    # Simple list
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        if not inner:
+            return []
+        items = []
+        for item in inner.split(","):
+            item = item.strip()
+            if (item.startswith('"') and item.endswith('"')) or \
+               (item.startswith("'") and item.endswith("'")):
+                items.append(item[1:-1])
+            else:
+                items.append(item)
+        return items
+
+    return value
+
+
+def _parse_simple_toml(content: str) -> Dict[str, Any]:
+    """
+    Parse a simple TOML file without external dependencies.
+
+    Only handles basic key-value pairs and sections.
+    For complex TOML, use tomllib on Python 3.11+.
+    """
+    result = {}
+    current_section = None
+    current_section_data = {}
+
+    for line in content.split("\n"):
+        line = line.strip()
+
+        # Skip empty lines and comments
+        if not line or line.startswith("#"):
+            continue
+
+        # Section header
+        if line.startswith("[") and line.endswith("]"):
+            # Save previous section
+            if current_section:
+                result[current_section] = current_section_data
+
+            # Start new section
+            section_name = line[1:-1].strip()
+            # Handle nested sections like [tool.ruff]
+            current_section = section_name
+            current_section_data = {}
+            continue
+
+        # Key-value pair
+        if "=" in line:
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = _parse_toml_value(value)
+
+            if current_section:
+                current_section_data[key] = value
+            else:
+                result[key] = value
+
+    # Save last section
+    if current_section:
+        result[current_section] = current_section_data
+
+    return result
+
+
+def extract_linter_rules(target_dir: str) -> Dict[str, Any]:
+    """
+    Extract linter rules from project configuration files.
+
+    Checks for:
+    - pyproject.toml (ruff, black, isort settings)
+    - ruff.toml
+    - .flake8
+    - setup.cfg
+
+    Returns dict with:
+    - linter: str - detected linter name
+    - config_file: str - source config file
+    - rules: dict - extracted rules
+    - banned_imports: list - imports that should be avoided
+    """
+    target_path = Path(target_dir)
+    result = {
+        "linter": None,
+        "config_file": None,
+        "rules": {},
+        "banned_imports": [],
+        "required_imports": []
+    }
+
+    # Try pyproject.toml first (most common)
+    pyproject = target_path / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            content = pyproject.read_text(encoding="utf-8")
+
+            # Try tomllib on Python 3.11+
+            try:
+                import tomllib
+                data = tomllib.loads(content)
+            except ImportError:
+                # Fall back to simple parser
+                data = _parse_simple_toml(content)
+
+            # Check for ruff configuration
+            ruff_config = None
+            if "tool.ruff" in data:
+                ruff_config = data["tool.ruff"]
+                result["linter"] = "ruff"
+            elif "tool" in data and isinstance(data["tool"], dict):
+                if "ruff" in data["tool"]:
+                    ruff_config = data["tool"]["ruff"]
+                    result["linter"] = "ruff"
+
+            if ruff_config:
+                result["config_file"] = "pyproject.toml"
+                if "line-length" in ruff_config:
+                    result["rules"]["line_length"] = ruff_config["line-length"]
+                if "select" in ruff_config:
+                    result["rules"]["select"] = ruff_config["select"]
+                if "ignore" in ruff_config:
+                    result["rules"]["ignore"] = ruff_config["ignore"]
+
+            # Check for black configuration
+            black_config = None
+            if "tool.black" in data:
+                black_config = data["tool.black"]
+            elif "tool" in data and isinstance(data["tool"], dict):
+                if "black" in data["tool"]:
+                    black_config = data["tool"]["black"]
+
+            if black_config:
+                if not result["linter"]:
+                    result["linter"] = "black"
+                    result["config_file"] = "pyproject.toml"
+                if "line-length" in black_config:
+                    result["rules"]["line_length"] = black_config["line-length"]
+                if "target-version" in black_config:
+                    result["rules"]["target_version"] = black_config["target-version"]
+
+            # Check for isort configuration
+            isort_config = None
+            if "tool.isort" in data:
+                isort_config = data["tool.isort"]
+            elif "tool" in data and isinstance(data["tool"], dict):
+                if "isort" in data["tool"]:
+                    isort_config = data["tool"]["isort"]
+
+            if isort_config:
+                result["rules"]["import_sorting"] = "isort"
+                if "profile" in isort_config:
+                    result["rules"]["isort_profile"] = isort_config["profile"]
+
+        except Exception:
+            pass
+
+    # Try ruff.toml
+    ruff_toml = target_path / "ruff.toml"
+    if ruff_toml.exists() and not result["linter"]:
+        try:
+            content = ruff_toml.read_text(encoding="utf-8")
+            data = _parse_simple_toml(content)
+
+            result["linter"] = "ruff"
+            result["config_file"] = "ruff.toml"
+
+            if "line-length" in data:
+                result["rules"]["line_length"] = data["line-length"]
+            if "select" in data:
+                result["rules"]["select"] = data["select"]
+
+        except Exception:
+            pass
+
+    # Try .flake8
+    flake8 = target_path / ".flake8"
+    if flake8.exists() and not result["linter"]:
+        try:
+            content = flake8.read_text(encoding="utf-8")
+
+            result["linter"] = "flake8"
+            result["config_file"] = ".flake8"
+
+            # Parse INI-style config
+            for line in content.split("\n"):
+                line = line.strip()
+                if line.startswith("max-line-length"):
+                    try:
+                        result["rules"]["line_length"] = int(line.split("=")[1].strip())
+                    except (ValueError, IndexError):
+                        pass
+                elif line.startswith("ignore"):
+                    result["rules"]["ignore"] = line.split("=")[1].strip()
+
+        except Exception:
+            pass
+
+    # Extract common banned patterns based on rules
+    if result["rules"]:
+        select = result["rules"].get("select", [])
+        if isinstance(select, list):
+            # E501 = line too long, T20x = print statements banned
+            if any("T20" in s for s in select):
+                result["banned_imports"].append("print() - use logging instead")
+            # UP = pyupgrade rules
+            if any("UP" in s for s in select):
+                result["rules"]["pyupgrade"] = True
+
+    return result
+
+
+# =============================================================================
+# Hazard Glob Patterns
+# =============================================================================
+
+def derive_hazard_patterns(hazards: List[Dict[str, Any]], target_dir: str = ".") -> List[Dict[str, Any]]:
+    """
+    Derive glob patterns from hazard file paths.
+
+    Groups files by parent directory and creates patterns like:
+    - artifacts/** (if multiple files in artifacts/)
+    - logs/*.log (if multiple .log files in logs/)
+    - specific/path/large_file.json (if only one file)
+
+    Returns list of patterns with file counts and estimated tokens.
+    """
+    from collections import defaultdict
+
+    if not hazards:
+        return []
+
+    target_path = Path(target_dir).resolve()
+
+    # Group hazards by parent directory
+    dir_files = defaultdict(list)
+
+    for hazard in hazards:
+        filepath = hazard.get("file", "")
+        tokens = hazard.get("tokens", 0)
+
+        try:
+            # Make path relative to target
+            file_path = Path(filepath)
+            if file_path.is_absolute():
+                try:
+                    rel_path = file_path.relative_to(target_path)
+                except ValueError:
+                    rel_path = file_path
+            else:
+                rel_path = file_path
+
+            parent = str(rel_path.parent)
+            filename = rel_path.name
+            extension = rel_path.suffix
+
+            dir_files[parent].append({
+                "file": str(rel_path),
+                "filename": filename,
+                "extension": extension,
+                "tokens": tokens
+            })
+        except Exception:
+            continue
+
+    # Generate patterns
+    patterns = []
+
+    for dir_path, files in dir_files.items():
+        if len(files) == 1:
+            # Single file - use specific path
+            f = files[0]
+            patterns.append({
+                "pattern": f["file"],
+                "file_count": 1,
+                "total_tokens": f["tokens"],
+                "type": "file"
+            })
+        else:
+            # Multiple files - try to group by extension or use directory pattern
+            extensions = defaultdict(list)
+            for f in files:
+                extensions[f["extension"]].append(f)
+
+            # If same extension, use *.ext pattern
+            if len(extensions) == 1:
+                ext = list(extensions.keys())[0]
+                total_tokens = sum(f["tokens"] for f in files)
+                if dir_path == ".":
+                    pattern = f"*{ext}" if ext else "*"
+                else:
+                    pattern = f"{dir_path}/*{ext}" if ext else f"{dir_path}/*"
+                patterns.append({
+                    "pattern": pattern,
+                    "file_count": len(files),
+                    "total_tokens": total_tokens,
+                    "type": "extension"
+                })
+            else:
+                # Mixed extensions - use directory/** pattern
+                total_tokens = sum(f["tokens"] for f in files)
+                if dir_path == ".":
+                    pattern = "**/*"
+                else:
+                    pattern = f"{dir_path}/**"
+                patterns.append({
+                    "pattern": pattern,
+                    "file_count": len(files),
+                    "total_tokens": total_tokens,
+                    "type": "directory"
+                })
+
+    # Sort by total tokens descending
+    patterns.sort(key=lambda x: x["total_tokens"], reverse=True)
+
+    # Format tokens for display
+    for p in patterns:
+        tokens = p["total_tokens"]
+        if tokens >= 1000:
+            p["tokens_display"] = f"~{tokens // 1000}K tokens"
+        else:
+            p["tokens_display"] = f"~{tokens} tokens"
+
+    return patterns
 
 
 # =============================================================================

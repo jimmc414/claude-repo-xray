@@ -50,7 +50,18 @@
     "state_mutations": true,
     "verify_commands": true,
     "persona_map": true,
-    "explain": true
+    "explain": true,
+
+    "_comment_v31": "v3.1 features below",
+    "github_about": true,
+    "data_flow": true,
+    "cli_arguments": true,
+    "instance_vars": true,
+    "pydantic_validators": true,
+    "hazard_patterns": true,
+    "env_defaults": true,
+    "test_example": true,
+    "linter_rules": true
   },
 
   "output": {

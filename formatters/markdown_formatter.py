@@ -48,6 +48,26 @@ def format_markdown(
     # Summary Table
     lines.append("## Summary")
     lines.append("")
+
+    # GitHub About (if enabled)
+    if gap.get("github_about"):
+        try:
+            from gap_features import get_github_about
+            target_dir = gap.get("target_dir", ".")
+            about = get_github_about(target_dir)
+            if about.get("description"):
+                lines.append(f"> **About:** {about['description']}")
+                lines.append("")
+            if about.get("topics"):
+                topics = ", ".join(about["topics"][:10])
+                lines.append(f"> **Topics:** {topics}")
+                lines.append("")
+            if about.get("error"):
+                lines.append(f"> *{about['error']}*")
+                lines.append("")
+        except Exception:
+            pass
+
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
     lines.append(f"| Python files | {summary.get('total_files', 0)} |")
@@ -82,7 +102,9 @@ def format_markdown(
             from gap_features import generate_mermaid_diagram
             imports = results.get("imports", {})
             if imports:
-                mermaid = generate_mermaid_diagram(imports)
+                # Include call data for data flow annotations if enabled
+                call_data = results.get("calls") if gap.get("data_flow") else None
+                mermaid = generate_mermaid_diagram(imports, call_data)
                 lines.append("## Architecture Diagram")
                 lines.append("")
                 if gap.get("explain"):
@@ -144,7 +166,7 @@ def format_markdown(
     # Entry Points
     if gap.get("entry_points"):
         try:
-            from gap_features import detect_entry_points
+            from gap_features import detect_entry_points, extract_cli_arguments
             target_dir = gap.get("target_dir", ".")
             entry_pts = detect_entry_points(results, target_dir)
             if entry_pts:
@@ -164,6 +186,29 @@ def format_markdown(
                         rel_usage = usage
                     lines.append(f"| `{ep.get('entry_point', '')}` | {rel_path} | `{rel_usage}` |")
                 lines.append("")
+
+                # CLI Arguments (if enabled)
+                if gap.get("cli_arguments"):
+                    structure = results.get("structure", {})
+                    cli_args = extract_cli_arguments(entry_pts, structure)
+                    if cli_args:
+                        lines.append("### CLI Arguments")
+                        lines.append("")
+                        for entry in cli_args[:5]:
+                            entry_name = Path(entry.get('file', '')).name
+                            lines.append(f"**{entry_name}:**")
+                            lines.append("")
+                            lines.append("| Argument | Required | Default | Help |")
+                            lines.append("|----------|----------|---------|------|")
+                            for arg in entry.get("arguments", [])[:10]:
+                                arg_name = arg.get("name", "")
+                                required = "Yes" if arg.get("required") else "No"
+                                default = arg.get("default", "-") or "-"
+                                help_text = arg.get("help", "-") or "-"
+                                if len(help_text) > 50:
+                                    help_text = help_text[:47] + "..."
+                                lines.append(f"| `{arg_name}` | {required} | {default} | {help_text} |")
+                            lines.append("")
         except Exception:
             pass
 
@@ -197,6 +242,19 @@ def format_markdown(
                     if cls.get("init_signature"):
                         lines.append(f"    {cls['init_signature']}")
                         lines.append("")
+
+                    # Show instance variables from __init__ (if enabled)
+                    instance_vars = cls.get("instance_vars", [])
+                    if instance_vars and gap.get("instance_vars"):
+                        lines.append("    # Instance variables:")
+                        for iv in instance_vars[:8]:
+                            iv_name = iv.get("name", "")
+                            iv_value = iv.get("value", "...")
+                            lines.append(f"    self.{iv_name} = {iv_value}")
+                        if len(instance_vars) > 8:
+                            lines.append(f"    # ... and {len(instance_vars) - 8} more")
+                        lines.append("")
+
                     for field in cls.get("fields", [])[:5]:
                         field_name = field.get("name", "")
                         field_type = field.get("type", "")
@@ -261,17 +319,43 @@ def format_markdown(
                         model_type = model.get("type", "")
                         lines.append(f"**{model['name']}** [{model_type}] ({Path(model.get('file', '')).name})")
                         lines.append("")
-                        lines.append("```python")
-                        lines.append(f"class {model['name']}{bases}:  # L{model.get('line', 0)}")
-                        for field in model.get("fields", [])[:8]:
-                            field_name = field.get("name", "")
-                            field_type = field.get("type", "")
-                            if field_type:
-                                lines.append(f"    {field_name}: {field_type}")
-                            else:
-                                lines.append(f"    {field_name}")
-                        lines.append("```")
-                        lines.append("")
+
+                        # Show field constraints if enabled and available
+                        field_constraints = model.get("field_constraints", {})
+                        if field_constraints and gap.get("pydantic_validators"):
+                            lines.append("| Field | Type | Constraints |")
+                            lines.append("|-------|------|-------------|")
+                            for field in model.get("fields", [])[:8]:
+                                field_name = field.get("name", "")
+                                field_type = field.get("type", "")
+                                constraints = field_constraints.get(field_name, {})
+                                # Format constraints
+                                constraint_strs = []
+                                for k, v in constraints.items():
+                                    if k != "type":
+                                        constraint_strs.append(f"{k}={v}")
+                                constraint_text = ", ".join(constraint_strs) if constraint_strs else "-"
+                                lines.append(f"| `{field_name}` | {field_type} | {constraint_text} |")
+                            lines.append("")
+                        else:
+                            lines.append("```python")
+                            lines.append(f"class {model['name']}{bases}:  # L{model.get('line', 0)}")
+                            for field in model.get("fields", [])[:8]:
+                                field_name = field.get("name", "")
+                                field_type = field.get("type", "")
+                                if field_type:
+                                    lines.append(f"    {field_name}: {field_type}")
+                                else:
+                                    lines.append(f"    {field_name}")
+                            lines.append("```")
+                            lines.append("")
+
+                        # Show validators if enabled and available
+                        validators = model.get("validators", [])
+                        if validators and gap.get("pydantic_validators"):
+                            validator_names = [f'`{v.get("name", "")}`' for v in validators[:5]]
+                            lines.append(f"*Validators:* {', '.join(validator_names)}")
+                            lines.append("")
                         models_shown += 1
         except Exception:
             pass
@@ -279,7 +363,7 @@ def format_markdown(
     # Hazards (Large Files and Directories)
     if gap.get("hazards"):
         try:
-            from gap_features import detect_hazards, get_directory_hazards
+            from gap_features import detect_hazards, get_directory_hazards, derive_hazard_patterns
             file_hazards = detect_hazards(results)
             target_dir = gap.get("target_dir", ".")
             dir_hazards = get_directory_hazards(target_dir)
@@ -287,6 +371,18 @@ def format_markdown(
             if file_hazards or dir_hazards:
                 lines.append("## Context Hazards")
                 lines.append("")
+
+                # Show glob patterns if enabled
+                if file_hazards and gap.get("hazard_patterns"):
+                    patterns = derive_hazard_patterns(file_hazards, target_dir)
+                    if patterns:
+                        lines.append("### Patterns to Exclude")
+                        lines.append("")
+                        lines.append("*Use these glob patterns to skip large files:*")
+                        lines.append("")
+                        for p in patterns[:10]:
+                            lines.append(f"- `{p.get('pattern', '')}` ({p.get('file_count', 0)} files, {p.get('tokens_display', '')})")
+                        lines.append("")
 
                 # File hazards
                 if file_hazards:
@@ -793,10 +889,22 @@ def format_markdown(
             lines.append("")
             lines.append("*Environment variables used in the codebase:*")
             lines.append("")
-            lines.append("| Variable | File | Line |")
-            lines.append("|----------|------|------|")
-            for ev in env_vars[:20]:
-                lines.append(f"| `{ev.get('variable', '')}` | {Path(ev.get('file', '')).name} | {ev.get('line', 0)} |")
+
+            # Check if env_defaults feature is enabled (new format with defaults)
+            if gap.get("env_defaults") and env_vars and "default" in env_vars[0]:
+                lines.append("| Variable | Default | Required | Location |")
+                lines.append("|----------|---------|----------|----------|")
+                for ev in env_vars[:20]:
+                    default = ev.get("default", "-") or "-"
+                    required = "**Yes**" if ev.get("required") else "No"
+                    location = f"{Path(ev.get('file', '')).name}:{ev.get('line', 0)}"
+                    lines.append(f"| `{ev.get('variable', '')}` | {default} | {required} | {location} |")
+            else:
+                # Fallback to old format
+                lines.append("| Variable | File | Line |")
+                lines.append("|----------|------|------|")
+                for ev in env_vars[:20]:
+                    lines.append(f"| `{ev.get('variable', '')}` | {Path(ev.get('file', '')).name} | {ev.get('line', 0)} |")
             lines.append("")
     except Exception:
         pass
@@ -864,6 +972,67 @@ def format_markdown(
         lines.append(f"- Async for loops: {async_patterns.get('async_for_loops', 0)}")
         lines.append(f"- Async context managers: {async_patterns.get('async_context_managers', 0)}")
         lines.append("")
+
+    # Test Example (Rosetta Stone)
+    if gap.get("test_example"):
+        try:
+            from test_analysis import get_test_example
+            target_dir = gap.get("target_dir", ".")
+            example = get_test_example(target_dir, max_lines=50)
+            if example:
+                lines.append("## Testing Idioms")
+                lines.append("")
+                if gap.get("explain"):
+                    lines.append("> **How to use:** Use this test as a template for writing new tests.")
+                    lines.append("> It demonstrates the mocking and assertion patterns used in this codebase.")
+                    lines.append("")
+                patterns = example.get("patterns", [])
+                if patterns:
+                    lines.append(f"**Patterns used:** {', '.join(f'`{p}`' for p in patterns)}")
+                    lines.append("")
+                lines.append(f"**Example:** `{example.get('file', '')}` ({example.get('line_count', 0)} lines)")
+                lines.append("")
+                lines.append("```python")
+                lines.append(example.get("content", ""))
+                lines.append("```")
+                lines.append("")
+        except Exception:
+            pass
+
+    # Linter Rules (Project Idioms)
+    if gap.get("linter_rules"):
+        try:
+            from gap_features import extract_linter_rules
+            target_dir = gap.get("target_dir", ".")
+            linter = extract_linter_rules(target_dir)
+            if linter.get("linter"):
+                lines.append("## Project Idioms")
+                lines.append("")
+                if gap.get("explain"):
+                    lines.append("> **How to use:** Follow these rules to ensure your code passes CI.")
+                    lines.append("> The linter configuration defines the coding style for this project.")
+                    lines.append("")
+                lines.append(f"**Linter:** {linter['linter']} (from `{linter.get('config_file', '')}`)")
+                lines.append("")
+
+                rules = linter.get("rules", {})
+                if rules:
+                    lines.append("| Rule | Value |")
+                    lines.append("|------|-------|")
+                    for rule, value in rules.items():
+                        if isinstance(value, list):
+                            value = ", ".join(str(v) for v in value[:5])
+                        lines.append(f"| {rule} | {value} |")
+                    lines.append("")
+
+                banned = linter.get("banned_imports", [])
+                if banned:
+                    lines.append("**Banned patterns:**")
+                    for b in banned[:5]:
+                        lines.append(f"- {b}")
+                    lines.append("")
+        except Exception:
+            pass
 
     # Footer
     lines.append("---")

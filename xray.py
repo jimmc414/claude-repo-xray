@@ -38,7 +38,7 @@ SCRIPT_DIR = Path(__file__).parent
 LIB_DIR = SCRIPT_DIR / "lib"
 sys.path.insert(0, str(LIB_DIR))
 
-VERSION = "3.0.0"  # Major version bump for config-driven approach
+VERSION = "3.1.0"  # Added 9 new features: github_about, cli_args, instance_vars, etc.
 
 # Analysis switches
 ANALYSIS_SWITCHES = [
@@ -499,6 +499,16 @@ def config_to_gap_features(config: Dict[str, Any], target_dir: str) -> Dict[str,
         "persona_map": is_enabled("persona_map"),
         "environment_variables": is_enabled("environment_variables"),
         "target_dir": target_dir,
+        # v3.1 features
+        "github_about": is_enabled("github_about"),
+        "data_flow": is_enabled("data_flow"),
+        "cli_arguments": is_enabled("cli_arguments"),
+        "instance_vars": is_enabled("instance_vars"),
+        "pydantic_validators": is_enabled("pydantic_validators"),
+        "hazard_patterns": is_enabled("hazard_patterns"),
+        "env_defaults": is_enabled("env_defaults"),
+        "test_example": is_enabled("test_example"),
+        "linter_rules": is_enabled("linter_rules"),
     }
 
 

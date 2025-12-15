@@ -65,6 +65,16 @@ DEFAULT_CONFIG = {
         "verify_commands": True,
         "persona_map": True,
         "explain": True,
+        # v3.1 features
+        "github_about": True,
+        "data_flow": True,
+        "cli_arguments": True,
+        "instance_vars": True,
+        "pydantic_validators": True,
+        "hazard_patterns": True,
+        "env_defaults": True,
+        "test_example": True,
+        "linter_rules": True,
     },
 
     "output": {

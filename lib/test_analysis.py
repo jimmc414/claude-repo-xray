@@ -234,3 +234,186 @@ def get_test_coverage_ratio(
         return 0.0
 
     return round(tested / (tested + untested), 2)
+
+
+def _detect_mocking_patterns(content: str) -> List[str]:
+    """
+    Detect mocking patterns used in a test file.
+
+    Returns list of detected patterns.
+    """
+    patterns = []
+
+    # unittest.mock patterns
+    if "unittest.mock" in content or "from unittest import mock" in content:
+        patterns.append("unittest.mock")
+    if "@patch" in content or "patch(" in content:
+        patterns.append("unittest.mock.patch")
+    if "MagicMock" in content:
+        patterns.append("MagicMock")
+    if "Mock(" in content:
+        patterns.append("Mock")
+
+    # pytest patterns
+    if "@pytest.fixture" in content or "@fixture" in content:
+        patterns.append("pytest.fixture")
+    if "pytest.mark" in content:
+        patterns.append("pytest.mark")
+    if "monkeypatch" in content:
+        patterns.append("monkeypatch")
+
+    # pytest-mock patterns
+    if "mocker" in content:
+        patterns.append("pytest-mock.mocker")
+
+    # responses library
+    if "@responses.activate" in content or "responses.add" in content:
+        patterns.append("responses")
+
+    # httpx mocking
+    if "respx" in content:
+        patterns.append("respx")
+
+    # asyncio testing
+    if "@pytest.mark.asyncio" in content:
+        patterns.append("pytest-asyncio")
+
+    return list(set(patterns))
+
+
+def _score_test_file(filepath: str, content: str, line_count: int) -> int:
+    """
+    Score a test file for quality as an example.
+
+    Higher scores indicate better examples.
+    """
+    score = 0
+
+    # Penalize very short files (less than 10 lines)
+    if line_count < 10:
+        return 0
+
+    # Penalize very long files (over 50 lines)
+    if line_count > 50:
+        score -= 10
+
+    # Reward files with fixtures
+    if "@pytest.fixture" in content or "@fixture" in content:
+        score += 20
+
+    # Reward files with mocking
+    if "Mock" in content or "patch" in content or "mocker" in content:
+        score += 15
+
+    # Reward files with assertions
+    if "assert " in content or "assertEqual" in content:
+        score += 10
+
+    # Reward complete imports section
+    if "import pytest" in content:
+        score += 5
+
+    # Reward async tests (good for showing async patterns)
+    if "async def test_" in content:
+        score += 10
+
+    # Reward files with docstrings
+    if '"""' in content or "'''" in content:
+        score += 5
+
+    # Penalize conftest files (not good standalone examples)
+    if "conftest" in filepath.lower():
+        score -= 100
+
+    return score
+
+
+def get_test_example(
+    directory: str,
+    max_lines: int = 50
+) -> Optional[Dict[str, Any]]:
+    """
+    Find the best representative test file as a "Rosetta Stone" example.
+
+    Criteria:
+    - Under max_lines lines
+    - Uses fixtures or mocking (demonstrates patterns)
+    - Complete and runnable
+    - Not a conftest.py
+
+    Args:
+        directory: Root directory to search
+        max_lines: Maximum number of lines for the example
+
+    Returns:
+        {
+            "file": str - relative path to the test file
+            "content": str - full file content
+            "line_count": int - number of lines
+            "patterns": [str] - detected testing patterns
+        }
+        Or None if no suitable example found.
+    """
+    root = Path(directory)
+    test_dirs = find_test_directories(directory)
+
+    if not test_dirs:
+        return None
+
+    candidates = []
+
+    for test_dir in test_dirs:
+        for py_file in test_dir.rglob("*.py"):
+            # Skip conftest.py files
+            if py_file.name == "conftest.py":
+                continue
+
+            # Skip __init__.py
+            if py_file.name == "__init__.py":
+                continue
+
+            # Skip non-test files
+            if not is_test_file(py_file.name):
+                continue
+
+            try:
+                content = py_file.read_text(encoding="utf-8", errors="replace")
+                lines = content.split("\n")
+                line_count = len(lines)
+
+                # Skip files over max_lines
+                if line_count > max_lines:
+                    continue
+
+                # Score the file
+                score = _score_test_file(str(py_file), content, line_count)
+
+                if score > 0:
+                    rel_path = str(py_file.relative_to(root))
+                    patterns = _detect_mocking_patterns(content)
+
+                    candidates.append({
+                        "file": rel_path,
+                        "content": content,
+                        "line_count": line_count,
+                        "patterns": patterns,
+                        "score": score
+                    })
+
+            except (IOError, OSError):
+                continue
+
+    if not candidates:
+        return None
+
+    # Sort by score descending
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+
+    # Return the best candidate (without the internal score)
+    best = candidates[0]
+    return {
+        "file": best["file"],
+        "content": best["content"],
+        "line_count": best["line_count"],
+        "patterns": best["patterns"]
+    }
