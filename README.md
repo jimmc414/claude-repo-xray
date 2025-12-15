@@ -78,25 +78,53 @@ Generate a config template: `python xray.py --init-config > .xray.json`
 
 ## Claude Code Integration
 
-The tool includes a Claude Code skill and agent that go beyond raw analysis. Instead of dumping X-Ray output, the agent uses it as a map to guide intelligent investigation.
+The tool includes Claude Code agents and skills that go beyond raw analysis. Instead of dumping X-Ray output, the agents use it as a map to guide intelligent investigation.
 
 ### The Design
 
 ```
-X-Ray (the map)          Claude (the analyst)         Output (for next Claude)
-----------------         -------------------          -----------------------
-Extracts signals    -->  Investigates selectively --> Produces curated docs
-~15K tokens              Uses Read/Grep/Glob          ~15K tokens
-                         Adds judgment
+X-Ray (the map)          repo_xray Agent           repo_retrospective Agent
+----------------         -------------------       ------------------------
+Extracts signals    -->  Investigates & curates   -->  QA & verification
+~15K tokens              Adds judgment                 Ensures quality
+Zero tokens              Uses Read/Grep/Glob           Scores actionability
 ```
 
-The agent operates in three phases:
+### repo_xray Agent: Four-Phase Workflow
 
-1. **Orient** — Run X-Ray, read the markdown summary for quick understanding
-2. **Investigate** — Use signals to guide deep reading with Read/Grep/Glob
-3. **Synthesize** — Produce curated onboarding documentation
+The `repo_xray` agent operates in four phases:
+
+1. **ORIENT** — Run X-Ray, read the markdown summary, build mental model
+2. **INVESTIGATE** — Use signals to guide deep reading with Read/Grep/Glob
+   - **Pass 1**: Signal verification — confirm or downgrade X-Ray signals
+   - **Pass 2**: Gap discovery — find what X-Ray missed
+3. **SYNTHESIZE** — Produce curated onboarding documentation
+4. **VALIDATE** — Self-test: "Can I answer common questions from this doc?"
 
 This matters because X-Ray signals aren't always accurate. A "complexity hotspot" might be essential business logic or accidental complexity. A "pillar" module might be genuinely central or just a grab-bag of utilities. The agent verifies signals before including them in the final output.
+
+### Confidence Levels
+
+Every insight in the output is tagged:
+
+| Level | Meaning |
+|-------|---------|
+| `[VERIFIED]` | Agent read the actual code and confirmed |
+| `[INFERRED]` | Logical deduction from related code |
+| `[X-RAY SIGNAL]` | Directly from X-Ray, not independently verified |
+
+### What the Agent Produces
+
+The final onboarding document includes:
+
+- **TL;DR** — 5-bullet summary for 60-second orientation
+- **Architecture diagram** — Mermaid visualization from X-Ray
+- **Critical components** — Verified pillars with code context
+- **Data flow** — Traced request path through the system
+- **Gotchas** — Counterintuitive behaviors that would waste hours to discover
+- **Debugging guide** — Common failure modes and remediation
+- **Hazards** — Files to never read (would waste context)
+- **Quality metrics** — Transparency about investigation depth
 
 ### Agent Modes
 
@@ -106,31 +134,74 @@ This matters because X-Ray signals aren't always accurate. A "complexity hotspot
 | `analyze` | `@repo_xray analyze` | Full onboarding document (~40K tokens) |
 | `query` | `@repo_xray query "auth"` | Targeted investigation |
 | `focus` | `@repo_xray focus ./src/api` | Deep dive on subsystem |
+| `refresh` | `@repo_xray refresh` | Update existing analysis |
 
-### What the Agent Adds
+### Investigation Depth Presets
 
-X-Ray extracts signals. The agent adds:
+| Preset | Pillars | Hotspots | Side Effects | Output |
+|--------|---------|----------|--------------|--------|
+| `quick` | Top 3 (skeleton) | None | None | ~5K tokens |
+| `standard` | Top 5 (100 lines) | Top 3 | Critical only | ~15K tokens |
+| `thorough` | Top 10 (full read) | Top 5 | All | ~25K tokens |
 
-- **Verification** — Is this complexity actually essential?
-- **Context** — What triggers this side effect?
-- **Judgment** — Should this be in the final document?
-- **Insights** — Patterns X-Ray cannot detect (design patterns, implicit dependencies)
+---
 
-The final output is optimized for a fresh Claude instance that has never seen the codebase. It answers: "What do I need to know to work effectively here?"
+## repo_retrospective Agent: Quality Assurance
 
-### Files
+The `repo_retrospective` agent provides QA for AI onboarding documentation. Run it at project end or mid-project to verify the onboarding document is effective.
+
+### Five-Phase Workflow
+
+1. **INVENTORY** — Catalog all claims in the onboarding document
+2. **COVERAGE** — Compare against X-Ray source for gaps
+3. **VERIFICATION** — Spot-check `[VERIFIED]` claims against actual code
+4. **ACTIONABILITY** — Test if document answers 8 standard questions
+5. **RECOMMENDATIONS** — Produce specific fixes
+
+### Verdicts
+
+| Verdict | Meaning |
+|---------|---------|
+| **Ship It** | High quality, ready for use |
+| **Needs Minor Fixes** | Good, 1-3 small issues to address |
+| **Needs Significant Rework** | Critical problems, re-run repo_xray |
+
+### Retrospective Modes
+
+| Mode | Command | Purpose |
+|------|---------|---------|
+| `full` | `@repo_retrospective full` | Complete QA (all 5 phases) |
+| `quick` | `@repo_retrospective quick` | Verification audit only |
+| `coverage` | `@repo_retrospective coverage` | Gap analysis only |
+| `actionability` | `@repo_retrospective actionability` | Usability test only |
+
+---
+
+## Complete Workflow
 
 ```
-.claude/
-├── agents/
-│   └── repo_xray.md           # Unified analyst agent
-└── skills/
-    └── repo-xray/
-        ├── SKILL.md           # Skill documentation
-        ├── COMMANDS.md        # Quick reference
-        └── templates/
-            └── ONBOARD.md.template
+Codebase (2M+ tokens)
+       │
+       ▼
+X-Ray Scanner (Python AST, zero tokens, seconds)
+       │
+       ▼
+Signal Extraction (~15K tokens)
+       │
+       ▼
+repo_xray Agent (investigates, verifies, curates)
+       │
+       ▼
+Warm Start Document (~15K tokens)
+       │
+       ▼
+repo_retrospective Agent (QA)
+       │
+       ▼
+Fresh Claude instance is productive immediately
 ```
+
+**Cold start solved: Map + Judgment + Quality Assurance**
 
 ---
 
@@ -306,11 +377,25 @@ repo-xray/
 ├── configs/
 │   ├── default_config.json
 │   └── presets.json
+├── examples/
+│   ├── kosmos_xray_output_v31.md    # X-Ray output example
+│   ├── KOSMOS_ONBOARD.md            # Agent output v1
+│   └── KOSMOS_ONBOARD_v2.md         # Agent output v2
 └── .claude/
     ├── agents/
-    │   └── repo_xray.md        # Claude Code agent
+    │   ├── repo_xray.md             # Analysis agent
+    │   └── repo_retrospective.md    # QA agent
     └── skills/
-        └── repo-xray/          # Claude Code skill
+        ├── repo-xray/               # Analysis skill
+        │   ├── SKILL.md
+        │   ├── COMMANDS.md
+        │   └── templates/
+        │       └── ONBOARD.md.template
+        └── repo-retrospective/      # QA skill
+            ├── SKILL.md
+            ├── COMMANDS.md
+            └── templates/
+                └── RETROSPECTIVE.md.template
 ```
 
 ---
@@ -319,7 +404,7 @@ repo-xray/
 
 AI coding assistants are powerful but context-limited. They can understand code they read, but they can't read everything. This creates a bootstrapping problem: the assistant needs to understand the architecture to know what to read, but needs to read to understand the architecture.
 
-X-Ray provides the bootstrap. It compresses a codebase into signals that fit in context and guide further investigation. The agent layer adds judgment—turning raw signals into verified, curated documentation.
+X-Ray provides the bootstrap. It compresses a codebase into signals that fit in context and guide further investigation. The agent layer adds judgment—turning raw signals into verified, curated documentation. The retrospective layer ensures quality—verifying that the documentation actually works.
 
 The goal is not to replace reading code. It's to make reading code efficient by telling the AI where to look first.
 
