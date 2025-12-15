@@ -1,0 +1,326 @@
+# Retrospective Report: {PROJECT_NAME}
+
+> **Purpose:** Quality assurance for AI onboarding documentation
+> **ONBOARD reviewed:** `{ONBOARD_PATH}`
+> **X-Ray source:** `{XRAY_PATH}`
+> **Codebase:** `{CODEBASE_PATH}`
+> **Generated:** {TIMESTAMP}
+> **Mode:** {MODE}
+
+---
+
+## Executive Summary
+
+{EXECUTIVE_SUMMARY}
+
+<!--
+AGENT INSTRUCTIONS:
+Write 2-3 sentences summarizing:
+- Overall quality assessment (Excellent/Good/Needs Work)
+- Key finding (most important gap or strength)
+- Verdict preview (Ship It / Minor Fixes / Rework)
+
+Example:
+"The KOSMOS ONBOARD document is high quality with 28 verified claims and 8/8 actionability.
+One quantitative claim lacks code evidence. Verdict: Ship It with minor fix."
+-->
+
+---
+
+## Phase 1: Inventory
+
+### Claims Catalog
+
+| Category | Count | Examples |
+|----------|-------|----------|
+| [VERIFIED] | {VERIFIED_COUNT} | {VERIFIED_EXAMPLES} |
+| [INFERRED] | {INFERRED_COUNT} | {INFERRED_EXAMPLES} |
+| [X-RAY SIGNAL] | {XRAY_SIGNAL_COUNT} | {XRAY_SIGNAL_EXAMPLES} |
+
+### Investigation Coverage
+
+| Metric | Value |
+|--------|-------|
+| Files investigated | {FILES_INVESTIGATED} |
+| Gotchas documented | {GOTCHAS_COUNT} |
+| Gaps acknowledged | {GAPS_COUNT} |
+| Quality metrics reported | {QUALITY_METRICS} |
+
+<!--
+AGENT INSTRUCTIONS:
+Extract these counts by reading the ONBOARD document.
+Count occurrences of [VERIFIED], [INFERRED], [X-RAY SIGNAL].
+List files mentioned as "read" or "investigated".
+-->
+
+---
+
+## Phase 2: Coverage Analysis
+
+### Coverage Matrix
+
+| X-Ray Section | Category | In ONBOARD? | Status |
+|--------------|----------|-------------|--------|
+| {SECTION_1} | {CATEGORY_1} | {COVERAGE_1} | {STATUS_1} |
+
+<!--
+AGENT INSTRUCTIONS:
+For each major X-Ray section, assess:
+- Category: Must Have / Should Have / Nice to Have
+- In ONBOARD: Yes / No / Partial
+- Status: ✓ / Gap / Justified Omission
+
+Categories:
+- Must Have: Architecture, Hazards, Top 5 pillars
+- Should Have: Key data models, Critical side effects, Required env vars
+- Nice to Have: Decorator counts, Orphan files, Stats
+-->
+
+### Critical Gaps (Must Fix)
+
+{CRITICAL_GAPS}
+
+<!--
+AGENT INSTRUCTIONS:
+List Must Have items missing from ONBOARD.
+These are blockers for Ship It verdict.
+
+Example:
+"1. **Hazards incomplete** — X-Ray lists 7 hazard files, ONBOARD only shows 4.
+   Missing: test_req_llm.py (10K), test_req_literature.py (10K), data_analysis.py (10K)"
+-->
+
+### Moderate Gaps (Should Fix)
+
+{MODERATE_GAPS}
+
+<!--
+AGENT INSTRUCTIONS:
+List Should Have items missing or inadequate.
+These don't block Ship It but should be addressed.
+
+Example:
+"1. **Data models too sparse** — X-Ray shows 188 Pydantic models, ONBOARD shows ~3.
+   Recommend adding: Hypothesis, Experiment, ExperimentProtocol, BatchRequest, BatchResponse"
+-->
+
+### Justified Omissions
+
+{JUSTIFIED_OMISSIONS}
+
+<!--
+AGENT INSTRUCTIONS:
+List Nice to Have items correctly omitted.
+Confirms the agent made good judgment calls.
+
+Example:
+"1. **Decorator counts** — Correctly omitted. Not actionable for coding.
+2. **Orphan candidates** — Correctly omitted. Can grep if needed.
+3. **Full import tables** — Correctly summarized. Layer summary is sufficient."
+-->
+
+---
+
+## Phase 3: Verification Audit
+
+### Claims Verified
+
+| # | Claim | Location | Status | Notes |
+|---|-------|----------|--------|-------|
+| 1 | {CLAIM_1} | {LOCATION_1} | {STATUS_1} | {NOTES_1} |
+
+<!--
+AGENT INSTRUCTIONS:
+Select 5-10 [VERIFIED] claims from ONBOARD.
+For each, read the actual code and confirm.
+
+Status options:
+- [CONFIRMED] ✓ — Matches code exactly
+- [PARTIAL] △ — Correct but missing context
+- [OUTDATED] ⚠ — Code has changed
+- [INACCURATE] ✗ — Doesn't match code
+- [UNVERIFIABLE] ? — Can't find location
+
+Example:
+| 1 | "CLI mode with 999 API key" | config.py:80-82 | [CONFIRMED] ✓ | `api_key.replace('9','')` exact match |
+| 2 | "90% cost reduction" | config.py | [PARTIAL] △ | Caching enabled, but 90% not in code |
+-->
+
+### Issues Found
+
+{VERIFICATION_ISSUES}
+
+<!--
+AGENT INSTRUCTIONS:
+Detail any claims that are not [CONFIRMED].
+Provide specific fix recommendations.
+
+Example:
+"1. **'90% cost reduction' claim** (ONBOARD line 404)
+   - Status: [PARTIAL]
+   - Issue: Code shows `enable_cache=True` but no 90% figure
+   - Found: config.py:60-64 has caching config, no percentage
+   - Recommendation: Change to 'significant cost reduction' or cite external source"
+-->
+
+### Verification Summary
+
+| Status | Count | Percentage |
+|--------|-------|------------|
+| [CONFIRMED] | {CONFIRMED_COUNT} | {CONFIRMED_PCT}% |
+| [PARTIAL] | {PARTIAL_COUNT} | {PARTIAL_PCT}% |
+| [OUTDATED] | {OUTDATED_COUNT} | {OUTDATED_PCT}% |
+| [INACCURATE] | {INACCURATE_COUNT} | {INACCURATE_PCT}% |
+| [UNVERIFIABLE] | {UNVERIFIABLE_COUNT} | {UNVERIFIABLE_PCT}% |
+
+**Verification rate:** {VERIFICATION_RATE}% confirmed or partial
+
+---
+
+## Phase 4: Actionability Assessment
+
+### Question-by-Question Analysis
+
+| # | Question | Answerable? | Quality | Evidence |
+|---|----------|-------------|---------|----------|
+| 1 | "What is this codebase?" | {ANS_1} | {QUAL_1} | {EVID_1} |
+| 2 | "Where does core logic live?" | {ANS_2} | {QUAL_2} | {EVID_2} |
+| 3 | "How do I add a new [entity]?" | {ANS_3} | {QUAL_3} | {EVID_3} |
+| 4 | "What happens when [X] fails?" | {ANS_4} | {QUAL_4} | {EVID_4} |
+| 5 | "What files should I never read?" | {ANS_5} | {QUAL_5} | {EVID_5} |
+| 6 | "What are common pitfalls?" | {ANS_6} | {QUAL_6} | {EVID_6} |
+| 7 | "What env vars do I need?" | {ANS_7} | {QUAL_7} | {EVID_7} |
+| 8 | "How do I run tests?" | {ANS_8} | {QUAL_8} | {EVID_8} |
+
+<!--
+AGENT INSTRUCTIONS:
+For each question, try to answer using ONLY the ONBOARD document.
+- Answerable: Yes / No / Partial
+- Quality: Clear / Vague / Missing
+- Evidence: Which section provides the answer
+
+Example:
+| 1 | "What is this codebase?" | Yes | Clear | TL;DR + Quick Orientation |
+| 4 | "What happens when failure?" | Yes | Detailed | Gotchas #7 + Debugging Guide |
+-->
+
+### Actionability Score
+
+**Score: {ACTIONABILITY_SCORE}/8**
+
+| Rating | Meaning |
+|--------|---------|
+| 8/8 | Excellent — All questions clearly answerable |
+| 6-7/8 | Good — Minor gaps in coverage |
+| 4-5/8 | Needs Improvement — Several questions unanswerable |
+| <4/8 | Significant Rework — Document not actionable |
+
+**Assessment:** {ACTIONABILITY_ASSESSMENT}
+
+---
+
+## Phase 5: Specific Recommendations
+
+{RECOMMENDATIONS}
+
+<!--
+AGENT INSTRUCTIONS:
+Provide numbered, specific, actionable recommendations.
+Each should include:
+- What to change
+- Where to change it
+- Why it matters
+- Specific content to add (if applicable)
+
+Example:
+"1. **Add Key Data Models section**
+   - What: Add new section between 'Critical Components' and 'Data Flow'
+   - Content: Top 10-15 Pydantic models with field summaries:
+     - Hypothesis (research_question, statement, rationale, domain, status)
+     - Experiment (hypothesis_id, protocol, results, status)
+     - ExperimentProtocol (steps, variables, controls)
+     - BatchRequest (id, prompt, system, max_tokens)
+     - BatchResponse (id, success, response, error)
+   - Why: 188 → 3 is too aggressive; developers need model awareness
+   - Impact: ~500 tokens added, significant usability improvement
+
+2. **Soften '90% cost reduction' claim** (line 404)
+   - What: Change 'reduces costs by 90%' to 'significantly reduces costs'
+   - Why: The 90% figure isn't in the code; claim is unverifiable
+   - Impact: Improves document accuracy, no token change"
+-->
+
+---
+
+## Conclusion
+
+### Verdict: {VERDICT}
+
+<!--
+AGENT INSTRUCTIONS:
+Choose one:
+- **Ship It** — High quality, ready for use
+- **Ship It with Minor Fixes** — Good, 1-3 small issues to address
+- **Needs Minor Fixes** — Several issues, but structure is sound
+- **Needs Significant Rework** — Critical problems, re-run repo_xray
+-->
+
+### Summary Table
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Critical gaps | {CRIT_GAPS_STATUS} | {CRIT_GAPS_NOTES} |
+| Verification rate | {VERIF_STATUS} | {VERIF_NOTES} |
+| Actionability | {ACTION_STATUS} | {ACTION_NOTES} |
+| Hazards complete | {HAZARDS_STATUS} | {HAZARDS_NOTES} |
+| Gaps acknowledged | {GAPS_STATUS} | {GAPS_NOTES} |
+
+### What's Done Well
+
+{WHATS_DONE_WELL}
+
+<!--
+AGENT INSTRUCTIONS:
+Acknowledge strengths of the document.
+Be specific about what works.
+
+Example:
+"- **Comprehensive Gotchas section** — 8 counterintuitive behaviors documented,
+  including the CLI mode trick that would save hours to discover
+- **Strong verification** — 28 [VERIFIED] claims with specific line references
+- **Excellent actionability** — All 8 standard questions clearly answerable
+- **Appropriate compression** — 160:1 ratio while preserving critical info"
+-->
+
+### What Needs Attention
+
+{WHATS_NEEDS_ATTENTION}
+
+<!--
+AGENT INSTRUCTIONS:
+Summarize issues that should be addressed.
+Prioritize by impact.
+
+Example:
+"- **Data models section needed** — Priority: Medium, Impact: High
+- **One claim needs softening** — Priority: Low, Impact: Low
+- **Consider cross-references** — Priority: Low, Impact: Medium"
+-->
+
+---
+
+## Appendix: Raw Metrics
+
+| Metric | ONBOARD | X-Ray | Delta |
+|--------|---------|-------|-------|
+| Lines | {ONBOARD_LINES} | {XRAY_LINES} | {LINES_DELTA} |
+| Words | {ONBOARD_WORDS} | {XRAY_WORDS} | {WORDS_DELTA} |
+| Est. tokens | {ONBOARD_TOKENS} | {XRAY_TOKENS} | {TOKENS_DELTA} |
+| Compression ratio | {COMPRESSION_RATIO}:1 | — | — |
+
+---
+
+*This retrospective report was generated by the repo_retrospective agent
+to ensure AI onboarding documentation quality.*
+
+*Workflow: INVENTORY → COVERAGE → VERIFICATION → ACTIONABILITY → RECOMMENDATIONS*

@@ -4,6 +4,31 @@
 > **Prepared by:** repo_xray agent
 > **Codebase:** {FILE_COUNT} files, ~{TOTAL_TOKENS} tokens
 > **This document:** ~{DOC_TOKENS} tokens
+> **Generated:** {TIMESTAMP}
+> **From commit:** {GIT_COMMIT_HASH}
+
+---
+
+## TL;DR (5 Bullets Max)
+
+{TLDR}
+
+<!--
+AGENT INSTRUCTIONS:
+If a developer has 60 seconds, what do they NEED to know?
+- What is this? (1 sentence)
+- Where does core logic live? (1-2 files)
+- What's the critical path? (entry → processing → output)
+- What to avoid? (biggest hazard)
+- How to run it? (1 command)
+
+Example:
+- **KOSMOS** = autonomous AI research platform using Claude
+- **Core logic** lives in `agents/research_director.py` (use skeleton only — 21K tokens)
+- **Flow:** CLI → ResearchDirector → specialized agents → results
+- **Avoid:** `kosmos-claude-scientific-skills/` (external, not core)
+- **Run:** `kosmos run "your research question" --domain physics`
+-->
 
 ---
 
@@ -65,6 +90,7 @@ For each, provide:
 - File path and why it matters
 - Key classes/functions (skeleton or summary)
 - Your assessment from investigation
+- Mark with [VERIFIED], [INFERRED], or [X-RAY SIGNAL]
 -->
 
 ### {COMPONENT_1_NAME}
@@ -80,7 +106,7 @@ For each, provide:
 <!--
 Example:
 ### Order Engine
-**File:** `core/engine.py` | **Why it matters:** Central orchestrator for all order processing
+**File:** `core/engine.py` | **Why it matters:** [VERIFIED] Central orchestrator for all order processing
 
 ```python
 class OrderEngine:
@@ -90,9 +116,9 @@ class OrderEngine:
     def execute_payment(self, order: Order) -> PaymentResult: ...
 ```
 
-**What to know:** Uses strategy pattern for payment providers. The `process_order` method is the
+**What to know:** [VERIFIED] Uses strategy pattern for payment providers. The `process_order` method is the
 critical path — handles validation, payment, inventory reservation, and fulfillment in sequence.
-Retry logic with exponential backoff for payment failures.
+[VERIFIED] Retry logic with exponential backoff for payment failures (2s, 4s, 8s).
 -->
 
 ### {COMPONENT_2_NAME}
@@ -111,6 +137,7 @@ Retry logic with exponential backoff for payment failures.
 AGENT INSTRUCTIONS:
 Trace a typical request/operation through the system.
 Show the sequence, not just a list.
+Include file:line references where possible.
 -->
 
 ```
@@ -156,6 +183,7 @@ AGENT INSTRUCTIONS:
 Only include complexity hotspots you INVESTIGATED.
 Provide your verdict: essential vs accidental complexity.
 Generate logic map for essential complexity.
+Mark confidence level.
 -->
 
 ### {COMPLEX_FUNCTION_1} (CC={CC_1})
@@ -170,7 +198,7 @@ Example for ESSENTIAL complexity:
 
 ### process_order() (CC=25)
 **Location:** `core/engine.py:45`
-**Verdict:** Essential — business logic requires this complexity
+**Verdict:** [VERIFIED] Essential — business logic requires this complexity
 
 **Logic Map:**
 ```
@@ -205,7 +233,7 @@ Example for ACCIDENTAL complexity:
 
 ### validate_input() (CC=18)
 **Location:** `api/handlers.py:102`
-**Verdict:** Accidental — candidate for refactoring
+**Verdict:** [VERIFIED] Accidental — candidate for refactoring
 
 **Issue:** Giant switch statement mixing schema validation with business rules.
 
@@ -250,12 +278,12 @@ Example:
 | Operation | Location | Trigger | Notes |
 |-----------|----------|---------|-------|
 | INSERT orders | order_repo.py:34 | Order created | Transaction boundary |
-| UPDATE inventory | inventory.py:89 | Item reserved | Must rollback on payment failure |
+| UPDATE inventory | inventory.py:89 | Item reserved | [VERIFIED] Must rollback on payment failure |
 
 ### External API Calls
 | Service | Location | Trigger | Notes |
 |---------|----------|---------|-------|
-| Stripe API | providers/stripe.py:45 | Payment charge | Has retry logic, 3 attempts |
+| Stripe API | providers/stripe.py:45 | Payment charge | [VERIFIED] Has retry logic, 3 attempts |
 | Slack webhook | notifications.py:23 | Order completed | Fire-and-forget, non-critical |
 -->
 
@@ -297,6 +325,62 @@ Example:
 
 ---
 
+## Gotchas — Things That Will Trip You Up
+
+<!--
+AGENT INSTRUCTIONS:
+THIS SECTION IS MANDATORY. Document counterintuitive behaviors discovered during investigation.
+These are the insights that make your document valuable beyond raw X-Ray output.
+Mark each with confidence level.
+-->
+
+{GOTCHAS}
+
+<!--
+Example:
+1. **[VERIFIED] Config must be loaded first** — `get_config()` initializes the logging singleton;
+   calling `get_logger()` before `get_config()` causes silent failures with no error message.
+
+2. **[VERIFIED] API key "999..." enables CLI mode** — Setting ANTHROPIC_API_KEY to all 9s
+   activates development mode without API costs. Not documented anywhere.
+
+3. **[INFERRED] Import order in __init__.py matters** — Models must import before services
+   due to SQLAlchemy mapper configuration. Reordering causes cryptic "mapper not found" errors.
+
+4. **[VERIFIED] Circular import is intentional** — `llm.py <-> anthropic.py` looks like a bug
+   but is the provider factory pattern. Don't "fix" it.
+
+5. **[VERIFIED] Race condition in inventory check** — Line 178 does check-then-reserve without
+   locking; two concurrent orders can both pass the availability check.
+-->
+
+---
+
+## When Things Break (Debugging Guide)
+
+<!--
+AGENT INSTRUCTIONS:
+Document common failure modes and how to debug them.
+This helps the next Claude troubleshoot efficiently.
+-->
+
+| Symptom | Check First | Common Cause |
+|---------|-------------|--------------|
+| {SYMPTOM_1} | {CHECK_1} | {CAUSE_1} |
+
+<!--
+Example:
+| Symptom | Check First | Common Cause |
+|---------|-------------|--------------|
+| "LLM call hangs" | `ANTHROPIC_API_KEY` env var | Key invalid or rate limited |
+| "Experiment fails silently" | `docker ps` | Sandbox container not running |
+| "Import error on startup" | `pip install -e .` | Package not in dev mode |
+| "Config not found" | Working directory | Must run from project root |
+| "Database connection refused" | `NEO4J_PASSWORD` | Knowledge graph not configured |
+-->
+
+---
+
 ## Environment & Configuration
 
 ### Required Environment Variables
@@ -316,15 +400,15 @@ Example:
 ### Required Environment Variables
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
-| `STRIPE_API_KEY` | Yes | — | Payment processing |
+| `DATABASE_URL` | **Yes** | — | PostgreSQL connection string |
+| `STRIPE_API_KEY` | **Yes** | — | Payment processing |
 | `LOG_LEVEL` | No | INFO | Logging verbosity |
 
 ### Configuration Files
 | File | Purpose |
 |------|---------|
 | `config/settings.py` | Application settings, loads from env |
-| `.env` | Local development overrides |
+| `.env` | Local development overrides (not committed) |
 -->
 
 ---
@@ -406,30 +490,53 @@ Example:
 
 ---
 
-## What X-Ray Missed
+## What X-Ray Missed (Your Insights)
 
 <!--
 AGENT INSTRUCTIONS:
-Add insights you discovered during investigation that weren't in X-Ray output.
-This is YOUR value-add as an analyst.
+THIS SECTION IS MANDATORY. Add insights you discovered during investigation
+that weren't in X-Ray output. This is YOUR value-add as an analyst.
+Mark each with confidence level.
 -->
 
 {INSIGHTS}
 
 <!--
 Example:
-1. **Feature flags:** Payment providers can be disabled via `ENABLED_PROVIDERS` env var.
+1. **[VERIFIED] Feature flags:** Payment providers can be disabled via `ENABLED_PROVIDERS` env var.
    X-Ray saw the config but not the conditional activation in `providers/__init__.py:23`.
 
-2. **Rate limiting:** External API calls have a custom rate limiter in `lib/rate_limit.py`.
+2. **[VERIFIED] Rate limiting:** External API calls have a custom rate limiter in `lib/rate_limit.py`.
    Not detected as a pattern by X-Ray.
 
-3. **Potential race condition:** `inventory.py:78` checks availability then reserves in
+3. **[VERIFIED] Potential race condition:** `inventory.py:78` checks availability then reserves in
    separate queries. Two concurrent orders could both pass the check. Suggest using
    `SELECT FOR UPDATE`.
 
-4. **Implicit dependency:** `OrderService` assumes `InventoryService` is initialized first.
+4. **[INFERRED] Implicit dependency:** `OrderService` assumes `InventoryService` is initialized first.
    No explicit dependency injection — relies on import order in `services/__init__.py`.
+
+5. **[VERIFIED] Prompt caching enabled:** Claude calls use prompt caching by default (`enable_cache: true`).
+   Reduces API costs by ~90% for repetitive operations.
+-->
+
+---
+
+## What This Document Doesn't Cover (Gaps)
+
+<!--
+AGENT INSTRUCTIONS:
+Be honest about limitations. This helps the next Claude know where to dig deeper.
+-->
+
+{GAPS}
+
+<!--
+Example:
+- **Knowledge graph internals** — Neo4j integration is optional; didn't investigate deeply
+- **Schema migrations** — Alembic setup exists but migration strategy unclear
+- **Performance tuning** — No profiling data; unknown bottlenecks
+- **Multi-tenancy** — Not clear if supported; would need investigation
 -->
 
 ---
@@ -488,6 +595,10 @@ Example:
 {KEY_IMPORTS}
 ```
 
+### Linter Rules
+
+{LINTER_RULES}
+
 <!--
 Example:
 ### Key Commands
@@ -510,10 +621,42 @@ from models import Order, OrderItem, User
 from services import OrderService, InventoryService
 from providers import get_payment_provider
 ```
+
+### Linter Rules
+```toml
+[tool.ruff]
+line-length = 100
+select = ["E", "W", "F", "I", "B"]
+ignore = ["E501", "B008", "C901"]
+```
+Translation: Max 100 chars (but E501 ignored), imports sorted (I), no bare excepts (B).
 -->
 
 ---
 
-*This onboarding document was prepared by the repo_xray agent.*
-*It compresses a {TOTAL_TOKENS}-token codebase into ~{DOC_TOKENS} tokens of actionable intelligence.*
+## Quality Metrics
+
+<!--
+AGENT INSTRUCTIONS:
+Report these metrics at the end of your document.
+They help users understand the depth of analysis.
+-->
+
+| Metric | Value |
+|--------|-------|
+| Pillars investigated | {PILLARS_INVESTIGATED} |
+| Hotspots with verdicts | {HOTSPOTS_VERDICTS} |
+| [VERIFIED] insights | {VERIFIED_COUNT} |
+| [INFERRED] insights | {INFERRED_COUNT} |
+| Gotchas documented | {GOTCHAS_COUNT} |
+| Error paths documented | {ERROR_PATHS_COUNT} |
+| Compression ratio | {COMPRESSION_RATIO} |
+
+---
+
+*This onboarding document was prepared by the repo_xray agent using the four-phase workflow:
+ORIENT (read X-Ray scan) → INVESTIGATE (verify signals, two passes) → SYNTHESIZE (curate with judgment) → VALIDATE (self-test).*
+
+*It compresses a {TOTAL_TOKENS}-token codebase into ~{DOC_TOKENS} tokens of actionable intelligence optimized for AI coding assistants.*
+
 *For deeper exploration, use the `@repo_xray query` or `@repo_xray focus` modes.*

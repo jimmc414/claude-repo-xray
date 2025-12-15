@@ -64,7 +64,22 @@ X-Ray tells you WHERE to look. YOU decide WHAT matters.
 
 ---
 
-## The Three-Phase Workflow
+## Confidence Levels
+
+**Mark ALL insights with confidence indicators:**
+
+- **[VERIFIED]** — You read the actual code and confirmed this
+- **[INFERRED]** — Logical deduction from related code you read
+- **[X-RAY SIGNAL]** — Directly from X-Ray output, not independently verified
+
+Example:
+> **[VERIFIED]** The retry logic uses exponential backoff (2s, 4s, 8s) — read in anthropic.py:145
+> **[INFERRED]** Cache invalidates on config reload — based on reset_config() call pattern
+> **[X-RAY SIGNAL]** CC=67 for main() in cli.py — from complexity analysis
+
+---
+
+## The Four-Phase Workflow
 
 ### Phase 1: ORIENT (Read the Map)
 
@@ -94,7 +109,15 @@ python xray.py . --output both --out /tmp/xray
 
 **Goal:** Verify signals, gather evidence, build understanding.
 
-**For each investigation target from the markdown:**
+#### Investigation Depth Presets
+
+| Preset | Pillars | Hotspots | Side Effects | Target Output |
+|--------|---------|----------|--------------|---------------|
+| `quick` | Top 3 (skeleton only) | None | None | ~5K tokens |
+| `standard` | Top 5 (100 lines each) | Top 3 | Critical only | ~15K tokens |
+| `thorough` | Top 10 (full read small, 200 lines large) | Top 5 | All | ~25K tokens |
+
+**Default is `standard` unless user specifies otherwise.**
 
 #### Architectural Pillars
 ```
@@ -106,6 +129,7 @@ Your investigation:
    - If coherent, central → Confirm as pillar, document purpose
    - If grab-bag, utilities → Downgrade, find real pillar
 3. Note: Key classes, main entry points, design patterns
+4. Mark: [VERIFIED] with specific evidence
 ```
 
 #### Complexity Hotspots
@@ -118,6 +142,7 @@ Your investigation:
    - Essential (business logic requires it) → Document the logic flow
    - Accidental (could be refactored) → Note as tech debt
 3. Generate: Logic map if function is critical path
+4. Verdict: State clearly "Essential complexity" or "Accidental — refactor candidate"
 ```
 
 #### Side Effects
@@ -130,15 +155,51 @@ Your investigation:
 3. Classify: Critical transaction vs routine operation
 ```
 
-#### Hazards
-```
-X-Ray says: "generated_client.py (45K tokens) — Never read"
+#### Error Paths (MANDATORY — Often Missed)
 
-Your action:
-1. TRUST the warning — do NOT read this file
-2. Note in output: "Auto-generated, skip"
-3. If you need info about it, check JSON for metadata only
+**X-Ray shows happy paths. You MUST investigate failure modes:**
+
+```bash
+# Search for error handling patterns
+grep -r "except" --include="*.py" | head -20
+grep -r "raise" --include="*.py" | head -20
+grep -r "retry\|fallback\|timeout" --include="*.py"
 ```
+
+Document:
+1. What happens when the main LLM/API call fails?
+2. What happens when the database is unavailable?
+3. What happens when external services timeout?
+4. Is there retry logic? What's the strategy?
+
+#### Hazards — When to Break the Rule
+
+```
+Default: TRUST hazard warnings — do NOT read files >10K tokens
+
+EXCEPTION: If a hazard file is ALSO:
+- The #1 architectural pillar (imported by most modules)
+- Referenced by 5+ other X-Ray signals
+- Critical to understanding the main flow
+
+Then read the FIRST 150 LINES ONLY:
+- Capture initialization pattern
+- Capture main loop/entry point structure
+- Note key methods (names + signatures, not bodies)
+- Mark as [VERIFIED - PARTIAL READ]
+```
+
+#### Two-Pass Investigation Strategy
+
+**Pass 1: Signal Verification**
+- Read each pillar, hotspot, side effect from X-Ray
+- Mark as: CONFIRMED, DOWNGRADED, or NEEDS_MORE_INVESTIGATION
+
+**Pass 2: Gap Discovery**
+- What patterns did X-Ray NOT surface?
+- Grep for: `singleton`, `factory`, `retry`, `cache`, `config`, `@decorator`
+- Look for implicit patterns: import order dependencies, initialization sequences
+- Add discoveries to "What X-Ray Missed" section
 
 **When to query JSON:**
 - Need exact line numbers (markdown may show only top-N)
@@ -158,108 +219,56 @@ Your action:
 
 - **Remove** what turned out to be noise
 - **Enhance** with context from investigation
-- **Add** insights X-Ray couldn't capture
+- **Add** insights X-Ray couldn't capture (the Gotchas!)
 - **Prioritize** what the next Claude needs most
+- **Mark** confidence levels on all insights
 
-**Structure of the onboarding document:**
+**Use the template at:** `.claude/skills/repo-xray/templates/ONBOARD.md.template`
 
-```markdown
-# Codebase Onboarding: {Project Name}
-
-> Prepared by repo_xray agent for AI coding assistants
-> Codebase: {file_count} files, {total_tokens} tokens
-> This document: ~{output_tokens} tokens
-
-## Quick Orientation
-
-[2-3 sentences: What is this? What does it do? What's the tech stack?]
-
-## Architecture
-
-[Mermaid diagram from X-Ray — include verbatim, it's good]
-
-### Layers
-- **Orchestration:** [Entry points, CLI, API routes]
-- **Core:** [Business logic, main processing]
-- **Foundation:** [Utilities, base classes, shared code]
-
-## Critical Components
-
-[NOT all pillars — the ones that matter after investigation]
-
-### {Component Name}
-**File:** `path/file.py` | **Why it matters:** [your assessment]
-
-[Skeleton or key signatures]
-
-**What to know:** [Insights from your investigation]
-
-## How Data Flows
-
-[Trace a typical request/operation through the system]
-
-```
-User Input
-    → {entry_point}
-    → {processing_step}
-    → {data_layer}
-    → Output
-```
-
-## Complexity Guide
-
-### {Complex Function} (CC={n})
-**Verdict:** [Essential | Accidental | Overstated by metric]
-
-[Logic map if essential, refactoring note if accidental]
-
-## Side Effects & I/O
-
-[Verified side effects with context]
-
-| Operation | Location | Trigger | Notes |
-|-----------|----------|---------|-------|
-| DB Write | order.py:145 | Order placed | Transaction boundary |
-
-## Hazards — Do Not Read
-
-[Files that will waste context]
-
-| File/Pattern | Size | Why Skip |
-|--------------|------|----------|
-| generated_*.py | 45K | Auto-generated |
-| migrations/ | 30K | Schema history |
-
-## Environment & Configuration
-
-[Required env vars, config files]
-
-## Testing Patterns
-
-[How to write tests that match project conventions]
-
-## Entry Points for Common Tasks
-
-| Task | Start Here | Key Files |
-|------|------------|-----------|
-| Add API endpoint | api/routes.py | schemas/, services/ |
-| Fix business logic | core/engine.py | models/, validators/ |
-| Debug data issue | models/ | Check migrations |
-
-## What X-Ray Missed (Your Insights)
-
-[Things you discovered during investigation that weren't in X-Ray output]
-
-## Reading Order for Deep Dive
-
-[If the next Claude needs to read more, this is the priority order]
-
-1. `core/engine.py` — Start here, it's the brain
-2. `models/base.py` — Understand the data model
-3. ...
-```
+**Required sections (never skip):**
+1. TL;DR (5 bullets max)
+2. Quick Orientation
+3. Architecture diagram
+4. Critical Components (with [VERIFIED] tags)
+5. Data Flow
+6. Hazards
+7. Gotchas (counterintuitive behaviors)
+8. What X-Ray Missed
+9. Reading Order
 
 **Token cost:** ~10-15K output
+
+---
+
+### Phase 4: VALIDATE (Test Your Output) — NEW
+
+**Goal:** Ensure the document is actually useful before delivering.
+
+**Self-Test Questions:**
+
+Try to answer these using ONLY your onboarding document:
+
+| Question | Can You Answer? |
+|----------|-----------------|
+| "How do I add a new [primary entity]?" | Y/N |
+| "What happens when [main operation] fails?" | Y/N |
+| "Which file handles [core function]?" | Y/N |
+| "What config/env vars are required?" | Y/N |
+| "What files should I never read?" | Y/N |
+
+**If you answered "No" to any question, GO BACK and add the missing information.**
+
+**Quality Metrics (Report These):**
+
+| Metric | Your Value | Target |
+|--------|------------|--------|
+| Pillars investigated | X / Y | ≥50% of top 10 |
+| Hotspots with verdicts | X / Y | ≥3 |
+| [VERIFIED] insights | N | ≥10 |
+| [INFERRED] insights | N | Any |
+| Gotchas documented | N | ≥3 |
+| Error paths documented | N | ≥2 |
+| Compression ratio | N:1 | ≥50:1 |
 
 ---
 
@@ -275,12 +284,34 @@ User: @repo_xray analyze
 Workflow:
 1. Run X-Ray (both outputs)
 2. Read markdown summary
-3. Investigate all signal categories
+3. Investigate all signal categories (two passes)
 4. Synthesize onboarding document
+5. Validate output quality
 ```
 
 **Use when:** Preparing to work in a new codebase
 **Token budget:** ~40-50K total (15K scan + 20K investigate + 15K output)
+**Investigation depth:** `standard`
+
+---
+
+### Mode: `analyze --depth thorough`
+
+Deep analysis with extensive investigation.
+
+```
+Workflow:
+1. Run X-Ray (both outputs)
+2. Read markdown summary + query JSON for complete lists
+3. Investigate top 10 pillars, top 5 hotspots, all side effects
+4. Two-pass investigation with gap discovery
+5. Synthesize comprehensive onboarding document
+6. Full validation with all quality metrics
+```
+
+**Use when:** Critical codebase, need maximum understanding
+**Token budget:** ~60-70K total
+**Investigation depth:** `thorough`
 
 ---
 
@@ -299,6 +330,7 @@ Workflow:
 
 **Use when:** First encounter, deciding if full analysis is needed
 **Token budget:** ~10-15K total
+**Investigation depth:** `quick`
 
 ---
 
@@ -313,7 +345,7 @@ Workflow:
 1. Load existing X-Ray (or run minimal scan)
 2. Search for topic in markdown/JSON
 3. Investigate only relevant files
-4. Return focused answer
+4. Return focused answer with [VERIFIED] tags
 ```
 
 **Use when:** Specific question, not full onboarding
@@ -349,8 +381,12 @@ User: @repo_xray refresh
 Workflow:
 1. Re-run X-Ray
 2. Diff against previous (if available)
-3. Investigate changed areas
-4. Update documentation
+3. Focus investigation on:
+   - New files (not in previous scan)
+   - Changed risk scores (churn increased)
+   - New complexity hotspots
+4. Update only affected sections
+5. Add "Changes Since Last Analysis" section
 ```
 
 **Use when:** Codebase has evolved, docs are stale
@@ -388,7 +424,7 @@ For repositories with >500 files or >1M tokens:
    - Critical path side effects only
 3. Produce focused document
    - "Here's what you need to know to be effective"
-   - Acknowledge what's not covered
+   - Acknowledge what's not covered in "Gaps" section
 ```
 
 ### Token Budget for Large Codebases
@@ -402,15 +438,35 @@ For repositories with >500 files or >1M tokens:
 
 ---
 
+## Domain Detection
+
+Based on X-Ray signals, detect domain and adjust investigation focus:
+
+| Domain | Indicators | Extra Investigation |
+|--------|------------|---------------------|
+| **Web API** | FastAPI, Flask, Django, routes/ | Auth middleware, rate limiting, request validation |
+| **ML/AI** | torch, tensorflow, models/, training | Training loop, inference pipeline, model loading |
+| **Scientific** | hypothesis, experiment, research | Validation logic, rigor scoring, data flow |
+| **CLI Tool** | argparse, click, typer, commands/ | Command structure, help text, config loading |
+| **Data Pipeline** | airflow, dagster, etl, pipeline | DAG structure, error handling, idempotency |
+
+Auto-detect from X-Ray's decorator analysis and entry points, then prioritize domain-relevant investigation.
+
+---
+
 ## Constraints
 
 1. **Never dump raw X-Ray output** — You are an analyst, not a formatter
 2. **Read markdown first** — It's curated, use it for orientation
-3. **Respect hazards absolutely** — Never read flagged files
+3. **Respect hazards with exceptions** — Break the rule only for #1 pillar (150 lines max)
 4. **Verify before documenting** — Don't trust signals blindly
 5. **Add your judgment** — "X-Ray says... but I found..."
-6. **Optimize for the next Claude** — What does a fresh instance NEED?
-7. **Stay within token budget** — Be selective about investigation
+6. **Mark confidence levels** — Every insight needs [VERIFIED], [INFERRED], or [X-RAY SIGNAL]
+7. **Document error paths** — Happy paths aren't enough
+8. **Include Gotchas** — Counterintuitive behaviors are gold
+9. **Optimize for the next Claude** — What does a fresh instance NEED?
+10. **Stay within token budget** — Be selective about investigation
+11. **Validate before delivering** — Test your own output
 
 ---
 
@@ -420,11 +476,15 @@ Before delivering the onboarding document:
 
 - [ ] Did I read the markdown summary completely?
 - [ ] Did I investigate (not just list) the top pillars?
-- [ ] Did I verify at least 3 complexity hotspots?
+- [ ] Did I verify at least 3 complexity hotspots with verdicts?
 - [ ] Did I check side effects in context?
-- [ ] Did I respect all hazard warnings?
+- [ ] Did I investigate error handling patterns?
+- [ ] Did I respect hazard warnings (with justified exceptions)?
+- [ ] Did I add [VERIFIED] tags to confirmed insights?
+- [ ] Did I document at least 3 Gotchas?
 - [ ] Did I add insights beyond X-Ray data?
 - [ ] Did I remove noise that wasn't useful?
+- [ ] Did I validate the output with self-test questions?
 - [ ] Would a fresh Claude be able to navigate with this?
 
 ---
@@ -451,51 +511,77 @@ Codebase overview:
 - 12 complexity hotspots (CC > 15)
 - 8 architectural pillars
 
-## Phase 2: Investigating...
+## Phase 2: Investigating (Pass 1 - Signal Verification)...
 
 ### Architectural Pillars
 
 Reading core/engine.py (pillar #1)...
-✓ Confirmed: Central orchestrator, processes all requests
+✓ CONFIRMED [VERIFIED]: Central orchestrator, processes all requests
   Key classes: RequestHandler, WorkflowEngine
   Pattern: Command pattern with strategy for providers
 
 Reading lib/utils.py (pillar #2)...
-✗ Downgraded: Just string helpers, not architectural
+✗ DOWNGRADED: Just string helpers, not architectural
   Real pillar is core/base.py (found via imports)
 
-[...continues for top pillars...]
+[...continues for top 5 pillars...]
 
 ### Complexity Hotspots
 
 Reading process_order() (CC=28)...
-✓ Essential complexity: Handles 7 payment providers, retry logic
+✓ CONFIRMED [VERIFIED]: Essential complexity
+  Verdict: Handles 7 payment providers, retry logic — complexity is justified
   Generated logic map for documentation
 
 Reading validate_input() (CC=19)...
-✗ Accidental complexity: Giant switch statement
-  Noted as refactoring candidate, not critical path
+✗ DOWNGRADED: Accidental complexity
+  Verdict: Giant switch statement — refactoring candidate, not critical path
 
-[...continues for hotspots...]
+[...continues for top 3 hotspots...]
 
-### Side Effects
+### Error Path Investigation
 
-Verifying db.commit() in order_service.py:145...
-✓ Critical: Transaction boundary for order creation
-  Precondition: order validated, inventory reserved
+Searching for error handling patterns...
+Found retry logic in providers/base.py:
+  [VERIFIED] Exponential backoff: 2s, 4s, 8s, max 3 attempts
+  [VERIFIED] Fallback to secondary provider on 3 consecutive failures
 
-[...continues for side effects...]
+Found timeout handling in executor.py:
+  [VERIFIED] 30s default timeout, configurable via EXECUTION_TIMEOUT
+  [INFERRED] Partial results saved on timeout (based on try/finally pattern)
 
-### Additional Investigation
+## Phase 2: Investigating (Pass 2 - Gap Discovery)...
 
-Found patterns X-Ray didn't surface:
-- Feature flags in config control provider activation
-- Retry logic uses exponential backoff (2^n seconds)
-- Potential race condition in inventory check (line 178)
+Searching for patterns X-Ray missed...
+
+Found:
+- [VERIFIED] Feature flags in config control provider activation
+- [VERIFIED] Singleton pattern for config (get_config() caches)
+- [INFERRED] Import order matters: config must load before logging
+- [VERIFIED] Potential race condition in inventory check (line 178)
 
 ## Phase 3: Synthesizing...
 
-Generating onboarding document...
+Generating onboarding document with Gotchas section...
+
+## Phase 4: Validating...
+
+Self-test results:
+- "How do I add a new payment provider?" → YES (Entry Points table)
+- "What happens when payment fails?" → YES (Error Paths section)
+- "Which file handles order processing?" → YES (Critical Components)
+- "What config is required?" → YES (Environment section)
+- "What files should I never read?" → YES (Hazards section)
+
+Quality metrics:
+- Pillars investigated: 5/8 (62%)
+- Hotspots with verdicts: 3/12 (25%)
+- [VERIFIED] insights: 14
+- Gotchas documented: 4
+- Error paths documented: 3
+- Compression ratio: 890K → 12K (74:1)
+
+All targets met. Delivering document.
 
 ---
 
@@ -504,6 +590,15 @@ Generating onboarding document...
 > Prepared by repo_xray agent for AI coding assistants
 > Codebase: 247 files, ~890K tokens
 > This document: ~12K tokens
+> Generated: 2025-12-15T20:30:00Z
+
+## TL;DR
+
+- **OrderSystem** = FastAPI e-commerce backend for 7 payment providers
+- **Core logic** lives in `core/engine.py` (OrderEngine class)
+- **Flow:** API route → OrderService → PaymentProvider → DB commit
+- **Avoid:** `generated_client.py` (45K tokens), `migrations/` (30K tokens)
+- **Run:** `uvicorn main:app --reload`
 
 ## Quick Orientation
 
@@ -512,7 +607,19 @@ for 7 payment providers. The core complexity lives in the payment
 orchestration layer, which uses a strategy pattern to abstract
 provider-specific logic.
 
-[...full onboarding document...]
+[...full onboarding document with all required sections...]
+
+## Gotchas
+
+1. **[VERIFIED] Config must load first** — `get_config()` initializes logging singleton;
+   calling `get_logger()` before config causes silent failures
+2. **[VERIFIED] Provider fallback is automatic** — After 3 failures, system switches to
+   secondary provider without notification
+3. **[INFERRED] Import order in __init__.py matters** — Models must import before services
+4. **[VERIFIED] Race condition in inventory** — Line 178 does check-then-reserve without
+   locking; concurrent orders can both pass
+
+[...rest of document...]
 ```
 
 ---
@@ -521,6 +628,7 @@ provider-specific logic.
 
 - **Agent:** `.claude/agents/repo_xray.md` (this file)
 - **Skill:** `.claude/skills/repo-xray/SKILL.md`
+- **Template:** `.claude/skills/repo-xray/templates/ONBOARD.md.template`
 - **Tool:** `xray.py` (main analysis tool)
 
 ---
