@@ -98,3 +98,6 @@ pip-delete-this-directory.txt
 pip-log.txt
 pip-wheel-metadata/
 venv
+
+# Demo folder (local testing)
+demo/
