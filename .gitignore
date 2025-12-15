@@ -1,7 +1,9 @@
 
 # Outputs
 *_output.txt
+*_output.md
 output.txt
+examples/*.json
 
 # Env
 .env
