@@ -1,417 +1,136 @@
 # repo-xray
 
-Unified AST-based Python codebase analysis for AI coding assistants.
-
-> **Quick start**: `python xray.py /path/to/project` (all sections enabled by default)
-
-## The Problem
-
-AI coding assistants face a cold start problem: a 200K token context window cannot directly ingest a codebase that may span millions of tokens, yet the assistant must understand the architecture to work effectively.
-
-## The Solution
-
-A **unified analysis tool** that extracts 37+ signals across 7 dimensions in a single pass:
-
-- **Structure** (4): skeleton, tokens, files, interfaces
-- **Architecture** (5): layers, orphans, circulars, import aliases, data flow
-- **History** (5): risk scores, coupling pairs, freshness, commit sizes, expertise
-- **Complexity** (4): cyclomatic complexity, hotspots, async patterns, type coverage
-- **Behavior** (6): side effects (5 types), cross-module calls, reverse lookup
-- **Coverage** (5): test files, functions, fixtures, tested/untested dirs
-- **Context** (8): CLI args, instance vars, Pydantic validators, env defaults, test idioms, linter rules, hazard patterns, GitHub metadata
-
-The tool produces a comprehensive reference (~2K-15K tokens depending on preset) that helps an AI effectively understand a multimillion token repository within a limited context window.
-
-## Usage
-
-### Basic Usage (v3.1 - Config-Driven)
-
-**All sections are enabled by default.** No need to remember flags - just run:
+AST-based Python codebase analysis for AI coding assistants.
 
 ```bash
 python xray.py /path/to/project
 ```
 
-This generates a complete analysis with all 25+ sections. To customize, disable what you don't need:
+## The Problem
+
+AI coding assistants face a cold start problem. A codebase might span 2 million tokens. A context window holds 200K. The assistant cannot read everything, yet must understand the architecture to work effectively.
+
+Reading files at random wastes context on implementation details. Reading nothing leaves the assistant guessing. What's needed is a compressed representation—a map of the codebase that fits in context and tells the AI where to look.
+
+## The Solution
+
+This tool extracts 37 signals from a Python codebase in a single pass:
+
+| Dimension | Signals |
+|-----------|---------|
+| Structure | Skeletons, tokens, files, interfaces |
+| Architecture | Import layers, dependency distance, circular deps, hub modules |
+| History | Risk scores, co-modification coupling, freshness, expertise |
+| Complexity | Cyclomatic complexity, hotspots, async patterns |
+| Behavior | Side effects (DB, API, file, subprocess), cross-module calls |
+| Context | CLI arguments, env vars, Pydantic validators, linter rules |
+| Safety | Hazard files, exclusion patterns |
+
+Output: 2K-15K tokens (configurable) that compress a multi-million token codebase into actionable intelligence.
+
+## Usage
 
 ```bash
-# Disable specific sections
-python xray.py . --no-explain --no-persona-map
+# Full analysis (default)
+python xray.py /path/to/project
 
-# Use a preset for smaller output
+# Quick survey
 python xray.py . --preset minimal      # ~2K tokens
+
+# Balanced analysis
 python xray.py . --preset standard     # ~8K tokens
 
-# Use a custom config file
-python xray.py . --config my_config.json
-
-# Generate a config template to customize
-python xray.py --init-config > .xray.json
+# Both markdown and JSON
+python xray.py . --output both --out ./analysis
 ```
 
-### Configuration
+### Presets
 
-The tool supports three ways to customize output:
+| Preset | Output | Use Case |
+|--------|--------|----------|
+| `minimal` | ~2K tokens | Quick reconnaissance |
+| `standard` | ~8K tokens | Balanced coverage |
+| (default) | ~15K tokens | Comprehensive analysis |
 
-1. **Project config**: Place `.xray.json` in your project root (auto-detected)
-2. **Explicit config**: Use `--config path/to/config.json`
-3. **CLI flags**: Use `--no-<section>` to disable specific sections
+### Selective Output
 
-Generate a config template:
+Disable sections you don't need:
 
 ```bash
-python xray.py --init-config > .xray.json
+python xray.py . --no-logic-maps --no-test-example --no-prose
 ```
 
-Example config (all sections shown, set to `false` to disable):
+Or create a `.xray.json` config in your project root:
 
 ```json
 {
   "sections": {
-    "summary": true,
-    "prose": true,
-    "mermaid": true,
-    "architectural_pillars": true,
-    "maintenance_hotspots": true,
-    "complexity_hotspots": true,
-    "critical_classes": {"enabled": true, "count": 10},
-    "data_models": true,
-    "logic_maps": {"enabled": true, "count": 5},
+    "logic_maps": { "enabled": true, "count": 5 },
     "hazards": true,
-    "entry_points": true,
-    "explain": true,
-    "persona_map": true,
-    "github_about": true,
-    "data_flow": true,
-    "cli_arguments": true,
-    "instance_vars": true,
-    "pydantic_validators": true,
-    "hazard_patterns": true,
-    "env_defaults": true,
-    "test_example": true,
-    "linter_rules": true
+    "git": true
   }
 }
 ```
 
-### Disable Flags
-
-Quickly disable sections without a config file:
-
-| Flag | Disables |
-|------|----------|
-| `--no-prose` | Natural language summary |
-| `--no-mermaid` | Architecture diagram |
-| `--no-priority-scores` | Architectural Pillars + Maintenance Hotspots |
-| `--no-critical-classes` | Critical class skeletons |
-| `--no-data-models` | Pydantic/dataclass models |
-| `--no-logic-maps` | Complex function logic maps |
-| `--no-hazards` | Large file warnings |
-| `--no-entry-points` | CLI entry points |
-| `--no-explain` | Explanatory blockquotes |
-| `--no-persona-map` | Agent prompts/personas |
-
-### Presets
-
-| Preset | Description | Token Estimate |
-|--------|-------------|----------------|
-| `minimal` | Structure + imports only | ~2K |
-| `standard` | Core analysis, balanced output | ~8K |
-| (default) | All sections enabled | ~15-20K |
-
-### Output Options
-
-```bash
-# Output formats
-python xray.py . --output markdown     # Markdown (default)
-python xray.py . --output json         # JSON
-python xray.py . --output both         # Both formats
-
-# Write to files
-python xray.py . --out ./analysis      # Creates analysis.md (and .json if both)
-
-# Verbose progress
-python xray.py . --verbose
-```
-
-### Available Sections
-
-All sections are enabled by default. Here's what's included:
-
-| Section | Description |
-|---------|-------------|
-| `summary` | File counts, lines, tokens, type coverage |
-| `prose` | Natural language architecture overview |
-| `mermaid` | Architecture diagram (viewable in GitHub/VS Code) |
-| `architectural_pillars` | Most-imported files (understand these first) |
-| `maintenance_hotspots` | High-risk files by git history |
-| `complexity_hotspots` | Functions with highest cyclomatic complexity |
-| `critical_classes` | Top N classes with skeleton code + docstrings |
-| `data_models` | Pydantic/dataclass/TypedDict models by domain |
-| `logic_maps` | Control flow analysis for complex functions |
-| `import_analysis` | Architectural layers, orphans, circulars |
-| `layer_details` | Import weight per layer |
-| `git_risk` | Risk scores per file |
-| `coupling` | Files that change together |
-| `freshness` | Active/aging/stale/dormant files |
-| `side_effects` | I/O, network, DB operations |
-| `side_effects_detail` | Per-function side effects |
-| `entry_points` | CLI and main() entry points |
-| `environment_variables` | Env vars used in code |
-| `hazards` | Large files that waste context |
-| `test_coverage` | Test files, fixtures, coverage |
-| `tech_debt_markers` | TODO/FIXME/HACK comments |
-| `verify_imports` | Import path verification |
-| `signatures` | Full method signatures |
-| `state_mutations` | Attribute modifications |
-| `verify_commands` | Verification commands |
-| `explain` | Explanatory text before sections |
-| `persona_map` | Agent prompts and personas |
-| **v3.1 Features** | |
-| `github_about` | GitHub repo description and topics |
-| `data_flow` | Data flow direction annotation in Mermaid |
-| `cli_arguments` | CLI argument extraction (argparse/click/typer) |
-| `instance_vars` | Instance variables from `__init__` in class skeletons |
-| `pydantic_validators` | Pydantic Field() constraints and validators |
-| `hazard_patterns` | Glob patterns for hazard files |
-| `env_defaults` | Environment variable default values |
-| `test_example` | One-shot test file example ("Rosetta Stone") |
-| `linter_rules` | Linter rules from pyproject.toml/ruff.toml |
+Generate a config template: `python xray.py --init-config > .xray.json`
 
 ---
 
-## v3.1 Features (New)
+## Claude Code Integration
 
-### 1. GitHub About (`github_about`)
+The tool includes a Claude Code skill and agent that go beyond raw analysis. Instead of dumping X-Ray output, the agent uses it as a map to guide intelligent investigation.
 
-Pulls repository description and topics from GitHub to provide immediate context.
+### The Design
 
-**How it works:**
-1. Tries `gh` CLI first (works for private repos with auth)
-2. Falls back to GitHub API (public repos only)
-3. Shows error message if unavailable
-
-**Output:**
-```markdown
-## Summary
-
-> **About:** AST-based Python codebase analysis for AI coding assistants.
-> **Topics:** python, ast, codebase-analysis, ai-tools
+```
+X-Ray (the map)          Claude (the analyst)         Output (for next Claude)
+----------------         -------------------          -----------------------
+Extracts signals    -->  Investigates selectively --> Produces curated docs
+~15K tokens              Uses Read/Grep/Glob          ~15K tokens
+                         Adds judgment
 ```
 
-### 2. Data Flow Annotations (`data_flow`)
+The agent operates in three phases:
 
-Adds data flow direction analysis to the Mermaid architecture diagram.
+1. **Orient** — Run X-Ray, read the markdown summary for quick understanding
+2. **Investigate** — Use signals to guide deep reading with Read/Grep/Glob
+3. **Synthesize** — Produce curated onboarding documentation
 
-**How it works:**
-- Analyzes cross-module call patterns
-- Determines if system is push-based (higher layers call lower) or pull-based (lower call higher)
+This matters because X-Ray signals aren't always accurate. A "complexity hotspot" might be essential business logic or accidental complexity. A "pillar" module might be genuinely central or just a grab-bag of utilities. The agent verifies signals before including them in the final output.
 
-**Output:**
-```markdown
-*Data Flow: Foundation → Core → Orchestration (push-based)*
+### Agent Modes
+
+| Mode | Command | Purpose |
+|------|---------|---------|
+| `survey` | `@repo_xray survey` | Quick reconnaissance (~10K tokens) |
+| `analyze` | `@repo_xray analyze` | Full onboarding document (~40K tokens) |
+| `query` | `@repo_xray query "auth"` | Targeted investigation |
+| `focus` | `@repo_xray focus ./src/api` | Deep dive on subsystem |
+
+### What the Agent Adds
+
+X-Ray extracts signals. The agent adds:
+
+- **Verification** — Is this complexity actually essential?
+- **Context** — What triggers this side effect?
+- **Judgment** — Should this be in the final document?
+- **Insights** — Patterns X-Ray cannot detect (design patterns, implicit dependencies)
+
+The final output is optimized for a fresh Claude instance that has never seen the codebase. It answers: "What do I need to know to work effectively here?"
+
+### Files
+
 ```
-
-### 3. CLI Arguments Extraction (`cli_arguments`)
-
-Extracts command-line arguments from entry points, supporting argparse, click, and typer.
-
-**Output:**
-```markdown
-### CLI Arguments
-
-**main.py:**
-
-| Argument | Required | Default | Help |
-|----------|----------|---------|------|
-| `--query` | Yes | - | Query to execute |
-| `--config` | No | config.json | Config file path |
-| `--verbose` | No | False | Enable verbose output |
+.claude/
+├── agents/
+│   └── repo_xray.md           # Unified analyst agent
+└── skills/
+    └── repo-xray/
+        ├── SKILL.md           # Skill documentation
+        ├── COMMANDS.md        # Quick reference
+        └── templates/
+            └── ONBOARD.md.template
 ```
-
-### 4. Instance Variables (`instance_vars`)
-
-Shows `self.x = ...` assignments from `__init__` methods in class skeletons, helping AI understand object state.
-
-**Output:**
-```python
-class DatabaseManager:  # L42
-    def __init__(self, host: str, port: int = 5432)
-
-    # Instance variables:
-    self.connection = None
-    self.pool_size = 10
-    self.timeout = 30.0
-    self._cache = {}
-
-    def connect(self) -> Connection: ...
-```
-
-### 5. Pydantic Validators (`pydantic_validators`)
-
-Extracts `Field()` constraints and `@validator` decorators from Pydantic models.
-
-**Output:**
-```markdown
-**Config** [Pydantic] (config.py)
-
-| Field | Type | Constraints |
-|-------|------|-------------|
-| `max_cost_usd` | float | gt=0, le=1000 |
-| `timeout` | int | ge=1, default=30 |
-| `name` | str | min_length=1 |
-
-*Validators:* `validate_name`, `check_cost`
-```
-
-### 6. Hazard Glob Patterns (`hazard_patterns`)
-
-Derives glob patterns from large file paths, making it easy to exclude them.
-
-**Output:**
-```markdown
-### Patterns to Exclude
-
-*Use these glob patterns to skip large files:*
-
-- `data/artifacts/**` (3 files, ~50K tokens)
-- `logs/*.json` (5 files, ~100K tokens)
-- `cache/*.pkl` (2 files, ~20K tokens)
-```
-
-### 7. Environment Variable Defaults (`env_defaults`)
-
-Extracts default values from `os.getenv()` calls, showing which vars are required vs optional.
-
-**Output:**
-```markdown
-## Environment Variables
-
-| Variable | Default | Required | Location |
-|----------|---------|----------|----------|
-| `DATABASE_URL` | - | **Yes** | config.py:10 |
-| `LOG_LEVEL` | "INFO" | No | logging.py:5 |
-| `TIMEOUT` | 30 | No | client.py:20 |
-```
-
-### 8. Test Example ("Rosetta Stone") (`test_example`)
-
-Includes one complete, representative test file (≤50 lines) showing the project's testing patterns.
-
-**Output:**
-```markdown
-## Testing Idioms
-
-> **How to use:** Use this test as a template for writing new tests.
-
-**Patterns used:** `pytest.fixture`, `unittest.mock.patch`, `pytest.mark`
-
-**Example:** `tests/unit/test_service.py` (45 lines)
-
-\`\`\`python
-import pytest
-from unittest.mock import Mock, patch
-from myapp.service import MyService
-
-@pytest.fixture
-def mock_db():
-    return Mock()
-
-@pytest.mark.unit
-def test_create_record(mock_db):
-    with patch("myapp.service.database", mock_db):
-        svc = MyService()
-        result = svc.create("test")
-        mock_db.insert.assert_called_once()
-        assert result.id is not None
-\`\`\`
-```
-
-### 9. Linter Rules (`linter_rules`)
-
-Extracts linter configuration from pyproject.toml, ruff.toml, or .flake8 to help AI write compliant code.
-
-**Output:**
-```markdown
-## Project Idioms
-
-> **How to use:** Follow these rules to ensure your code passes CI.
-
-**Linter:** ruff (from `pyproject.toml`)
-
-| Rule | Value |
-|------|-------|
-| line_length | 100 |
-| select | E, W, F, I, B |
-| ignore | E501, B008 |
-
-**Banned patterns:**
-- `print()` - use logging instead
-```
-
----
-
-## Example Output
-
-### JSON Structure
-
-```json
-{
-  "metadata": {
-    "tool_version": "3.1.0",
-    "generated_at": "2025-12-15T...",
-    "target_directory": "/path/to/project",
-    "config": "defaults",
-    "file_count": 150
-  },
-  "summary": {
-    "total_files": 150,
-    "total_lines": 45000,
-    "total_tokens": 180000,
-    "total_functions": 1200,
-    "total_classes": 85,
-    "type_coverage": 72.5
-  },
-  "structure": { ... },
-  "complexity": { "hotspots": [...], "average_cc": 3.2 },
-  "git": { "risk": [...], "coupling": [...], "freshness": {...} },
-  "imports": { "graph": {...}, "aliases": [...], "orphans": [...] },
-  "calls": { "cross_module": {...}, "most_called": [...] },
-  "side_effects": { "by_type": {...}, "by_file": {...} },
-  "tests": { "test_file_count": 50, "fixtures": [...] },
-  "tech_debt": { "markers": {...}, "total_count": 45 }
-}
-```
-
-### Markdown Output
-
-```markdown
-# Codebase Analysis: project-name
-
-Generated: 2025-12-15 | Preset: None | Files: 150
-
-## Summary
-
-| Metric | Value |
-|--------|-------|
-| Python files | 150 |
-| Total lines | 45,000 |
-| Functions | 1,200 |
-| Classes | 85 |
-| Type coverage | 72.5% |
-
-## Complexity Hotspots
-
-| CC | Function | File |
-|----|----------|------|
-| 38 | `generate_skeleton` | ast_analysis.py |
-| 27 | `analyze_file` | ast_analysis.py |
-...
-```
-
-## Limitations
-
-Uses Python's built-in AST parser, so currently Python-only.
 
 ---
 
@@ -419,154 +138,192 @@ Uses Python's built-in AST parser, so currently Python-only.
 
 ### Skeleton Extraction
 
-**What**: Class definitions, method signatures, type annotations, decorators, constants with line numbers.
+Extracts class definitions, method signatures, type annotations, and decorators—without function bodies. A 10K token file typically produces a 500 token skeleton. 95% reduction.
 
-**Why**: Understanding interfaces doesn't require reading implementations. A 10K token file often has a 500 token skeleton.
-
-**How**: AST parsing extracts declarations without function bodies. Achieves ~95% token reduction.
+```python
+class OrderEngine:  # L45
+    def __init__(self, provider: PaymentProvider): ...
+    def process(self, order: Order) -> Result: ...  # CC=25
+    def validate(self, order: Order) -> bool: ...
+```
 
 ### Complexity Analysis
 
-**What**: Cyclomatic complexity (CC) per function, hotspots, async patterns.
+Cyclomatic complexity per function. Counts decision points: `if`, `for`, `while`, `except`, `and`, `or`. High CC (>10) indicates code that's harder to understand and test.
 
-**Why**: High CC (>10) indicates complex code that's hard to test and understand.
-
-**How**: Counts decision points: `if`, `elif`, `for`, `while`, `except`, `and`, `or`.
-
-### Git History Analysis
-
-**Risk Score** combines:
-- **Churn**: Commit frequency (high = active/buggy)
-- **Hotfix density**: Commits with "fix", "bug", "hotfix" keywords
-- **Author count**: Many authors = coordination overhead
-
-**Coupling Detection**: Files that change together across commits.
-
-**Freshness**: Active (<30d), Aging (30-90d), Stale (90-180d), Dormant (>180d).
+Also counts `BoolOp` branches correctly—`if a and b and c` adds 2 to complexity, not 1.
 
 ### Import Analysis
 
-**What**: Dependency graph, architectural layers, orphan detection, circular dependencies.
+Builds a dependency graph, then extracts:
 
-**New features**:
-- **Import aliases**: Tracks `import pandas as pd` patterns
-- **Dependency distance**: Calculates transitive import hops
-- **Hub detection**: Most connected modules
+- **Layers**: Orchestration (high imports, low importers), Core (balanced), Foundation (high importers)
+- **Dependency distance**: BFS shortest paths between all module pairs
+- **Hub modules**: Most connected modules (potential god objects)
+- **Circular dependencies**: Bidirectional import pairs
+- **Orphans**: Files with zero importers (dead code candidates)
 
-### Cross-Module Call Analysis (NEW)
+### Git History Analysis
 
-**What**: Where functions are called across module boundaries.
+**Risk score** combines three signals:
+- Churn (commit frequency)
+- Hotfix density (commits containing "fix", "bug", "hotfix", "revert")
+- Author count (coordination overhead)
 
-**Why**: Understanding call relationships reveals impact of changes.
+**Co-modification coupling** finds files that change together even without import relationships. Uses frequent itemset mining on commit history, filtering bulk refactors (>20 files).
 
-**Features**:
-- Cross-module call site detection
-- Reverse lookup ("Who calls this?")
-- Most-called functions ranking
-- Impact rating (low/medium/high)
+**Freshness**: Active (<30 days), Aging (30-90), Stale (90-180), Dormant (>180).
 
 ### Side Effect Detection
 
-**Categories**: Database, API, File I/O, Environment, Subprocess.
+Categorizes function calls by side effect type:
 
-**How**: Pattern matching on function calls.
+| Category | Patterns |
+|----------|----------|
+| DB | `session.commit`, `cursor.execute`, `insert(`, `update(` |
+| API | `requests.`, `httpx.`, `.post(`, `.put(` |
+| File | `.write(`, `json.dump`, `pickle.dump` |
+| Subprocess | `subprocess.`, `os.system`, `Popen(` |
 
-### Test Coverage
+Includes a whitelist to avoid false positives (`.get(`, `.read(`, `isinstance`).
 
-**What**: Test file counts, function estimates, fixtures, tested/untested modules.
+### Logic Maps
 
-**Why**: Test metadata reveals coverage gaps without reading test content.
+For complex functions (CC > 15), generates a symbolic representation of control flow:
+
+```
+process_order(order):
+  -> validate(order)
+  -> valid?
+     {status = processing}
+     * for item in items:
+       -> check_inventory(item)
+       [DB: reserve(item)]
+     -> calculate_total
+     [DB: save(order)]
+     -> Return(success)
+```
+
+Symbols: `->` control flow, `*` loop, `?` conditional, `{X}` state mutation, `[X]` side effect.
+
+### Hazard Detection
+
+Identifies files that would waste context:
+
+- Large files (>10K tokens)
+- Generated code (`**/generated_*.py`)
+- Migrations, fixtures, artifacts
+
+Outputs glob patterns for easy exclusion.
+
+### Additional Signals
+
+- **CLI arguments**: Extracted from argparse, Click, and Typer
+- **Environment variables**: From `os.getenv()` with default values
+- **Pydantic validators**: Field constraints and `@validator` decorators
+- **Linter rules**: From pyproject.toml, ruff.toml, .flake8
+- **Test patterns**: Representative test file as a "Rosetta Stone"
+
+---
+
+## Output Formats
+
+### Markdown
+
+Human-readable summary with tables, Mermaid diagrams, and code blocks. Renders in GitHub, VS Code, Obsidian.
+
+### JSON
+
+Structured data for programmatic consumption. The agent uses JSON for specific lookups while using markdown for orientation.
+
+```bash
+python xray.py . --output both --out ./analysis
+# Creates: analysis.md, analysis.json
+```
+
+---
+
+## Technical Details
+
+### How It Works
+
+Single-pass AST traversal using Python's `ast` module. Each file is parsed once; multiple analyzers extract different signals from the same tree.
+
+Key techniques:
+- `ast.walk()` for flat traversal (complexity counting)
+- `ast.NodeVisitor` subclasses for stateful traversal (call graph)
+- `collections.Counter` for frequency analysis
+- `collections.deque` for BFS (dependency distance)
+- Custom git log parsing with delimiter format
+
+### Performance
+
+For a 500-file codebase:
+- AST analysis: ~2 seconds
+- Git analysis: ~1 second (shells out to git)
+- Total: ~5 seconds
+
+No external dependencies. Stdlib only.
+
+### Limitations
+
+- Python only (uses Python's AST parser)
+- Git history analysis requires a git repository
+- Some signals are heuristic (side effect detection uses pattern matching)
 
 ---
 
 ## Installation
 
-### Option 1: Clone and Use
-
 ```bash
 git clone https://github.com/jimmc414/claude-repo-xray.git
 cd claude-repo-xray
-python xray.py /path/to/your/project --verbose
+python xray.py /path/to/your/project
 ```
 
-### Option 2: Copy to Project
+Or copy `xray.py`, `lib/`, `formatters/`, and `configs/` to your project.
 
-```bash
-# Copy the tool to your project
-cp -r /path/to/claude-repo-xray/xray.py /path/to/your/project/
-cp -r /path/to/claude-repo-xray/lib /path/to/your/project/
-cp -r /path/to/claude-repo-xray/configs /path/to/your/project/
-cp -r /path/to/claude-repo-xray/formatters /path/to/your/project/
-
-cd /path/to/your/project
-python xray.py . --verbose
-```
-
-### Option 3: Claude Skill
-
-The tool is available as a Claude skill. Use the repo-xray skill to analyze codebases.
+Requirements: Python 3.8+, no external dependencies.
 
 ---
 
 ## File Structure
 
 ```
-claude-repo-xray/
-├── xray.py                     # Main entry point (unified tool)
-├── README.md
-├── lib/                        # Analysis modules
-│   ├── __init__.py
-│   ├── config_loader.py        # Configuration loading and merging
-│   ├── file_discovery.py       # File finding, ignore patterns
-│   ├── ast_analysis.py         # Skeleton, complexity, types, decorators
-│   ├── import_analysis.py      # Dependencies, aliases, distances
-│   ├── call_analysis.py        # Cross-module calls, reverse lookup
+repo-xray/
+├── xray.py                     # Entry point
+├── lib/
+│   ├── ast_analysis.py         # Skeleton, complexity, types
+│   ├── import_analysis.py      # Dependency graph, layers, distance
+│   ├── call_analysis.py        # Cross-module calls
 │   ├── git_analysis.py         # Risk, coupling, freshness
-│   ├── tech_debt_analysis.py   # TODO/FIXME markers
-│   ├── test_analysis.py        # Test coverage, fixtures
-│   └── gap_features.py         # Priority scores, hazards, data models, etc.
-├── formatters/                 # Output formatting
-│   ├── __init__.py
-│   ├── json_formatter.py       # JSON output
-│   └── markdown_formatter.py   # Markdown output
-├── configs/                    # Configuration
-│   ├── default_config.json     # Full config (all sections enabled)
-│   ├── minimal.json            # Minimal preset config
-│   ├── standard.json           # Standard preset config
-│   ├── presets.json            # Legacy preset definitions
-│   └── ignore_patterns.json    # Files/dirs to skip
-├── tests/                      # Unit tests
-│   └── test_gap_features.py    # Tests for gap analysis features
-├── examples/                   # Example outputs
-│   ├── repo_xray_output_v31.md # v3.1 output for this repo
-│   └── kosmos_xray_output_v31.md # v3.1 output for kosmos project
-├── archived/                   # Legacy scripts (for reference)
-│   ├── generate_warm_start.py  # Old Phase 1 generator
-│   └── generate_hot_start.py   # Old Phase 2 generator
-├── plans/                      # Implementation plans
-│   └── deep-leaping-fern.md    # v3.1 feature plan
-└── .claude/                    # Claude skill integration
+│   ├── gap_features.py         # Logic maps, hazards, data models
+│   ├── test_analysis.py        # Test coverage
+│   └── tech_debt_analysis.py   # TODO/FIXME markers
+├── formatters/
+│   ├── markdown_formatter.py
+│   └── json_formatter.py
+├── configs/
+│   ├── default_config.json
+│   └── presets.json
+└── .claude/
+    ├── agents/
+    │   └── repo_xray.md        # Claude Code agent
     └── skills/
-        └── repo-xray/
+        └── repo-xray/          # Claude Code skill
 ```
 
 ---
 
-## Token Budget
+## Why This Exists
 
-| Operation | Tokens | Use Case |
-|-----------|--------|----------|
-| `--preset minimal` | ~2K | Quick structural overview |
-| `--preset standard` | ~8K | Balanced analysis |
-| (default - all sections) | ~15-20K | Complete analysis |
-| With `--no-explain --no-persona-map` | ~12K | Full minus verbose sections |
+AI coding assistants are powerful but context-limited. They can understand code they read, but they can't read everything. This creates a bootstrapping problem: the assistant needs to understand the architecture to know what to read, but needs to read to understand the architecture.
+
+X-Ray provides the bootstrap. It compresses a codebase into signals that fit in context and guide further investigation. The agent layer adds judgment—turning raw signals into verified, curated documentation.
+
+The goal is not to replace reading code. It's to make reading code efficient by telling the AI where to look first.
 
 ---
-
-## Requirements
-
-- Python 3.8+
-- No external dependencies (stdlib only)
 
 ## License
 
