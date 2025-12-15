@@ -1,0 +1,519 @@
+# {PROJECT_NAME}: AI Coding Assistant Onboarding
+
+> **Purpose:** Enable a fresh Claude instance to work effectively in this codebase
+> **Prepared by:** repo_xray agent
+> **Codebase:** {FILE_COUNT} files, ~{TOTAL_TOKENS} tokens
+> **This document:** ~{DOC_TOKENS} tokens
+
+---
+
+## Quick Orientation
+
+{QUICK_ORIENTATION}
+
+<!--
+AGENT INSTRUCTIONS:
+Write 2-4 sentences answering:
+- What is this codebase? (purpose)
+- What does it do? (functionality)
+- What's the tech stack? (frameworks, key dependencies)
+- What's the architecture style? (monolith, microservices, layered, etc.)
+
+This should be YOUR synthesis, not copied from X-Ray.
+Example: "OrderSystem is a FastAPI e-commerce backend processing orders for 7 payment
+providers. It uses a clean 3-layer architecture (API → Services → Data) with SQLAlchemy
+ORM and Redis caching. The core complexity lives in the payment orchestration layer."
+-->
+
+---
+
+## Architecture
+
+{MERMAID_DIAGRAM}
+
+<!--
+AGENT INSTRUCTIONS:
+Include the Mermaid diagram from X-Ray verbatim — it's already good.
+Add a brief annotation if helpful.
+-->
+
+### Layer Summary
+
+| Layer | Purpose | Key Modules |
+|-------|---------|-------------|
+| **Orchestration** | {ORCH_PURPOSE} | {ORCH_MODULES} |
+| **Core** | {CORE_PURPOSE} | {CORE_MODULES} |
+| **Foundation** | {FOUND_PURPOSE} | {FOUND_MODULES} |
+
+<!--
+AGENT INSTRUCTIONS:
+Fill in based on X-Ray layers + your investigation.
+Example:
+| Orchestration | API routes, CLI | api/, cli.py |
+| Core | Business logic | services/, core/ |
+| Foundation | Utilities, base classes | lib/, models/ |
+-->
+
+---
+
+## Critical Components
+
+<!--
+AGENT INSTRUCTIONS:
+NOT a dump of all pillars. Include only components you VERIFIED as important.
+For each, provide:
+- File path and why it matters
+- Key classes/functions (skeleton or summary)
+- Your assessment from investigation
+-->
+
+### {COMPONENT_1_NAME}
+
+**File:** `{COMPONENT_1_PATH}` | **Why it matters:** {COMPONENT_1_WHY}
+
+```python
+{COMPONENT_1_SKELETON}
+```
+
+**What to know:** {COMPONENT_1_INSIGHTS}
+
+<!--
+Example:
+### Order Engine
+**File:** `core/engine.py` | **Why it matters:** Central orchestrator for all order processing
+
+```python
+class OrderEngine:
+    def __init__(self, payment_provider: PaymentProvider, inventory: InventoryService): ...
+    def process_order(self, order: Order) -> OrderResult: ...  # CC=25, main entry point
+    def validate(self, order: Order) -> ValidationResult: ...
+    def execute_payment(self, order: Order) -> PaymentResult: ...
+```
+
+**What to know:** Uses strategy pattern for payment providers. The `process_order` method is the
+critical path — handles validation, payment, inventory reservation, and fulfillment in sequence.
+Retry logic with exponential backoff for payment failures.
+-->
+
+### {COMPONENT_2_NAME}
+
+**File:** `{COMPONENT_2_PATH}` | **Why it matters:** {COMPONENT_2_WHY}
+
+{COMPONENT_2_CONTENT}
+
+<!-- Repeat for 3-5 critical components -->
+
+---
+
+## Data Flow
+
+<!--
+AGENT INSTRUCTIONS:
+Trace a typical request/operation through the system.
+Show the sequence, not just a list.
+-->
+
+```
+{DATA_FLOW_DIAGRAM}
+```
+
+<!--
+Example:
+```
+API Request (POST /orders)
+    │
+    ▼
+OrderRouter.create_order()          ─── api/routes/orders.py:45
+    │
+    ▼
+OrderService.create()               ─── services/order_service.py:23
+    │
+    ├──▶ Validator.validate()       ─── core/validators.py:67
+    │
+    ├──▶ InventoryService.reserve() ─── services/inventory.py:89
+    │         │
+    │         └──▶ [DB: UPDATE inventory]
+    │
+    ├──▶ PaymentProvider.charge()   ─── providers/{stripe,paypal}/
+    │         │
+    │         └──▶ [API: External payment gateway]
+    │
+    └──▶ OrderRepository.save()     ─── repositories/order.py:34
+              │
+              └──▶ [DB: INSERT orders]
+    │
+    ▼
+Response (OrderCreated)
+```
+-->
+
+---
+
+## Complexity Guide
+
+<!--
+AGENT INSTRUCTIONS:
+Only include complexity hotspots you INVESTIGATED.
+Provide your verdict: essential vs accidental complexity.
+Generate logic map for essential complexity.
+-->
+
+### {COMPLEX_FUNCTION_1} (CC={CC_1})
+
+**Location:** `{FILE_1}:{LINE_1}`
+**Verdict:** {VERDICT_1}
+
+{COMPLEXITY_CONTENT_1}
+
+<!--
+Example for ESSENTIAL complexity:
+
+### process_order() (CC=25)
+**Location:** `core/engine.py:45`
+**Verdict:** Essential — business logic requires this complexity
+
+**Logic Map:**
+```
+process_order(order):
+  -> validate(order)
+  -> valid?
+     {status = "processing"}
+     * for item in order.items:
+       -> check_inventory(item)
+       -> available?
+          [DB: reserve(item)]
+       -> not available?
+          -> rollback_reservations()
+          -> Return(OutOfStock)
+     -> select_payment_provider(order.payment_method)
+     -> charge(order.total)
+     -> success?
+        [DB: save(order)]
+        [Email: confirmation]
+        -> Return(Success)
+     -> failure?
+        -> rollback_reservations()
+        -> Return(PaymentFailed)
+```
+
+**Why it's complex:** Handles 7 payment providers, inventory reservation with rollback,
+and transactional consistency. The complexity reflects real business requirements.
+
+---
+
+Example for ACCIDENTAL complexity:
+
+### validate_input() (CC=18)
+**Location:** `api/handlers.py:102`
+**Verdict:** Accidental — candidate for refactoring
+
+**Issue:** Giant switch statement mixing schema validation with business rules.
+
+**Recommendation:** Split into:
+- `validate_schema()` — Data type and format checks
+- `validate_business_rules()` — Domain logic validation
+
+Not on critical path — safe to refactor incrementally.
+-->
+
+---
+
+## Side Effects & I/O
+
+<!--
+AGENT INSTRUCTIONS:
+Include VERIFIED side effects with context.
+Group by type. Show trigger conditions.
+-->
+
+### Database Operations
+
+| Operation | Location | Trigger | Notes |
+|-----------|----------|---------|-------|
+| {DB_OP_1} | {DB_LOC_1} | {DB_TRIGGER_1} | {DB_NOTES_1} |
+
+### External API Calls
+
+| Service | Location | Trigger | Notes |
+|---------|----------|---------|-------|
+| {API_OP_1} | {API_LOC_1} | {API_TRIGGER_1} | {API_NOTES_1} |
+
+### File System
+
+| Operation | Location | Trigger | Notes |
+|-----------|----------|---------|-------|
+| {FILE_OP_1} | {FILE_LOC_1} | {FILE_TRIGGER_1} | {FILE_NOTES_1} |
+
+<!--
+Example:
+### Database Operations
+| Operation | Location | Trigger | Notes |
+|-----------|----------|---------|-------|
+| INSERT orders | order_repo.py:34 | Order created | Transaction boundary |
+| UPDATE inventory | inventory.py:89 | Item reserved | Must rollback on payment failure |
+
+### External API Calls
+| Service | Location | Trigger | Notes |
+|---------|----------|---------|-------|
+| Stripe API | providers/stripe.py:45 | Payment charge | Has retry logic, 3 attempts |
+| Slack webhook | notifications.py:23 | Order completed | Fire-and-forget, non-critical |
+-->
+
+---
+
+## Hazards — Do Not Read
+
+<!--
+AGENT INSTRUCTIONS:
+Include all hazards from X-Ray.
+The next Claude instance must know what to avoid.
+-->
+
+| File/Pattern | Size | Why Skip |
+|--------------|------|----------|
+| {HAZARD_1} | {SIZE_1} | {REASON_1} |
+
+**Glob patterns for exclusion:**
+```
+{HAZARD_PATTERNS}
+```
+
+<!--
+Example:
+| File/Pattern | Size | Why Skip |
+|--------------|------|----------|
+| `generated_client.py` | ~45K tokens | Auto-generated API client |
+| `migrations/*.py` | ~30K tokens | Schema history, not logic |
+| `tests/fixtures/*.json` | ~20K tokens | Test data |
+
+**Glob patterns for exclusion:**
+```
+**/generated_*.py
+**/migrations/*.py
+**/fixtures/**
+**/*.min.js
+```
+-->
+
+---
+
+## Environment & Configuration
+
+### Required Environment Variables
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| {ENV_1} | {REQ_1} | {DEF_1} | {PURPOSE_1} |
+
+### Configuration Files
+
+| File | Purpose |
+|------|---------|
+| {CONFIG_1} | {CONFIG_PURPOSE_1} |
+
+<!--
+Example:
+### Required Environment Variables
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
+| `STRIPE_API_KEY` | Yes | — | Payment processing |
+| `LOG_LEVEL` | No | INFO | Logging verbosity |
+
+### Configuration Files
+| File | Purpose |
+|------|---------|
+| `config/settings.py` | Application settings, loads from env |
+| `.env` | Local development overrides |
+-->
+
+---
+
+## Testing Patterns
+
+<!--
+AGENT INSTRUCTIONS:
+Include testing conventions so the next Claude writes consistent tests.
+-->
+
+**Test location:** `{TEST_DIR}`
+**Framework:** {TEST_FRAMEWORK}
+**Run command:** `{TEST_COMMAND}`
+
+### Patterns Used
+
+{TEST_PATTERNS}
+
+### Example Test
+
+```python
+{TEST_EXAMPLE}
+```
+
+<!--
+Example:
+**Test location:** `tests/`
+**Framework:** pytest with pytest-asyncio
+**Run command:** `pytest tests/ -v`
+
+### Patterns Used
+- Fixtures in `conftest.py` for DB and mocks
+- `@pytest.mark.unit` / `@pytest.mark.integration` markers
+- `unittest.mock.patch` for external services
+- Factory functions for test data (`tests/factories.py`)
+
+### Example Test
+```python
+@pytest.fixture
+def mock_payment_provider():
+    return Mock(spec=PaymentProvider)
+
+@pytest.mark.unit
+def test_process_order_success(mock_payment_provider, sample_order):
+    mock_payment_provider.charge.return_value = PaymentResult(success=True)
+
+    engine = OrderEngine(payment_provider=mock_payment_provider)
+    result = engine.process_order(sample_order)
+
+    assert result.success
+    mock_payment_provider.charge.assert_called_once()
+```
+-->
+
+---
+
+## Entry Points for Common Tasks
+
+<!--
+AGENT INSTRUCTIONS:
+Guide the next Claude on where to start for common tasks.
+-->
+
+| Task | Start Here | Key Files |
+|------|------------|-----------|
+| {TASK_1} | {START_1} | {FILES_1} |
+
+<!--
+Example:
+| Task | Start Here | Key Files |
+|------|------------|-----------|
+| Add new API endpoint | `api/routes/` | schemas/, services/ |
+| Add payment provider | `providers/base.py` | Implement `PaymentProvider` interface |
+| Fix order logic | `core/engine.py` | validators/, services/ |
+| Debug data issue | `models/` | Check migrations for schema |
+| Add background job | `workers/` | tasks.py, celery_config.py |
+-->
+
+---
+
+## What X-Ray Missed
+
+<!--
+AGENT INSTRUCTIONS:
+Add insights you discovered during investigation that weren't in X-Ray output.
+This is YOUR value-add as an analyst.
+-->
+
+{INSIGHTS}
+
+<!--
+Example:
+1. **Feature flags:** Payment providers can be disabled via `ENABLED_PROVIDERS` env var.
+   X-Ray saw the config but not the conditional activation in `providers/__init__.py:23`.
+
+2. **Rate limiting:** External API calls have a custom rate limiter in `lib/rate_limit.py`.
+   Not detected as a pattern by X-Ray.
+
+3. **Potential race condition:** `inventory.py:78` checks availability then reserves in
+   separate queries. Two concurrent orders could both pass the check. Suggest using
+   `SELECT FOR UPDATE`.
+
+4. **Implicit dependency:** `OrderService` assumes `InventoryService` is initialized first.
+   No explicit dependency injection — relies on import order in `services/__init__.py`.
+-->
+
+---
+
+## Recommended Reading Order
+
+<!--
+AGENT INSTRUCTIONS:
+If the next Claude needs to read more code, this is the priority order.
+Based on YOUR investigation, not just X-Ray ranking.
+-->
+
+**For understanding the system:**
+1. `{READ_1}` — {READ_1_WHY}
+2. `{READ_2}` — {READ_2_WHY}
+3. `{READ_3}` — {READ_3_WHY}
+
+**Skip these:**
+- `{SKIP_1}` — {SKIP_1_WHY}
+
+<!--
+Example:
+**For understanding the system:**
+1. `core/engine.py` — Central orchestrator, start here
+2. `models/order.py` — Core data model, understand the domain
+3. `providers/base.py` — Payment provider interface
+4. `api/routes/orders.py` — See how requests enter the system
+
+**Skip these:**
+- `lib/utils.py` — Just string helpers, not architectural
+- `migrations/` — Schema history, not needed for coding
+- `tests/fixtures/` — Test data, read actual tests instead
+-->
+
+---
+
+## Quick Reference
+
+### Key Commands
+
+```bash
+# Run the app
+{RUN_COMMAND}
+
+# Run tests
+{TEST_COMMAND}
+
+# Lint/format
+{LINT_COMMAND}
+```
+
+### Key Imports
+
+```python
+# Core components
+{KEY_IMPORTS}
+```
+
+<!--
+Example:
+### Key Commands
+```bash
+# Run the app
+uvicorn main:app --reload
+
+# Run tests
+pytest tests/ -v
+
+# Lint/format
+ruff check . && black .
+```
+
+### Key Imports
+```python
+# Core components
+from core.engine import OrderEngine
+from models import Order, OrderItem, User
+from services import OrderService, InventoryService
+from providers import get_payment_provider
+```
+-->
+
+---
+
+*This onboarding document was prepared by the repo_xray agent.*
+*It compresses a {TOTAL_TOKENS}-token codebase into ~{DOC_TOKENS} tokens of actionable intelligence.*
+*For deeper exploration, use the `@repo_xray query` or `@repo_xray focus` modes.*
