@@ -165,10 +165,10 @@ All sections are enabled by default. Here's what's included:
 ```json
 {
   "metadata": {
-    "tool_version": "2.0.0",
-    "generated_at": "2025-12-14T...",
+    "tool_version": "3.0.0",
+    "generated_at": "2025-12-15T...",
     "target_directory": "/path/to/project",
-    "preset": "full",
+    "config": "defaults",
     "file_count": 150
   },
   "summary": {
@@ -195,7 +195,7 @@ All sections are enabled by default. Here's what's included:
 ```markdown
 # Codebase Analysis: project-name
 
-Generated: 2025-12-14 | Preset: full | Files: 150
+Generated: 2025-12-15 | Preset: None | Files: 150
 
 ## Summary
 
@@ -363,10 +363,8 @@ claude-repo-xray/
 |-----------|--------|----------|
 | `--preset minimal` | ~2K | Quick structural overview |
 | `--preset standard` | ~8K | Balanced analysis |
-| `--preset full` | ~15K | Complete analysis |
-| `--skeleton` only | ~5K | Just code interfaces |
-| `--imports` only | ~3K | Just dependencies |
-| `--git` only | ~2K | Just history analysis |
+| (default - all sections) | ~15-20K | Complete analysis |
+| With `--no-explain --no-persona-map` | ~12K | Full minus verbose sections |
 
 ---
 
