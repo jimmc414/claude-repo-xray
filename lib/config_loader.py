@@ -75,6 +75,7 @@ DEFAULT_CONFIG = {
         "env_defaults": True,
         "test_example": True,
         "linter_rules": True,
+        "investigation_targets": True,
     },
 
     "output": {

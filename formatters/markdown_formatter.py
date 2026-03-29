@@ -608,6 +608,94 @@ def format_markdown(
     # END GAP ANALYSIS FEATURES
     # ==========================================================================
 
+    # Investigation Targets (for Deep Crawl)
+    if gap.get("investigation_targets"):
+        inv = results.get("investigation_targets", {})
+        if inv and any(inv.get(k) for k in (
+            "high_uncertainty_modules", "ambiguous_interfaces",
+            "entry_to_side_effect_paths", "coupling_anomalies",
+            "shared_mutable_state", "convention_deviations", "domain_entities",
+        )):
+            lines.append("## Investigation Targets (for Deep Crawl)")
+            lines.append("")
+
+            # High-uncertainty modules
+            hum = inv.get("high_uncertainty_modules", [])
+            if hum:
+                items = ", ".join(
+                    f"{Path(m['module']).name} ({m['uncertainty_score']})"
+                    for m in hum[:6]
+                )
+                lines.append(f"**High-uncertainty modules ({len(hum)}):** {items}")
+                lines.append("")
+
+            # Ambiguous interfaces
+            ai = inv.get("ambiguous_interfaces", [])
+            if ai:
+                # Group by function name
+                from collections import Counter
+                name_counts = Counter(a["function"] for a in ai)
+                items = ", ".join(
+                    f"{name}() in {count} modules" if count > 1 else f"{name}()"
+                    for name, count in name_counts.most_common(6)
+                )
+                lines.append(f"**Ambiguous interfaces ({len(ai)}):** {items}")
+                lines.append("")
+
+            # Entry-to-side-effect paths
+            esp = inv.get("entry_to_side_effect_paths", [])
+            if esp:
+                items_list = []
+                for p in esp[:5]:
+                    entry = Path(p["entry_point"].split(":")[0]).name if ":" in p["entry_point"] else p["entry_point"]
+                    effects = ", ".join(set(
+                        se["type"] for se in p.get("reachable_side_effects", [])
+                    ))
+                    items_list.append(
+                        f"{entry} → {p['estimated_hop_count']} module hops → {effects}"
+                    )
+                lines.append(f"**Traced entry→side-effect paths ({len(esp)}):** " + "; ".join(items_list))
+                lines.append("  *(Note: hop counts are module-level estimates; actual function call depth may differ)*")
+                lines.append("")
+
+            # Coupling anomalies
+            ca = inv.get("coupling_anomalies", [])
+            if ca:
+                items = ", ".join(
+                    f"{Path(a['files'][0]).name} ↔ {Path(a['files'][1]).name} "
+                    f"(no imports, {int(a['co_modification_score']*100)}% co-modified)"
+                    for a in ca[:4]
+                )
+                lines.append(f"**Coupling anomalies ({len(ca)}):** {items}")
+                lines.append("")
+
+            # Shared mutable state
+            sms = inv.get("shared_mutable_state", [])
+            if sms:
+                items = ", ".join(
+                    f"{s['variable']} in {Path(s['file']).name}"
+                    for s in sms[:5]
+                )
+                lines.append(f"**Shared mutable state ({len(sms)}):** {items}")
+                lines.append("")
+
+            # Convention deviations
+            cd = inv.get("convention_deviations", [])
+            if cd:
+                items = ", ".join(
+                    f"{d['convention']} ({len(d.get('violating', []))} violations)"
+                    for d in cd[:4]
+                )
+                lines.append(f"**Convention deviations ({len(cd)}):** {items}")
+                lines.append("")
+
+            # Domain entities
+            de = inv.get("domain_entities", [])
+            if de:
+                items = ", ".join(e["name"] for e in de[:8])
+                lines.append(f"**Domain entities ({len(de)}):** {items}")
+                lines.append("")
+
     # Priority Files (if available) - only show if not using gap priority_scores
     priority_files = results.get("priority_files", [])
     if priority_files and not gap.get("priority_scores"):

@@ -1,0 +1,25 @@
+{
+  "description": "Function names that are ambiguous without context. Functions with these names AND low type coverage AND cross-module callers are flagged for deep investigation.",
+  "generic_names": [
+    "process", "handle", "run", "execute", "resolve",
+    "validate", "transform", "convert", "dispatch", "apply",
+    "update", "get", "set", "do", "perform",
+    "manage", "build", "create", "make", "generate",
+    "parse", "format", "load", "save", "send",
+    "check", "verify", "compute", "calculate", "evaluate",
+    "init", "setup", "configure", "prepare", "cleanup",
+    "start", "stop", "reset", "refresh", "sync",
+    "call", "invoke", "emit", "notify", "trigger",
+    "wrap", "decorate", "inject", "register", "connect",
+    "fetch", "pull", "push", "merge", "split",
+    "filter", "map", "reduce", "aggregate", "collect",
+    "render", "display", "show", "output", "log"
+  ],
+  "generic_module_names": [
+    "utils", "helpers", "common", "base", "core",
+    "misc", "tools", "lib", "shared", "general",
+    "service", "handler", "manager", "processor", "worker",
+    "engine", "runner", "executor", "dispatcher", "resolver",
+    "controller", "adapter", "wrapper", "proxy", "factory"
+  ]
+}

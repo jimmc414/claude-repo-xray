@@ -1,0 +1,26 @@
+{
+  "description": "Token budget targets for DEEP_ONBOARD.md by codebase size.",
+  "targets": [
+    {"max_files": 100, "label": "small", "min_tokens": 6000, "target_tokens": 8000, "max_tokens": 12000},
+    {"max_files": 500, "label": "medium", "min_tokens": 10000, "target_tokens": 13000, "max_tokens": 17000},
+    {"max_files": 2000, "label": "large", "min_tokens": 13000, "target_tokens": 16000, "max_tokens": 20000},
+    {"max_files": 999999, "label": "very_large", "min_tokens": 15000, "target_tokens": 18000, "max_tokens": 22000}
+  ],
+  "section_budgets": {
+    "identity": {"max_tokens": 200, "priority": "required", "stability": "high"},
+    "critical_paths": {"max_tokens": 3000, "priority": "required", "stability": "high"},
+    "module_behavioral_index": {"max_tokens": 4000, "priority": "required", "stability": "high"},
+    "key_interfaces": {"max_tokens": 1000, "priority": "required", "stability": "high"},
+    "error_handling": {"max_tokens": 1000, "priority": "required", "stability": "high"},
+    "shared_state": {"max_tokens": 800, "priority": "required", "stability": "high"},
+    "domain_glossary": {"max_tokens": 600, "priority": "recommended", "stability": "medium"},
+    "config_surface": {"max_tokens": 1000, "priority": "required", "stability": "medium"},
+    "conventions": {"max_tokens": 800, "priority": "required", "stability": "high"},
+    "gotchas": {"max_tokens": 1500, "priority": "required", "stability": "low"},
+    "hazards": {"max_tokens": 500, "priority": "required", "stability": "low"},
+    "extension_points": {"max_tokens": 800, "priority": "recommended", "stability": "low"},
+    "reading_order": {"max_tokens": 400, "priority": "recommended", "stability": "low"},
+    "gaps": {"max_tokens": 300, "priority": "required", "stability": "low"}
+  },
+  "note": "Sections ordered by stability (high first) to maximize prompt cache prefix hits."
+}

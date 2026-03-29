@@ -1,0 +1,136 @@
+{
+  "web_api": {
+    "indicators": {
+      "frameworks": ["fastapi", "flask", "django", "starlette", "sanic", "tornado"],
+      "patterns": ["@app.route", "@router.", "APIRouter", "Blueprint"],
+      "directories": ["routes/", "api/", "views/", "endpoints/"]
+    },
+    "additional_investigation": [
+      "Authentication and authorization middleware chain",
+      "Request validation pipeline (Pydantic, marshmallow, etc.)",
+      "Rate limiting implementation",
+      "CORS configuration",
+      "Middleware execution order",
+      "Database session lifecycle (per-request? connection pool?)",
+      "Background task handling (Celery, ARQ, etc.)"
+    ],
+    "additional_output_sections": [
+      "API endpoint index (route → handler → service)",
+      "Auth flow trace",
+      "Middleware chain with execution order"
+    ],
+    "primary_entity": "API endpoint",
+    "grep_patterns": {
+      "auth": "authenticate\\|authorize\\|@login_required\\|Depends.*auth\\|Bearer\\|JWT",
+      "middleware": "middleware\\|@app.before\\|@app.after\\|Depends(",
+      "rate_limit": "rate_limit\\|throttle\\|RateLimit\\|slowapi"
+    }
+  },
+  "cli_tool": {
+    "indicators": {
+      "frameworks": ["argparse", "click", "typer", "fire", "cement"],
+      "patterns": ["@click.command", "@app.command", "add_argument", "ArgumentParser"],
+      "directories": ["commands/", "cli/"]
+    },
+    "additional_investigation": [
+      "Command hierarchy and subcommand structure",
+      "Argument parsing and validation",
+      "Output formatting strategy (JSON, table, plain text)",
+      "Exit code conventions",
+      "Interactive vs non-interactive mode handling",
+      "Progress reporting for long operations"
+    ],
+    "additional_output_sections": [
+      "Command tree with argument signatures",
+      "Output format documentation",
+      "Exit code table"
+    ],
+    "primary_entity": "CLI command",
+    "grep_patterns": {
+      "commands": "@click\\.command\\|@app\\.command\\|add_subparsers",
+      "output": "click\\.echo\\|print(\\|rich\\.print\\|console\\.print",
+      "exit_codes": "sys\\.exit\\|exit(\\|raise SystemExit"
+    }
+  },
+  "ml_pipeline": {
+    "indicators": {
+      "frameworks": ["torch", "tensorflow", "keras", "transformers", "sklearn", "lightning"],
+      "patterns": ["nn.Module", "tf.keras.Model", "model.fit", "model.train"],
+      "directories": ["models/", "training/", "data/", "experiments/"]
+    },
+    "additional_investigation": [
+      "Training loop structure and hooks",
+      "Model architecture definition location",
+      "Data loading and preprocessing pipeline",
+      "Checkpoint save/load conventions",
+      "Evaluation metrics implementation",
+      "Hyperparameter configuration surface",
+      "GPU/device management",
+      "Experiment tracking integration"
+    ],
+    "additional_output_sections": [
+      "Training pipeline trace (data → preprocessing → model → loss → optimizer)",
+      "Model configuration surface",
+      "Data flow from raw input to model input"
+    ],
+    "primary_entity": "model or training experiment",
+    "grep_patterns": {
+      "training": "def train\\|model\\.train\\|trainer\\.fit",
+      "data": "DataLoader\\|Dataset\\|dataloader\\|batch_size",
+      "checkpoint": "save_checkpoint\\|load_checkpoint\\|torch\\.save\\|torch\\.load"
+    }
+  },
+  "data_pipeline": {
+    "indicators": {
+      "frameworks": ["airflow", "dagster", "prefect", "luigi", "dbt", "beam"],
+      "patterns": ["@dag", "@task", "PythonOperator", "@op", "@asset"],
+      "directories": ["dags/", "pipelines/", "etl/", "jobs/"]
+    },
+    "additional_investigation": [
+      "DAG structure and stage dependencies",
+      "Idempotency guarantees (can re-run safely?)",
+      "Failure recovery and retry strategy",
+      "Data validation between stages",
+      "Scheduling configuration",
+      "Backfill strategy",
+      "Data partitioning approach"
+    ],
+    "additional_output_sections": [
+      "DAG/pipeline stage documentation",
+      "Stage-by-stage data transformation description",
+      "Failure recovery procedures"
+    ],
+    "primary_entity": "pipeline stage or DAG",
+    "grep_patterns": {
+      "stages": "@task\\|@op\\|PythonOperator\\|@asset",
+      "retry": "retries\\|retry_delay\\|on_failure",
+      "scheduling": "schedule_interval\\|cron\\|schedule("
+    }
+  },
+  "library": {
+    "indicators": {
+      "frameworks": [],
+      "patterns": ["__all__", "setup.py", "pyproject.toml"],
+      "directories": ["src/", "lib/"]
+    },
+    "additional_investigation": [
+      "Public API surface (what's exported via __all__ or top-level imports)",
+      "Backward compatibility constraints",
+      "Extension/plugin mechanisms",
+      "Thread safety guarantees",
+      "Performance-critical code paths",
+      "Deprecation patterns"
+    ],
+    "additional_output_sections": [
+      "Public API index with behavioral descriptions",
+      "Extension point documentation",
+      "Thread safety annotations"
+    ],
+    "primary_entity": "public API function or class",
+    "grep_patterns": {
+      "public_api": "__all__\\|from.*import.*\\*",
+      "deprecation": "deprecated\\|DeprecationWarning\\|warnings\\.warn",
+      "thread_safety": "Lock\\|RLock\\|threading\\|asyncio\\.Lock"
+    }
+  }
+}

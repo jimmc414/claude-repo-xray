@@ -61,7 +61,10 @@
     "hazard_patterns": true,
     "env_defaults": true,
     "test_example": true,
-    "linter_rules": true
+    "linter_rules": true,
+
+    "_comment_deep_crawl": "Deep Crawl investigation targets",
+    "investigation_targets": true
   },
 
   "output": {
