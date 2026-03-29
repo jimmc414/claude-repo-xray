@@ -103,7 +103,7 @@ Execute the crawl plan in priority order using these protocols:
 #### Protocol B: Module Deep Read
 
 ```
-1. Read the entire module (or first 500 lines if larger)
+1. Read the entire module
 2. Write to /tmp/deep_crawl/findings/modules/{module_name}.md:
    - What this module does (1-2 sentences of BEHAVIOR)
    - What's non-obvious about it
@@ -182,7 +182,7 @@ cat /tmp/deep_crawl/findings/traces/*.md \
 2. Read `SYNTHESIS_INPUT.md` fresh for a clean, complete view
 
 3. Use extended thinking to reason holistically:
-   - What are the 3-5 most important things a downstream agent needs?
+   - What are ALL the important things a downstream agent needs?
    - What themes emerge across findings?
    - What's the minimum set of facts for safe modifications anywhere?
    - Which findings are redundant with what an agent could infer from file names?

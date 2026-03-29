@@ -64,7 +64,7 @@ The crawl uses disk as extended memory to handle codebases larger than
 conversation context:
 
 - Findings written to `/tmp/deep_crawl/findings/` immediately after each task
-- Never hold >3 source files in working memory simultaneously
+- Hold as many source files in working memory as the current task requires
 - Batch by investigation task, not by file
 - Checkpoint every 5 tasks for resumability
 - Phase 3 reads all findings fresh from a concatenated file
@@ -78,19 +78,13 @@ DEEP_ONBOARD.md is included in CLAUDE.md so that:
 
 ## Output Size Guidance
 
-No token ceilings. Include everything that's not redundant with file names and signatures.
-
-| Codebase | Expected Range | Notes |
-|----------|---------------|-------|
-| <100 files | 6-12K | Small codebases, dense cross-cutting concerns |
-| 100-500 files | 12-25K | All significant modules, major request paths |
-| 500-2000 files | 20-40K | Deep cross-cutting concerns, longer trace chains |
-| >2000 files | 30-50K | Subsystem decomposition, possible appendices |
+No token ceilings. Include everything that's not redundant with information
+derivable from file names and signatures. Let the content determine the size.
 
 ## Feedback
 
 Downstream agents log section references to docs/.onboard_feedback.log.
-During refresh, this data informs section budget allocation.
+During refresh, this data informs section prioritization.
 
 ## Files
 

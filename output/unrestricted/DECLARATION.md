@@ -2,7 +2,12 @@
 
 ## Purpose
 
-This branch removes all token budget ceilings from the deep crawl pipeline to test the hypothesis that budget constraints caused the agent to self-compress during investigation (Phase 2) and synthesis (Phase 3), not just during the explicit compression step (Phase 4). See `output/constrained/DECLARATION.md` for the full constraint chain analysis.
+This branch removes all token budget ceilings and context-era investigation constraints from the deep crawl pipeline. The hypothesis: budget constraints caused the agent to self-compress during investigation (Phase 2) and synthesis (Phase 3), not just during the explicit compression step (Phase 4). See `output/constrained/DECLARATION.md` for the full constraint chain analysis.
+
+Two categories of constraints were removed:
+
+1. **Output budget constraints** — token ceilings, per-section budgets, budget comments in templates, trim instructions. These suppressed how much the agent wrote.
+2. **Investigation constraints** — 500-line module read caps, 3-file working memory limits, numeric quantity anchors. These suppressed how much the agent investigated, regardless of output budget. Designed for 200K context windows, now running under 1M.
 
 ## What Changed (6 files)
 
@@ -11,6 +16,16 @@ This branch removes all token budget ceilings from the deep crawl pipeline to te
 **Frontmatter description (line 3):**
 - Before: `"maximally compressed onboarding document...Designed to run without token budget constraints"`
 - After: `"comprehensive onboarding document...No token budget ceiling — include everything that's not redundant"`
+
+**Protocol B module read limit (was line 106):**
+- Before: `Read the entire module (or first 500 lines if larger)`
+- After: `Read the entire module`
+- Why: With 1M context, the agent can read entire modules regardless of size. The 500-line cap meant 75% of large modules went unread — exactly where the complex logic, edge cases, and gotchas live.
+
+**Phase 3 synthesis thinking prompt (was line 185):**
+- Before: `What are the 3-5 most important things a downstream agent needs?`
+- After: `What are ALL the important things a downstream agent needs?`
+- Why: "3-5" is a quantitative anchor that limits synthesis scope. Same self-limiting mechanism as the budget comments, just subtler.
 
 **Phase 4 heading (was line 206):**
 - Before: `### Phase 4: COMPRESS (Optimize for Token Budget)`
@@ -45,7 +60,7 @@ Removed all 9 `<!-- Budget: ~N tokens -->` HTML comments and replaced with value
 - All `target_tokens` set to `null` (were 8000-18000)
 - All `max_tokens` set to `null` — both global targets and per-section budgets
 - `min_tokens` retained as soft floor (unchanged)
-- Added `guidance` text per bracket with natural size expectations (e.g., "Expect 20-40K tokens")
+- Removed numeric expected ranges from `guidance` text (e.g., "Expect 20-40K" → "Be comprehensive") — numeric ranges anchor the agent to a target even when framed as guidance
 - Description updated: "No hard ceilings — include everything that's not redundant"
 - Note updated to state "No token ceilings"
 
@@ -59,7 +74,16 @@ Removed all 9 `<!-- Budget: ~N tokens -->` HTML comments and replaced with value
 - Before: `Onboarding document (8-20K tokens)`
 - After: `Onboarding document (unrestricted, value-driven)`
 
-**Token Budget Targets section (lines 79-86):** Replaced with "Output Size Guidance" — expected ranges (not ceilings) with explanatory notes.
+**Context management (line 67):**
+- Before: `Never hold >3 source files in working memory simultaneously`
+- After: `Hold as many source files in working memory as the current task requires`
+- Why: The 3-file limit was defensive context management for 200K windows. It forces isolated module investigation and prevents cross-module pattern comparison. With 1M context, this is unnecessarily restrictive.
+
+**Token Budget Targets section (lines 79-86):** Removed entirely. Replaced with two-line qualitative guidance: "No token ceilings. Let the content determine the size."
+
+**Feedback reference (line 93):**
+- Before: `this data informs section budget allocation`
+- After: `this data informs section prioritization`
 
 ### File 5: `INTENT.md`
 
@@ -88,6 +112,10 @@ These files are intentionally unmodified — verify with `git diff master`:
 | `configs/generic_names.json` | Name classification, not budgets |
 | `templates/CRAWL_PLAN.md.template` | No budget references |
 | `templates/VALIDATION_REPORT.md.template` | No budget references |
+
+## Remaining Filters
+
+After all constraint removal, the only filter on output content is: **"not redundant with information derivable from file names and signatures."** This cuts noise, not depth. Verified by scanning all deep crawl files for budget/ceiling/anchor language — no constraining references remain.
 
 ## Verification
 

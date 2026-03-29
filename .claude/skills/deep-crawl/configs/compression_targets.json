@@ -1,10 +1,10 @@
 {
   "description": "Output size guidance for DEEP_ONBOARD.md by codebase size. No hard ceilings — include everything that's not redundant.",
   "targets": [
-    {"max_files": 100, "label": "small", "min_tokens": 6000, "target_tokens": null, "max_tokens": null, "guidance": "Expect 6-12K tokens. Small codebases have fewer modules but may have dense cross-cutting concerns."},
-    {"max_files": 500, "label": "medium", "min_tokens": 10000, "target_tokens": null, "max_tokens": null, "guidance": "Expect 12-25K tokens. Cover all architecturally significant modules and major request paths."},
-    {"max_files": 2000, "label": "large", "min_tokens": 13000, "target_tokens": null, "max_tokens": null, "guidance": "Expect 20-40K tokens. Large codebases have more cross-cutting concerns and deeper trace chains."},
-    {"max_files": 999999, "label": "very_large", "min_tokens": 15000, "target_tokens": null, "max_tokens": null, "guidance": "Expect 30-50K tokens. Subsystem decomposition may produce appendices beyond the main document."}
+    {"max_files": 100, "label": "small", "min_tokens": 6000, "target_tokens": null, "max_tokens": null, "guidance": "Small codebases have fewer modules but may have dense cross-cutting concerns."},
+    {"max_files": 500, "label": "medium", "min_tokens": 10000, "target_tokens": null, "max_tokens": null, "guidance": "Cover all architecturally significant modules and major request paths."},
+    {"max_files": 2000, "label": "large", "min_tokens": 13000, "target_tokens": null, "max_tokens": null, "guidance": "Large codebases have more cross-cutting concerns and deeper trace chains. Be comprehensive."},
+    {"max_files": 999999, "label": "very_large", "min_tokens": 15000, "target_tokens": null, "max_tokens": null, "guidance": "Subsystem decomposition may produce appendices beyond the main document. Be comprehensive."}
   ],
   "section_budgets": {
     "identity": {"max_tokens": null, "priority": "required", "stability": "high"},
