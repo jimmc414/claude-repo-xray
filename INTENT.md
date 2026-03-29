@@ -54,7 +54,7 @@ LLM-powered. Expensive. Non-deterministic. Uses the scanner's output as a map to
 
 This layer exists because a map is not understanding. The scanner can tell you that a function has cyclomatic complexity 25 and is called from 8 modules. It cannot tell you whether that complexity is essential business logic or accidental tech debt. It cannot tell you that the function silently swallows timeout errors. It cannot tell you that changing it will break an undocumented integration. Only reading the code can tell you that.
 
-The deep_crawl agent is designed to spend unlimited tokens during generation to produce a small, maximally useful onboarding document. The economics work because the document is read by many future sessions — the generation cost is amortized. We deliberately removed the token budget constraint from generation because optimizing for cheap generation at the expense of output quality is a false economy when the output will be read hundreds of times.
+The deep_crawl agent is designed to spend unlimited tokens during generation to produce a comprehensive, maximally useful onboarding document. The economics work because the document is read by many future sessions — the generation cost is amortized. We deliberately removed the token budget constraint from generation because optimizing for cheap generation at the expense of output quality is a false economy when the output will be read hundreds of times.
 
 ## Design Decisions That Were Hard
 
@@ -81,6 +81,8 @@ An agent that has to know to look for the onboarding document will sometimes not
 ## The Tradeoffs We Accept
 
 **Compression loses information.** A 2M-token codebase compressed to 15K tokens loses 99.25% of its content. We accept this because the alternative — no compression — means the AI can't see any of it. The goal is not completeness. It's maximum useful information per token.
+
+**Unrestricted mode validates the compression tradeoff.** The deep crawl pipeline can run without token budget ceilings to measure how much useful content exists before compression. This is essential for calibrating budget targets: you can't know the right ceiling without first seeing the unrestricted output. Unrestricted mode removes all `target_tokens` and `max_tokens` constraints, all per-section budget comments in templates, and the Phase 4 trim step — replacing "compress to budget" with "include everything that's not redundant with information derivable from file names and signatures." The investigation protocols, evidence standards, validation pipeline, and quality checks remain identical. The only variable is output size.
 
 **Deterministic extraction misses semantic meaning.** The scanner doesn't know that `process()` orchestrates the entire order lifecycle. It just knows it has CC=25 and 8 callers. We accept this because semantic understanding requires LLM inference, which belongs in the agent layer, not the scanner.
 

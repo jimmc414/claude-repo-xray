@@ -1,6 +1,6 @@
 ---
 name: deep_crawl
-description: Exhaustive LLM-powered codebase investigator. Uses X-Ray signals to systematically crawl a codebase and produce a maximally compressed onboarding document optimized for AI agent consumption. Designed to run without token budget constraints.
+description: Exhaustive LLM-powered codebase investigator. Uses X-Ray signals to systematically crawl a codebase and produce a comprehensive onboarding document optimized for AI agent consumption. No token budget ceiling — include everything that's not redundant.
 tools: Read, Grep, Glob, Bash
 model: opus
 skills: deep-crawl
@@ -203,16 +203,9 @@ cat /tmp/deep_crawl/findings/traces/*.md \
 
 ---
 
-### Phase 4: COMPRESS (Optimize for Token Budget)
+### Phase 4: REFINE (Optimize for Value Density)
 
-**Target sizes** (from `.claude/skills/deep-crawl/configs/compression_targets.json`):
-
-| Codebase Files | Target Tokens | Hard Max |
-|----------------|---------------|----------|
-| <100 | 8-10K | 12K |
-| 100-500 | 12-15K | 17K |
-| 500-2000 | 15-18K | 20K |
-| >2000 | 18-20K | 22K |
+There is no token budget ceiling. Include everything that's not redundant with information derivable from file names and signatures.
 
 **Execute in this exact order:**
 
@@ -220,7 +213,6 @@ cat /tmp/deep_crawl/findings/traces/*.md \
 ```bash
 wc -w /tmp/deep_crawl/DRAFT_ONBOARD.md | awk '{printf "~%d tokens\n", $1 * 1.3}'
 ```
-If already within target, skip to Step 7.
 
 **Step 2: Cut self-evident module summaries.** For each row in Module Behavioral Index, ask: "Does the module name + architecture position already tell an agent what it does?" If yes, cut it.
 
@@ -230,11 +222,9 @@ If already within target, skip to Step 7.
 
 **Step 5: Convert prose to tables.** Tables are 30-50% denser than equivalent prose.
 
-**Step 6: Trim low-priority sections.** Cut from the bottom: Reading Order → Extension Points → Domain Glossary → Gaps.
+**Step 6: Verify completeness.** Attempt to answer all 10 standard questions. If any becomes unanswerable, add content.
 
-**Step 7: Verify completeness.** Attempt to answer all 10 standard questions. If any becomes unanswerable, restore minimal content.
-
-**Step 8: Verify caching structure.** Confirm stable sections (Identity through Conventions) come before volatile sections (Gotchas through Gaps).
+**Step 7: Verify caching structure.** Confirm stable sections (Identity through Conventions) come before volatile sections (Gotchas through Gaps).
 
 Write final version to `/tmp/deep_crawl/DEEP_ONBOARD.md`.
 
@@ -400,7 +390,7 @@ Not all claims have the same epistemological status. Use these tags:
 - [ ] All [FACT] claims have file:line citations
 - [ ] All [PATTERN] claims have N/M counts
 - [ ] Adversarial simulation passes
-- [ ] Document is within token budget for codebase size
+- [ ] Every section contains information not derivable from file names and signatures
 - [ ] Stable-first section ordering maintained
 - [ ] No redundant information that grep could find in 30 seconds
 - [ ] Every gotcha has specific file:line evidence

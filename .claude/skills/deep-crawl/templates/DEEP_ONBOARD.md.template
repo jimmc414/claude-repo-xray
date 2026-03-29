@@ -21,7 +21,7 @@
 <!-- For each major entry point, show the verified call chain from entry
 to terminal side effect. Include behavioral description at each hop and error path.
 This section has the highest file-reads-saved-per-token ratio.
-Budget: ~3000 tokens. Prioritize the 3-5 most important paths. -->
+Include all verified paths. -->
 
 ### {PATH_1_NAME}
 
@@ -39,7 +39,7 @@ Budget: ~3000 tokens. Prioritize the 3-5 most important paths. -->
 
 <!-- For every architecturally significant module: behavioral summary.
 This is WHAT it does and what's dangerous, not its structure.
-Budget: ~4000 tokens. -->
+Include all modules where behavior is not obvious from the name. -->
 
 | Module | Does | Runtime Deps | Danger |
 |--------|------|--------------|--------|
@@ -49,9 +49,9 @@ Budget: ~4000 tokens. -->
 
 ## Key Interfaces
 
-<!-- The 5-10 most important class/function signatures that downstream
+<!-- The most important class/function signatures that downstream
 agents will need on nearly every task. Include these directly rather than
-forcing agents to open xray output. Budget: ~1000 tokens. -->
+forcing agents to open xray output. -->
 
 ```python
 # {file}
@@ -63,8 +63,7 @@ class {Name}:
 
 ## Error Handling Strategy
 
-<!-- Dominant pattern + deviations.
-Budget: ~1000 tokens. -->
+<!-- Dominant pattern + deviations. -->
 
 **Dominant pattern:** {description} [PATTERN: observed in N/M modules]
 
@@ -80,8 +79,7 @@ Budget: ~1000 tokens. -->
 
 ## Shared State
 
-<!-- Every module-level mutable, singleton, cache, or registry.
-Budget: ~800 tokens. -->
+<!-- Every module-level mutable, singleton, cache, or registry. -->
 
 | State | Location | Mutated By | Risk |
 |-------|----------|------------|------|
@@ -92,8 +90,7 @@ Budget: ~800 tokens. -->
 ## Domain Glossary
 
 <!-- Terms that mean something specific in THIS codebase.
-Only genuinely ambiguous or overloaded terms.
-Budget: ~600 tokens. -->
+Only genuinely ambiguous or overloaded terms. -->
 
 | Term | Means Here | Defined In |
 |------|------------|------------|
@@ -103,8 +100,7 @@ Budget: ~600 tokens. -->
 
 ## Configuration Surface
 
-<!-- Every knob that changes runtime behavior.
-Budget: ~1000 tokens. -->
+<!-- Every knob that changes runtime behavior. -->
 
 | Config | Source | Affects | Default |
 |--------|--------|---------|---------|
@@ -114,8 +110,7 @@ Budget: ~1000 tokens. -->
 
 ## Conventions
 
-<!-- Implicit rules as directives. Each cites evidence count.
-Budget: ~800 tokens. -->
+<!-- Implicit rules as directives. Each cites evidence count. -->
 
 1. {Convention} [PATTERN: N/M examples]
 2. {Convention} [PATTERN: N/M examples]
@@ -125,8 +120,7 @@ Budget: ~800 tokens. -->
 ## Gotchas
 
 <!-- Counterintuitive behaviors with file:line evidence.
-Ordered by bug-likelihood. All must be [FACT].
-Budget: ~1500 tokens. -->
+Ordered by bug-likelihood. All must be [FACT]. -->
 
 1. **{title}** — {description} [FACT] (`{file}:{line}`)
 2. **{title}** — {description} [FACT] (`{file}:{line}`)

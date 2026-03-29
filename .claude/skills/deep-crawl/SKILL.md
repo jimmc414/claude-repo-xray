@@ -34,7 +34,7 @@ Phase 0: SETUP       Create workspace, check prerequisites, plan context mgmt
 Phase 1: PLAN        Read xray → build prioritized investigation agenda
 Phase 2: CRAWL       Execute agenda → read code → write verified findings to disk
 Phase 3: SYNTHESIZE  Concatenate findings → draft onboarding document
-Phase 4: COMPRESS    8-step algorithm → reduce to token budget
+Phase 4: REFINE      7-step algorithm → maximize value density, cut only redundancy
 Phase 5: VALIDATE    Questions test → spot-check → adversarial sim → cache check
 Phase 6: DELIVER     Copy to docs/ → update CLAUDE.md → enable prompt caching
 ```
@@ -53,7 +53,7 @@ No inferences or unverified signals in the output document.
 
 | File | Purpose | Location |
 |------|---------|----------|
-| DEEP_ONBOARD.md | Onboarding document (8-20K tokens) | docs/ |
+| DEEP_ONBOARD.md | Onboarding document (unrestricted, value-driven) | docs/ |
 | CLAUDE.md update | Auto-delivery to all sessions | project root |
 | .onboard_feedback.log | Usage tracking from downstream agents | docs/ |
 | VALIDATION_REPORT.md | QA results | docs/ |
@@ -76,14 +76,16 @@ DEEP_ONBOARD.md is included in CLAUDE.md so that:
 2. Prompt caching reduces read cost by ~90% after first session
 3. Downstream agents don't need to know to look for it
 
-## Token Budget Targets
+## Output Size Guidance
 
-| Codebase | Target | Hard Max |
-|----------|--------|----------|
-| <100 files | 8-10K | 12K |
-| 100-500 files | 12-15K | 17K |
-| 500-2000 files | 15-18K | 20K |
-| >2000 files | 18-20K | 22K |
+No token ceilings. Include everything that's not redundant with file names and signatures.
+
+| Codebase | Expected Range | Notes |
+|----------|---------------|-------|
+| <100 files | 6-12K | Small codebases, dense cross-cutting concerns |
+| 100-500 files | 12-25K | All significant modules, major request paths |
+| 500-2000 files | 20-40K | Deep cross-cutting concerns, longer trace chains |
+| >2000 files | 30-50K | Subsystem decomposition, possible appendices |
 
 ## Feedback
 
