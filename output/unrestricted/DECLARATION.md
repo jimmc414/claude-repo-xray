@@ -89,12 +89,6 @@ These files are intentionally unmodified — verify with `git diff master`:
 | `templates/CRAWL_PLAN.md.template` | No budget references |
 | `templates/VALIDATION_REPORT.md.template` | No budget references |
 
-## CLAUDE.md Context Impact
-
-The current spec auto-loads DEEP_ONBOARD.md via CLAUDE.md into every agent session. If the unrestricted output lands at 30-40K tokens instead of 15-18K, that's 15-20% of a 200K context window consumed before the agent starts working. This is still viable but changes the economics — less room for the agent to read files during tasks.
-
-**Decision point for after the comparison:** If unrestricted output exceeds 25K tokens, reassess whether full auto-loading via CLAUDE.md is optimal or whether a summary + on-demand full document is better. Do not solve this now — measure first.
-
 ## Verification
 
 ```bash
