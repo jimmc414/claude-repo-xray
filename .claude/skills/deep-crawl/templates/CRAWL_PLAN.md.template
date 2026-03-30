@@ -34,7 +34,7 @@ The crawl agent traces at function level; actual depth may differ. -->
 - [ ] Hidden coupling not captured by imports
 
 ## Completion Criteria
-All P1-P4 complete + 10/10 standard questions answerable + no new gotchas in last 3 tasks.
+All P1-P6 investigated + 10/10 standard questions answerable + coverage check passes (50%+ subsystems documented, modules deep-read >= max(10, file_count/40), all entry points traced).
 
 ## Context Management
 Write findings to /tmp/deep_crawl/findings/{type}/ after each task.

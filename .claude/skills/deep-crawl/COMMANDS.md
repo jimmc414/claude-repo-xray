@@ -8,22 +8,30 @@ python xray.py . --output both --out /tmp/xray
 
 ## Commands
 
-| Command | What It Does |
-|---------|-------------|
-| `@deep_crawl full` | Plan → Crawl → Synthesize → Compress → Validate → Deliver |
-| `@deep_crawl plan` | Generate investigation plan only |
-| `@deep_crawl resume` | Continue from last checkpoint |
-| `@deep_crawl validate` | QA an existing DEEP_ONBOARD.md |
-| `@deep_crawl refresh` | Update for code changes (reads .onboard_feedback.log) |
-| `@deep_crawl focus ./path` | Deep crawl a specific subsystem |
+| Command | Mode | What It Does |
+|---------|------|-------------|
+| `/deep-crawl full` | **Orchestrated** (parallel sub-agents) | Plan + parallel investigation + assemble + cross-reference + validate + deliver |
+| `@deep_crawl full` | Sequential (single-agent fallback) | Same pipeline, sequential investigation |
+| `@deep_crawl plan` | Sequential | Generate investigation plan only |
+| `@deep_crawl resume` | Sequential | Continue from last checkpoint |
+| `@deep_crawl validate` | Sequential | QA an existing DEEP_ONBOARD.md |
+| `@deep_crawl refresh` | Sequential | Update for code changes |
+| `@deep_crawl focus ./path` | Sequential | Deep crawl a specific subsystem |
 
-## Typical Workflow
+## Recommended Workflow
 
 ```bash
 python xray.py . --output both --out /tmp/xray   # 1. Scan
-@deep_crawl full                                   # 2. Crawl + deliver
+/deep-crawl full                                   # 2. Orchestrated crawl (preferred)
 @deep_onboard_validator full                       # 3. Optional independent QA
 # Output: docs/DEEP_ONBOARD.md, CLAUDE.md updated
+```
+
+## Sequential Fallback
+
+If `/deep-crawl full` is unavailable or you prefer sequential execution:
+```bash
+@deep_crawl full
 ```
 
 ## After Code Changes

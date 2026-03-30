@@ -1,26 +1,26 @@
 {
-  "description": "Output size guidance for DEEP_ONBOARD.md by codebase size. No hard ceilings — include everything that's not redundant.",
+  "description": "Minimum document size floors by codebase size. Only used as a tripwire — if the document is below the floor, assembly agents dropped findings.",
   "targets": [
-    {"max_files": 100, "label": "small", "min_tokens": 6000, "target_tokens": null, "max_tokens": null, "guidance": "Small codebases have fewer modules but may have dense cross-cutting concerns."},
-    {"max_files": 500, "label": "medium", "min_tokens": 10000, "target_tokens": null, "max_tokens": null, "guidance": "Cover all architecturally significant modules and major request paths."},
-    {"max_files": 2000, "label": "large", "min_tokens": 13000, "target_tokens": null, "max_tokens": null, "guidance": "Large codebases have more cross-cutting concerns and deeper trace chains. Be comprehensive."},
-    {"max_files": 999999, "label": "very_large", "min_tokens": 15000, "target_tokens": null, "max_tokens": null, "guidance": "Subsystem decomposition may produce appendices beyond the main document. Be comprehensive."}
+    {"max_files": 100, "label": "small", "min_tokens": 6000},
+    {"max_files": 500, "label": "medium", "min_tokens": 10000},
+    {"max_files": 2000, "label": "large", "min_tokens": 13000},
+    {"max_files": 999999, "label": "very_large", "min_tokens": 15000}
   ],
   "section_budgets": {
-    "identity": {"max_tokens": null, "priority": "required", "stability": "high"},
-    "critical_paths": {"max_tokens": null, "priority": "required", "stability": "high"},
-    "module_behavioral_index": {"max_tokens": null, "priority": "required", "stability": "high"},
-    "key_interfaces": {"max_tokens": null, "priority": "required", "stability": "high"},
-    "error_handling": {"max_tokens": null, "priority": "required", "stability": "high"},
-    "shared_state": {"max_tokens": null, "priority": "required", "stability": "high"},
-    "domain_glossary": {"max_tokens": null, "priority": "recommended", "stability": "medium"},
-    "config_surface": {"max_tokens": null, "priority": "required", "stability": "medium"},
-    "conventions": {"max_tokens": null, "priority": "required", "stability": "high"},
-    "gotchas": {"max_tokens": null, "priority": "required", "stability": "low"},
-    "hazards": {"max_tokens": null, "priority": "required", "stability": "low"},
-    "extension_points": {"max_tokens": null, "priority": "recommended", "stability": "low"},
-    "reading_order": {"max_tokens": null, "priority": "recommended", "stability": "low"},
-    "gaps": {"max_tokens": null, "priority": "required", "stability": "low"}
+    "identity": {"priority": "required", "stability": "high"},
+    "critical_paths": {"priority": "required", "stability": "high"},
+    "module_behavioral_index": {"priority": "required", "stability": "high"},
+    "key_interfaces": {"priority": "required", "stability": "high"},
+    "error_handling": {"priority": "required", "stability": "high"},
+    "shared_state": {"priority": "required", "stability": "high"},
+    "domain_glossary": {"priority": "recommended", "stability": "medium"},
+    "config_surface": {"priority": "required", "stability": "medium"},
+    "conventions": {"priority": "required", "stability": "high"},
+    "gotchas": {"priority": "required", "stability": "low"},
+    "hazards": {"priority": "required", "stability": "low"},
+    "extension_points": {"priority": "recommended", "stability": "low"},
+    "reading_order": {"priority": "recommended", "stability": "low"},
+    "gaps": {"priority": "required", "stability": "low"}
   },
-  "note": "Sections ordered by stability (high first) to maximize prompt cache prefix hits. No token ceilings — include everything not redundant with file names and signatures."
+  "note": "Sections ordered by stability (high first) to maximize prompt cache prefix hits. No token ceilings — assembly agents include everything."
 }
