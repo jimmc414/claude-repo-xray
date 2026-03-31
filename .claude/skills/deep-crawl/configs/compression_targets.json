@@ -10,7 +10,9 @@
     "identity": {"priority": "required", "stability": "high"},
     "critical_paths": {"priority": "required", "stability": "high"},
     "module_behavioral_index": {"priority": "required", "stability": "high"},
+    "change_impact_index": {"priority": "required", "stability": "high", "min_facts": 20},
     "key_interfaces": {"priority": "required", "stability": "high"},
+    "data_contracts": {"priority": "required", "stability": "high", "min_facts": 15},
     "error_handling": {"priority": "required", "stability": "high"},
     "shared_state": {"priority": "required", "stability": "high"},
     "domain_glossary": {"priority": "recommended", "stability": "medium"},
@@ -19,7 +21,9 @@
     "gotchas": {"priority": "required", "stability": "low"},
     "hazards": {"priority": "required", "stability": "low"},
     "extension_points": {"priority": "recommended", "stability": "low"},
+    "change_playbooks": {"priority": "recommended", "stability": "medium", "min_facts": 30, "min_facts_per_playbook": 25},
     "reading_order": {"priority": "recommended", "stability": "low"},
+    "environment_bootstrap": {"priority": "recommended", "stability": "high", "min_facts": 10},
     "gaps": {"priority": "required", "stability": "low"}
   },
   "note": "Sections ordered by stability (high first) to maximize prompt cache prefix hits. No token ceilings — assembly agents include everything."

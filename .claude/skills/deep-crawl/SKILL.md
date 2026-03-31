@@ -42,6 +42,10 @@ downstream agent from opening files.
 
 No inferences or unverified signals in the output document.
 
+**Citation density floor:** Assembled sections must achieve >= 3.0 [FACT] citations
+per 100 words. Playbooks must individually achieve >= 3.0 per 100 words.
+Investigation findings (raw) should target >= 5.0 per 100 words.
+
 ## Output
 
 | File | Purpose | Location |
@@ -67,7 +71,7 @@ All intermediate state lives on disk, not in conversation context.
 
 ```bash
 # Create working directory structure
-mkdir -p /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions} \
+mkdir -p /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks} \
          /tmp/deep_crawl/batch_status \
          /tmp/deep_crawl/sections
 
@@ -135,12 +139,13 @@ Phase 2 uses parallel sub-agents to investigate the codebase. You act as the **o
 | Batch | Tasks | Protocol | Max Agents | Dependencies |
 |-------|-------|----------|------------|--------------|
 | 1 | All P1 (request traces) | A | 5 | None |
-| 2 | All P2 + P3 (module deep reads + pillar summaries) | B | 8 | None |
-| 3 | All P4 (cross-cutting concerns) | C | 6 | None |
-| 4 | All P5 (conventions) + P6 (gaps) | D + mixed | 4 | Batches 1-3 |
+| 2 | All P2 + P3 + P7 (modules + pillars + impact) | B + E | 8 | None |
+| 3 | All P4 (cross-cutting concerns incl. async boundaries) | C | 6 | None |
+| 4 | All P5 + P6 (conventions + gaps) | D + mixed | 4 | Batches 1-3 |
 | 5 | Coverage gaps (if any) | Mixed | 4 | Batch 4 |
+| 6 | Change scenarios | F | 3 | Batches 1-4 |
 
-Batches 1-3 are independent — launch them concurrently (all in a single message with multiple Agent tool calls). Batch 4 waits for 1-3 because convention detection and gap investigation benefit from earlier findings being on disk.
+Batches 1-3 are independent — launch them concurrently (all in a single message with multiple Agent tool calls). Batch 4 waits for 1-3 because convention detection and gap investigation benefit from earlier findings being on disk. Batches 5+6 run concurrently (both depend on 1-4, independent of each other).
 
 If a batch has more tasks than its max agents, split into sequential sub-batches of max agents each. All sub-batches within a batch are independent.
 
@@ -259,6 +264,10 @@ grep -rn "config\[" --include="*.py"
 grep -rn "^[a-z_].*= " --include="*.py" | grep -v "def \|class \|#\|import " | head -30
 grep -rn "_instance\|_cache\|_registry\|_pool" --include="*.py"
 grep -rn "global " --include="*.py"
+
+# Async/sync boundaries
+grep -rn "asyncio\.run\|loop\.run_until_complete\|run_coroutine_threadsafe" --include="*.py"
+grep -rn "async def " --include="*.py" | wc -l
 ```
 
 #### Protocol D: Convention Documentation
@@ -272,6 +281,50 @@ grep -rn "global " --include="*.py"
 6. Write to /tmp/deep_crawl/findings/conventions/patterns.md
 ```
 
+#### Protocol E: Reverse Dependency & Change Impact
+
+```
+1. Read xray reverse dependency data for the assigned hub module cluster:
+   - .imports.graph[module]["imported_by"] — list of importer modules
+   - .imports.distances.hub_modules — sorted by connection count
+   - .calls.reverse_lookup[function] — {callers, caller_count, module_count, impact_rating}
+   - .calls.high_impact — pre-filtered high-impact functions
+2. For each hub module in the cluster, read 2-3 representative callers (full source)
+3. Identify:
+   - Which callers depend on specific function signatures
+   - Which callers depend on specific return value shapes
+   - Which callers depend on specific side effects or state mutations
+4. Classify changes as safe vs dangerous:
+   - Safe: internal refactoring, adding optional parameters, performance changes
+   - Dangerous: signature changes, return type changes, side effect changes, exception changes
+5. Write to /tmp/deep_crawl/findings/impact/{cluster_name}.md:
+   For each hub module:
+   - Module name and importer count
+   - High-impact functions with caller counts and impact ratings
+   - Signature-change consequences (which callers break and how)
+   - Behavior-change consequences (which callers produce wrong results)
+   - Safe changes list
+   - Dangerous changes list with specific blast radius
+```
+
+#### Protocol F: Change Scenario Walkthrough
+
+```
+1. Read Protocol E impact findings for context on hub modules and blast radii
+2. Read Protocol B module findings for behavioral detail
+3. Read conventions findings for coding patterns to follow
+4. Derive scenarios from domain profile's primary_entity + Extension Points findings:
+   - "Add new {primary_entity}" (always include this scenario)
+   - "Modify {top hub module} behavior" (top 3 hub modules by connection count)
+   - "Add new external dependency" (if >3 external deps detected)
+5. For each scenario, build a step-by-step checklist:
+   - Ordered steps with file:line targets
+   - What to create/modify at each step
+   - Validation commands (test commands, grep checks)
+   - Common mistakes (derived from gotchas and impact analysis)
+6. Write to /tmp/deep_crawl/findings/playbooks/{scenario_name}.md
+```
+
 **Checkpoint discipline:** After each batch completes, update CRAWL_PLAN.md to mark completed tasks. In sequential fallback mode, update after every 5 completed tasks.
 
 **When to stop crawling — ALL must be true:**
@@ -281,14 +334,17 @@ grep -rn "global " --include="*.py"
 4. All Priority 4 (cross-cutting concerns) are investigated
 5. All Priority 5 (conventions and patterns) are documented
 6. All Priority 6 (gap investigation) tasks are attempted
-7. Current findings can answer all 10 standard questions (see below)
-8. Coverage check passes (see below)
+7. All Priority 7 (change impact analysis) tasks are complete
+8. Current findings can answer all 12 standard questions (see below)
+9. Coverage check passes (see below)
 
 **Coverage check — ALL must be true:**
 - At least 50% of subsystems/top-level packages have at least one module deep-read
 - Number of modules deep-read >= max(10, file_count / 40)
 - Number of request traces >= number of entry points identified by xray
 - Every cross-cutting concern has examples from at least 3 different subsystems
+- At least one impact card exists for each hub module cluster
+- At least one change playbook exists
 
 ---
 
@@ -312,6 +368,8 @@ cat /tmp/deep_crawl/findings/traces/*.md \
     /tmp/deep_crawl/findings/modules/*.md \
     /tmp/deep_crawl/findings/cross_cutting/*.md \
     /tmp/deep_crawl/findings/conventions/*.md \
+    /tmp/deep_crawl/findings/impact/*.md \
+    /tmp/deep_crawl/findings/playbooks/*.md \
     > /tmp/deep_crawl/SYNTHESIS_INPUT.md
 wc -w /tmp/deep_crawl/SYNTHESIS_INPUT.md
 ```
@@ -323,7 +381,7 @@ Record the total word count — you will use it to verify retention in Step 8.
 No sub-agent needed. Extract formal gotcha sections from all findings so S5 has them consolidated:
 
 ```bash
-for f in /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions}/*.md; do
+for f in /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks}/*.md; do
     gotcha_line=$(grep -n "^## Gotcha\|^### Gotcha" "$f" | head -1 | cut -d: -f1)
     if [ -n "$gotcha_line" ]; then
         echo "### From: $(basename "$f" .md)"
@@ -332,6 +390,34 @@ for f in /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions}/*.m
     fi
 done > /tmp/deep_crawl/sections/gotcha_extracts.md
 ```
+
+#### Step 1a: Extract state diagrams from trace findings
+
+No sub-agent needed. Mechanically grep trace findings for state transition patterns and generate mermaid state diagrams if found:
+
+```bash
+# Look for state transition patterns in trace findings
+STATE_PATTERNS=$(grep -rn "state\|status\|phase\|stage\|transition\|→.*→" \
+    /tmp/deep_crawl/findings/traces/*.md 2>/dev/null | head -20)
+
+if [ -n "$STATE_PATTERNS" ]; then
+    echo "## State Diagrams" > /tmp/deep_crawl/sections/state_diagrams.md
+    echo "" >> /tmp/deep_crawl/sections/state_diagrams.md
+    echo "State transitions extracted from request traces:" >> /tmp/deep_crawl/sections/state_diagrams.md
+    echo "" >> /tmp/deep_crawl/sections/state_diagrams.md
+    echo '```mermaid' >> /tmp/deep_crawl/sections/state_diagrams.md
+    echo "stateDiagram-v2" >> /tmp/deep_crawl/sections/state_diagrams.md
+    # Assembly agent S1 will populate the actual transitions
+    echo "    [*] --> TODO_POPULATE_FROM_TRACES" >> /tmp/deep_crawl/sections/state_diagrams.md
+    echo '```' >> /tmp/deep_crawl/sections/state_diagrams.md
+    echo "State patterns found — S1 assembly agent will include in Critical Paths section header."
+else
+    echo "No state transition patterns found in traces."
+    touch /tmp/deep_crawl/sections/state_diagrams.md  # empty file
+fi
+```
+
+If state_diagrams.md has content, assembly agent S1 includes it at the top of the Critical Paths section.
 
 #### Step 1b: Temporarily remove CLAUDE.md compression contamination
 
@@ -403,20 +489,33 @@ Check for sentinel files. All 4 must complete before proceeding:
 ls /tmp/deep_crawl/sections/S{1,2,3,4}.done 2>/dev/null | wc -l
 ```
 
-#### Step 4: Spawn S5 (depends on S1–S4 gotcha outputs)
+#### Step 4: Spawn S5 AND S6 in parallel (depend on S1–S4 gotcha outputs)
 
-S5 assembles the cross-cutting sections that need input from all categories:
+Launch S5 and S6 simultaneously (both with `run_in_background: true`):
 
 | Agent | Sections | Input Files | Est. Input |
 |-------|----------|-------------|-----------|
 | **S5** | Gotchas, Hazards, Extension Points, Reading Order | `sections/gotcha_extracts.md` + `sections/gotchas_from_S{1,2,3,4}.md` + CRAWL_PLAN.md (for structure) | ~12K words |
+| **S6** | Change Impact Index, Data Contracts, Change Playbooks | `findings/impact/*.md` + `findings/playbooks/*.md` + `findings/modules/*.md` (grep for Pydantic/dataclass) + `sections/state_diagrams.md` | ~15K words |
 
 S5's prompt follows the same template as S1–S4. Its template sections are Gotchas, Hazards — Do Not Read, Extension Points, and Reading Order from DEEP_ONBOARD.md.template.
 
-#### Step 5: Monitor S5 completion
+S6's prompt for **Data Contracts**: extract all Pydantic models, dataclasses, TypedDicts, and NamedTuples from module findings + xray `investigation_targets.domain_entities`. Format as table with Model, File, Type, Key Fields, Serialization, Gotcha.
+
+S6's prompt for **Change Impact Index**: organize impact findings by hub module cluster. Each cluster gets a table showing importers, high-impact functions, signature-change consequences, behavior-change consequences, safe vs dangerous changes.
+
+S6's prompt for **Change Playbooks**: organize playbook findings into step-by-step checklists with validation commands and common mistakes.
+
+S6's prompt for **Change Playbooks** quality checks:
+- Each playbook individually: >= 800 words, >= 30 [FACT] citations
+- Each playbook must have: 8-10 common mistakes with behavioral explanations
+- Citation density per playbook: >= 3.0 [FACT] per 100 words
+- If a reference playbook exists (e.g., modify_llm_provider.md), use it as the quality bar
+
+#### Step 5: Monitor S5+S6 completion
 
 ```bash
-ls /tmp/deep_crawl/sections/S5.done 2>/dev/null | wc -l
+ls /tmp/deep_crawl/sections/S{5,6}.done 2>/dev/null | wc -l  # expect 2
 ```
 
 #### Step 6: Orchestrator produces small sections
@@ -426,9 +525,10 @@ The orchestrator writes these directly (no sub-agent needed — they are small, 
 - **Identity** — from xray.md (already in context from Phase 1)
 - **Gaps** — from Phase 2 coverage check results
 - **Header metadata** — file count, token count, timestamp, git hash
-- **Footer metadata** — task counts, coverage scope, evidence counts
+- **Footer metadata** — task counts, coverage scope, evidence counts, hub module count, playbook count
+- **Environment Bootstrap** — read assembled `config_surface.md` + cross-cutting findings for external systems. Produce short bootstrap checklist: required services, minimum env vars, setup commands, verify command. Write to `sections/environment_bootstrap.md`.
 
-Write to `/tmp/deep_crawl/sections/header.md`, `/tmp/deep_crawl/sections/identity.md`, `/tmp/deep_crawl/sections/gaps.md`, `/tmp/deep_crawl/sections/footer.md`.
+Write to `/tmp/deep_crawl/sections/header.md`, `/tmp/deep_crawl/sections/identity.md`, `/tmp/deep_crawl/sections/gaps.md`, `/tmp/deep_crawl/sections/environment_bootstrap.md`, `/tmp/deep_crawl/sections/footer.md`.
 
 #### Step 7: Assemble DRAFT_ONBOARD.md
 
@@ -439,7 +539,9 @@ cat /tmp/deep_crawl/sections/header.md \
     /tmp/deep_crawl/sections/identity.md \
     /tmp/deep_crawl/sections/critical_paths.md \
     /tmp/deep_crawl/sections/module_index.md \
+    /tmp/deep_crawl/sections/change_impact_index.md \
     /tmp/deep_crawl/sections/key_interfaces.md \
+    /tmp/deep_crawl/sections/data_contracts.md \
     /tmp/deep_crawl/sections/error_handling.md \
     /tmp/deep_crawl/sections/shared_state.md \
     /tmp/deep_crawl/sections/domain_glossary.md \
@@ -448,7 +550,9 @@ cat /tmp/deep_crawl/sections/header.md \
     /tmp/deep_crawl/sections/gotchas.md \
     /tmp/deep_crawl/sections/hazards.md \
     /tmp/deep_crawl/sections/extension_points.md \
+    /tmp/deep_crawl/sections/change_playbooks.md \
     /tmp/deep_crawl/sections/reading_order.md \
+    /tmp/deep_crawl/sections/environment_bootstrap.md \
     /tmp/deep_crawl/sections/gaps.md \
     /tmp/deep_crawl/sections/footer.md \
     > /tmp/deep_crawl/DRAFT_ONBOARD.md
@@ -461,6 +565,62 @@ wc -w /tmp/deep_crawl/SYNTHESIS_INPUT.md /tmp/deep_crawl/DRAFT_ONBOARD.md
 ```
 
 If the draft is under 80% of SYNTHESIS_INPUT.md word count, an assembly agent dropped findings. Identify which section agent under-produced by comparing each section's word count against its input word count, and re-spawn that agent with: "Your previous output was N words from M words of input. Include every finding — you dropped content. The context window is 1M tokens and there is no reason to exclude findings."
+
+#### Step 8b: Fact-level completeness check
+
+This is a mechanical step — no LLM needed. Extract all file:line citations that appear with [FACT] tags in SYNTHESIS_INPUT.md and verify each appears in DRAFT_ONBOARD.md.
+
+```bash
+# Extract unique file:line citations from [FACT]-tagged lines in findings
+grep '\[FACT' /tmp/deep_crawl/SYNTHESIS_INPUT.md \
+  | grep -oP '[\w/]+\.py:\d+' | sort -u \
+  > /tmp/deep_crawl/_synthesis_fact_citations.txt
+
+# Extract unique file:line citations from assembled draft
+grep -oP '[\w/]+\.py:\d+' /tmp/deep_crawl/DRAFT_ONBOARD.md \
+  | sort -u > /tmp/deep_crawl/_draft_citations.txt
+
+# Find dropped citations
+comm -23 /tmp/deep_crawl/_synthesis_fact_citations.txt \
+         /tmp/deep_crawl/_draft_citations.txt \
+  > /tmp/deep_crawl/_dropped_citations.txt
+
+TOTAL=$(wc -l < /tmp/deep_crawl/_synthesis_fact_citations.txt)
+RETAINED=$(comm -12 /tmp/deep_crawl/_synthesis_fact_citations.txt /tmp/deep_crawl/_draft_citations.txt | wc -l)
+DROPPED=$(wc -l < /tmp/deep_crawl/_dropped_citations.txt)
+
+echo "Fact citations: $RETAINED/$TOTAL retained, $DROPPED dropped"
+```
+
+If DROPPED > 0, recover the dropped facts:
+
+```bash
+# For each dropped citation, extract the full [FACT] line from SYNTHESIS_INPUT.md
+while IFS= read -r cite; do
+    grep "$cite" /tmp/deep_crawl/SYNTHESIS_INPUT.md | grep '\[FACT'
+done < /tmp/deep_crawl/_dropped_citations.txt > /tmp/deep_crawl/_dropped_facts.txt
+```
+
+Classify each dropped fact by the section it belongs to (using the finding file it came from):
+- Facts from `findings/traces/` → append to Critical Paths section
+- Facts from `findings/modules/` → append to Module Behavioral Index section
+- Facts from `findings/cross_cutting/` → append to the corresponding section (Error Handling, Shared State, etc.)
+- Facts from `findings/conventions/` → append to Conventions section
+
+Append dropped facts to the appropriate section files in `/tmp/deep_crawl/sections/`, then re-concatenate DRAFT_ONBOARD.md using the Step 7 concatenation command.
+
+Log: `Step 8b: {RETAINED}/{TOTAL} fact citations retained ({PCT}%). Recovered {N} dropped facts.`
+
+If DROPPED == 0: `Step 8b: {TOTAL}/{TOTAL} fact citations retained (100%). No recovery needed.`
+
+Log fact-level retention to `/tmp/deep_crawl/REFINE_LOG.md`:
+```
+## Fact-Level Retention
+Citations in findings: {N}
+Citations in draft: {M}
+Retained: {R}/{N} ({PCT}%)
+Dropped and recovered: {D}
+```
 
 #### Step 9: Delegate refinement and validation (sequential)
 
@@ -533,21 +693,137 @@ Use `run_in_background: true`.
 ```bash
 # Report must exist with required sections
 test -f /tmp/deep_crawl/VALIDATION_REPORT.md && echo "PASS" || echo "FAIL"
-grep -c "^### Q[0-9]" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect 10
+grep -c "^### Q[0-9]" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect 12
 grep -c "^### Spot Check" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect 10
 grep -c "Adversarial Simulation" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect >= 1
 ```
 
-**Remediation loop:** If the validator returns FAIL on the adversarial simulation or any standard question is NO:
-1. Extract fix instructions from VALIDATION_REPORT.md
-2. Re-spawn the cross-referencer with the original inputs PLUS the fix instructions appended
-3. Wait for REFINE.done → verify word count >= previous cross-referenced version
-4. Re-spawn the validator on the new DEEP_ONBOARD.md
-5. Maximum 1 remediation cycle. If still failing, deliver with gaps noted.
+**Orchestrator spot-check (before remediation):** The orchestrator reads 5 [FACT]
+citations from DEEP_ONBOARD.md and verifies them by reading the actual source file.
+Priority: new sections > modified sections > unchanged sections. Log:
+```bash
+# For each spot-check:
+# Claim: "{quoted claim}" [FACT] ({file}:{line})
+# Source: {what the actual file says}
+# Verdict: CONFIRMED | WRONG_LINE | WRONG_CONTENT | FILE_MISSING
+```
+If >= 2/5 spot-checks fail, re-spawn S6 with corrective instructions before proceeding.
+
+**Remediation loop:** After the validator completes, parse VALIDATION_REPORT.md for gaps:
+
+```bash
+# Check for NO or PARTIAL standard questions
+grep -E "^\*\*Rating:\*\* (NO|PARTIAL)" /tmp/deep_crawl/VALIDATION_REPORT.md
+```
+
+If any standard question is NO or PARTIAL, or if the adversarial simulation is PARTIAL/FAIL:
+
+**Step R1: Map gaps to investigation tasks.** For each gap, determine the investigation protocol and target:
+
+| Gap Type | Protocol | Target | Finding Output |
+|----------|----------|--------|----------------|
+| Q1 PURPOSE unanswerable | B | Entry point modules | findings/modules/gap_purpose.md |
+| Q2 ENTRY missing entry points | A | Untraced entry points | findings/traces/gap_entry.md |
+| Q3 FLOW incomplete path | A | Untraceable critical paths | findings/traces/gap_flow.md |
+| Q4 HAZARDS not documented | B | Large/generated files from xray | findings/modules/gap_hazards.md |
+| Q5 ERRORS incomplete | C | Error handling patterns | findings/cross_cutting/gap_errors.md |
+| Q6 EXTERNAL missing systems | C | External system patterns (grep: requests, httpx, boto, redis) | findings/cross_cutting/gap_external.md |
+| Q7 STATE incomplete | C | Shared state patterns (grep: global, _instance, _cache) | findings/cross_cutting/gap_state.md |
+| Q8 TESTING thin | D | Testing conventions (read conftest.py, sample test files) | findings/conventions/gap_testing.md |
+| Q9 GOTCHAS insufficient | (review) | Re-scan existing findings for uncollected gotchas | findings/cross_cutting/gap_gotchas.md |
+| Q10 EXTENSION missing | B | Primary entity base class + extension patterns | findings/modules/gap_extension.md |
+| Q11 IMPACT missing | E | Hub modules from xray | findings/impact/gap_impact.md |
+| Q12 BOOTSTRAP missing | C | Setup patterns (requirements.txt, Dockerfile, Makefile) | findings/cross_cutting/gap_bootstrap.md |
+| Adversarial step N failed | B | Module referenced in failing step | findings/modules/gap_adversarial_{N}.md |
+
+**Step R2: Spawn targeted investigation agents.** For each gap, spawn one sub-agent with the appropriate protocol. Use `run_in_background: true` for parallel execution. Sub-agent prompts follow the standard Phase 2 format:
+
+```
+You are investigating {CODEBASE} at {ROOT_PATH} to fill a specific gap in the onboarding document.
+
+## Gap Being Filled
+{Question text} was rated {NO/PARTIAL} because: {validator's explanation}
+
+## Investigation Protocol
+{Protocol A/B/C/D text, copied verbatim}
+
+## Specific Target
+{What to investigate — e.g., "Read conftest.py, 3 representative test files, pytest.ini. Document fixture patterns, mocking strategies, coverage configuration, marker usage."}
+
+## Evidence Standards
+- [FACT]: Read specific code, cite file:line. Example: "retries 3x (stripe.py:89)"
+- [PATTERN]: Observed in >=3 examples, state count. Example: "DI via __init__ (12/14 services)"
+- [ABSENCE]: Searched and confirmed non-existence. Example: "No rate limiting (grep — 0 hits)"
+
+## Output
+Write findings to: /tmp/deep_crawl/findings/{category}/gap_{name}.md
+When done: touch /tmp/deep_crawl/batch_status/gap_{name}.done
+```
+
+**Step R3: Wait for completion.** Monitor sentinel files:
+```bash
+ls /tmp/deep_crawl/batch_status/gap_*.done 2>/dev/null | wc -l
+```
+
+**Step R4: Patch DEEP_ONBOARD.md.** For each new finding:
+1. Read the finding file
+2. Determine which section of DEEP_ONBOARD.md it belongs to
+3. Append the content to the appropriate section (ADDITIVE ONLY — do not remove existing content)
+4. Update the Gaps section to mark the gap as addressed
+
+Log to REFINE_LOG.md: `Gap closure: Investigated {N} gaps, added {M} words to {K} sections`
+
+**Step R5: Re-validate.** Re-spawn the validator to check ONLY the previously-failed questions:
+
+```
+You are re-validating specific questions that previously failed.
+
+## Questions to Re-check
+{List of previously NO/PARTIAL questions}
+
+## Input
+- /tmp/deep_crawl/DEEP_ONBOARD.md (updated with gap investigation results)
+- Codebase at {ROOT_PATH}
+
+Append results to /tmp/deep_crawl/VALIDATION_REPORT.md under "## Gap Closure Re-validation"
+When done: touch /tmp/deep_crawl/REVALIDATE.done
+```
+
+**Step R6: Accept or deliver.** If all re-checked questions are now YES, proceed to delivery. If any remain NO/PARTIAL after one investigation cycle, note in Gaps section and deliver. **Maximum 1 gap-closure cycle** to prevent infinite loops.
+
+### Partial Re-investigation Protocol
+
+When re-investigating specific sections (rather than a full crawl), the same quality
+standards apply. The orchestrator MUST NOT assemble or validate manually.
+
+**Rules:**
+1. **S6 assembly is mandatory.** Spawn a sub-agent to assemble replacement sections
+   from findings. The orchestrator reads only sentinel files + word counts, never
+   assembles section content itself.
+2. **Independent validation is mandatory.** Spawn a separate validator agent.
+   The validator receives ONLY the patched document + codebase, not findings.
+3. **Orchestrator spot-checks 5 citations.** Before declaring quality gate passed,
+   the orchestrator reads 5 [FACT] citations from the assembled sections and verifies
+   each against actual source code. Log results.
+4. **Quality gate checks are per-section, not aggregate.** Each re-investigated
+   section must independently meet the citation density floor (see Evidence Standards).
+5. **Findings-to-section retention floor.** S6 output for each section must retain
+   >= 60% of the corresponding findings word count. If below 60%, the orchestrator
+   must direct S6 to include more detail.
+
+**Partial re-investigation follows this sequence:**
+1. Spawn investigation agents (Protocol E/F) for the sections being re-done
+2. Wait for all agents; verify findings files have `wc -w > 500`
+3. Spawn S6 agent to assemble replacement sections from findings
+4. Verify S6 output: citation density >= 3.0/100w per section, word count retention >= 60%
+5. Patch the document (replace specific sections)
+6. Spawn independent validator on the patched document
+7. Run quality gate checks (per-section, not aggregate)
+8. Update DECLARATION.md with actual metrics
 
 **Step 10: Restore CLAUDE.md files.**
 
-After all sub-agents (S1-S5, cross-referencer, validator) have completed:
+After all sub-agents (S1-S6, cross-referencer, validator) have completed:
 
 ```bash
 ROOT_PATH=$(pwd)
@@ -592,12 +868,16 @@ Step 1: PASS — draft is ~{N} tokens (floor: {min_tokens})
 2. Gotchas relating to traced paths get `(see Critical Path N)`.
 3. Critical Path hops that have Module Index entries get `(see Module Index: {module})`.
 4. Error Handling deviations referenced in Gotchas get cross-links.
-5. Do NOT rewrite, merge, or remove any content. Only add parenthetical cross-references.
+5. Change Impact entries get `(see Module Index)` links.
+6. Change Playbook steps referencing gotchas get `(see Gotcha #N)` links.
+7. Data Contracts in Critical Paths get `(see Data Contracts)` links.
+8. Environment Bootstrap services get `(see Configuration Surface)` links.
+9. Do NOT rewrite, merge, or remove any content. Only add parenthetical cross-references.
 
 Log: `Step 2: Added {N} cross-references`
 
 **Step 3: Verify completeness.** Two checks:
-- **3a. Standard Questions:** Attempt to answer all 10 standard questions. If any is unanswerable, note in Gaps section (do NOT fabricate content — the assembly agents produced what the investigation found).
+- **3a. Standard Questions:** Attempt to answer all 12 standard questions. If any is unanswerable, note in Gaps section (do NOT fabricate content — the assembly agents produced what the investigation found).
 - **3b. Coverage Breadth:** Check subsystem coverage, pillar coverage, entry point traces, cross-cutting concerns. Note gaps in Gaps section.
 
 Log: `Step 3: {N}/10 questions answerable, {gaps noted}`
@@ -619,7 +899,7 @@ wc -w /tmp/deep_crawl/DRAFT_ONBOARD.md /tmp/deep_crawl/DEEP_ONBOARD.md
 
 #### 5a. Standard Questions Test
 
-For each of the 10 standard questions, attempt to answer using ONLY DEEP_ONBOARD.md.
+For each of the 12 standard questions, attempt to answer using ONLY DEEP_ONBOARD.md.
 Write each answer to VALIDATION_REPORT.md in this format:
 
 ```
@@ -629,7 +909,25 @@ Write each answer to VALIDATION_REPORT.md in this format:
 **Source section:** [which section answered this]
 ```
 
-The 10 standard questions:
+If rating is NO or PARTIAL, also include:
+```
+**Gap:** [1-sentence description of what's missing]
+**Investigation needed:** [Protocol A/B/C/D] targeting [specific files or patterns]
+**Expected output:** [what the investigation should produce]
+```
+
+Example:
+```
+### Q8. TESTING: What are the testing conventions?
+**Rating:** PARTIAL
+**Answer:** Conventions 14-20 cover test structure, organization, markers, fixtures, mocking, helpers, pytest config. But the document self-identifies testing as a gap.
+**Source section:** Conventions sections 14-20, Gaps section
+**Gap:** Fixture patterns and mocking strategies are surface-level only. No examples of how conftest.py layers fixtures or how tests mock LLM calls.
+**Investigation needed:** Protocol D targeting conftest.py, tests/unit/agents/test_research_director.py, tests/unit/core/test_llm.py
+**Expected output:** Detailed testing conventions with fixture hierarchy, LLM mocking patterns, database isolation strategies
+```
+
+The 12 standard questions:
 
 Q1.  PURPOSE:    What does this codebase do?
 Q2.  ENTRY:      Where does a request/command enter the system?
@@ -641,6 +939,8 @@ Q7.  STATE:      What shared state exists that could cause bugs?
 Q8.  TESTING:    What are the testing conventions?
 Q9.  GOTCHAS:    What are the 3 most counterintuitive things?
 Q10. EXTENSION:  If I need to add a new [primary entity], where do I start?
+Q11. IMPACT:     If I change the most-connected module, what files are affected?
+Q12. BOOTSTRAP:  How do I set up a dev environment and run tests from scratch?
 
 If any question is NO or PARTIAL, fix the gap in DEEP_ONBOARD.md before continuing.
 
@@ -686,6 +986,12 @@ Write the plan to VALIDATION_REPORT.md under `### Adversarial Simulation`.
 
 **Step 3:** Read actual codebase files to verify each step would produce correct code.
 For each step, note whether the document gave correct, incorrect, or missing guidance.
+If incorrect or missing, include:
+```
+**Missing info:** [what the document should have said]
+**Source module:** [which module contains the correct information]
+**Investigation needed:** Protocol B targeting {module path}
+```
 
 **Step 4:** Score: PASS (5/5 correct), PARTIAL (3-4/5), FAIL (<=2/5).
 If PARTIAL or FAIL, identify what's missing from DEEP_ONBOARD.md and add it.
@@ -695,7 +1001,7 @@ If PARTIAL or FAIL, identify what's missing from DEEP_ONBOARD.md and add it.
 Confirm stable sections (Identity, Critical Paths, Module Index) come before volatile sections (Gotchas, Gaps). This maximizes prompt cache prefix hits.
 
 **Phase 5 completion gate:** VALIDATION_REPORT.md must contain all of:
-- 10 standard question answers with ratings
+- 12 standard question answers with ratings
 - Coverage breadth table with actuals filled in
 - 10 spot-check entries with verdicts
 - Redundancy check results
@@ -704,7 +1010,7 @@ Confirm stable sections (Identity, Critical Paths, Module Index) come before vol
 
 ```bash
 # Verify report completeness
-grep -c "^### Q[0-9]" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect 10
+grep -c "^### Q[0-9]" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect 12
 grep -c "^### Spot Check" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect 10
 grep -c "Adversarial Simulation" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect >= 1
 ```
@@ -747,7 +1053,7 @@ Deep Crawl Complete
 Codebase: {files} files, ~{tokens} tokens
 Document: ~{doc_tokens} tokens covering {tokens} token codebase
 Crawl: {tasks_completed}/{tasks_planned} tasks
-Questions answerable: {score}/10
+Questions answerable: {score}/12
 Claims verified: {verified}/10
 Adversarial test: {PASS/PARTIAL/FAIL}
 Gotchas documented: {count}
@@ -830,7 +1136,10 @@ Not all claims have the same epistemological status. Use these tags:
 
 ## Quality Checklist (before delivery)
 
-- [ ] All 10 standard questions answerable from the document
+- [ ] All 12 standard questions answerable from the document
+- [ ] Change Impact Index covers all xray hub modules
+- [ ] At least one change playbook exists
+- [ ] Data Contracts lists high-usage domain entities
 - [ ] All [FACT] claims have file:line citations
 - [ ] All [PATTERN] claims have N/M counts
 - [ ] Adversarial simulation passes

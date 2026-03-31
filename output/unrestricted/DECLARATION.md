@@ -498,3 +498,223 @@ grep -n "80%" .claude/skills/deep-crawl/SKILL.md  # expect hits
 ### What This Tests
 
 Is a ~40-45K word document that includes essentially everything the investigation found actually more useful than a 30K word document where 40% of findings were compressed away? With 1M context, the token cost difference is noise (58K tokens vs 39K tokens — both under 6% of context). The question is purely about downstream utility.
+
+---
+
+## Round 9: Closed-Loop Validation-Driven Investigation
+
+### Context
+
+R8 eliminated compression from assembly (30K → 62K words). Citation-level measurement shows 81.8% fact retention (1,089/1,332 unique file:line citations). Assembly is no longer the bottleneck.
+
+The bottleneck is now **investigation gaps**. R8 validation returned Q8 (Testing) as PARTIAL. The Gaps section lists 5 uninvestigated areas. These aren't assembly failures — the information doesn't exist in the findings because Phase 2 didn't investigate deeply enough.
+
+**The structural problem:** The pipeline was open-loop. The validator identifies exactly what's missing but has no power to fix it. The remediation loop (SKILL.md) re-spawned the cross-referencer, which can only add cross-references — not new content that was never investigated.
+
+```
+Before:   Investigate → Assemble → Validate → Report gaps (stop)
+After:    Investigate → Assemble → Validate → Investigate gaps → Patch → Re-validate
+```
+
+### What Changed (3 files, 5 structural changes)
+
+#### A. New Phase 3.5: Fact-Level Completeness Check
+**File:** SKILL.md — inserted between Step 8 (verify retention) and Step 9 (delegate refinement/validation)
+
+Mechanical step (no LLM needed): extract all file:line citations with [FACT] tags from SYNTHESIS_INPUT.md, verify each appears in DRAFT_ONBOARD.md, recover any that were dropped. Citations are classified by finding source (traces/, modules/, cross_cutting/, conventions/) and appended to the appropriate section before re-concatenation.
+
+**Why word count is the wrong metric:** An assembly agent at 95% word count could drop the most important gotcha while padding with verbose formatting. Citation-level checking measures what actually matters: are the verified facts in the document?
+
+#### B. Remediation Loop Replaced with Investigation-Driven Gap Closure
+**File:** SKILL.md — replaced the old 5-step remediation loop
+
+Old loop re-spawned the cross-referencer with fix instructions. The cross-referencer can only add cross-references — it can't investigate new topics. A NO on Q8 (Testing) means the investigation didn't produce testing findings.
+
+New loop (6 steps): R1 maps each NO/PARTIAL gap to an investigation protocol and target. R2 spawns targeted investigation agents in parallel. R3 waits for sentinel files. R4 patches DEEP_ONBOARD.md with new findings (additive only). R5 re-validates only previously-failed questions. R6 accepts or delivers with max 1 gap-closure cycle.
+
+Gap-to-protocol mapping covers all 10 standard questions plus adversarial simulation failures, each with a specific investigation protocol (A/B/C/D) and target.
+
+#### C. Phase 5a: Machine-Parseable Gap Descriptions
+**File:** SKILL.md — added structured fields after rating format
+
+When rating is NO or PARTIAL, validator now also includes: Gap (1-sentence), Investigation needed (protocol + target files), Expected output (what investigation should produce). This makes the validator's output directly actionable by the remediation loop.
+
+#### D. Phase 5d: Structured Adversarial Failure Info
+**File:** SKILL.md — added structured fields to step 3
+
+When an adversarial step produces incorrect or missing guidance, validator now includes: Missing info, Source module, Investigation needed (protocol + target). Same structured format as 5a for consistency.
+
+#### E. Fact-Retention Metric as First-Class Output
+**Files:** SKILL.md (Step 8b logging), DEEP_ONBOARD.md.template (footer)
+
+REFINE_LOG.md gets a Fact-Level Retention section with citation counts. Footer template updated to include `Fact retention: {RETAINED}/{TOTAL} citations ({PCT}%)`.
+
+### Pipeline Change Summary
+
+```
+Phase 3 Step 8:  Verify retention (word count)        ← existing
+Phase 3 Step 8b: Fact-level completeness check         ← NEW (mechanical)
+Phase 3 Step 9:  Cross-reference + Validate            ← existing
+Remediation:     Map gaps → Investigate → Patch → Re-validate  ← REPLACED
+```
+
+### Execution Results
+
+| Metric | R8 | R9 target | R9 actual |
+|--------|-----|-----------|-----------|
+| Fact citations in findings | 1,332 (post-hoc) | measure | 674 |
+| Fact citations in draft (pre-recovery) | 1,089 (post-hoc) | measure | 603 |
+| Fact citations in draft (post-recovery) | — | measure | 673 |
+| Fact retention rate | 81.8% (measured post-hoc) | >= 90% | 99.9% (673/674) |
+| Dropped facts recovered | — | all dropped | 70 |
+| Standard questions YES | 9/10 | 10/10 | **10/10 YES** |
+| Gap investigation agents spawned | 0 | >= 1 | 1 (Q8 TESTING — 14 files read, 2,481 words) |
+| Gap closure words added | 0 | > 0 | +3,022 total (+1,562 fact recovery, +750 Q8 patch, +1,667 cross-refs) |
+| Re-validation questions improved | — | >= 1 | 1 (Q8: PARTIAL → YES) |
+| Final word count | 61,869 | >= 61,869 | 64,891 |
+| Adversarial simulation | PASS | PASS | PASS (5/5 + testing coverage confirmed) |
+| Re-validation spot checks | — | 3/3 | 3/3 CONFIRMED |
+
+### Verification
+
+```bash
+# Phase 3.5 fact check exists
+grep -n "Fact-level completeness" .claude/skills/deep-crawl/SKILL.md
+grep -n "dropped_citations" .claude/skills/deep-crawl/SKILL.md
+
+# Remediation loop uses investigation, not cross-referencing
+grep -n "Map gaps to investigation" .claude/skills/deep-crawl/SKILL.md
+grep -n "Protocol A\|Protocol B\|Protocol C\|Protocol D" .claude/skills/deep-crawl/SKILL.md
+
+# Phase 5 produces structured gap info
+grep -n "Investigation needed" .claude/skills/deep-crawl/SKILL.md
+
+# After execution
+wc -w output/unrestricted-r9/DEEP_ONBOARD.md
+grep "Fact retention" output/unrestricted-r9/DEEP_ONBOARD.md
+grep "Gap Closure Re-validation" output/unrestricted-r9/VALIDATION_REPORT.md
+```
+
+### What This Tests
+
+Can validation-driven investigation close the gap between 9/10 and 10/10 standard questions? Does fact-level completeness checking recover citations that word-count metrics miss? The goal is a document where the 10 standard questions become guarantees, not metrics — the pipeline keeps investigating until all 10 are YES.
+
+---
+
+## Round 10: Change-Oriented Investigation Protocols
+
+### Context
+
+R1-R9 produced a 65K word onboarding document scoring 10/10 standard questions, 99.9% fact retention, 10/10 spot checks, PASS adversarial. The document excels at **understanding** — what modules do, how they connect, what's dangerous.
+
+But it's weak at **changing**. A fresh agent doing a refactor still needs to grep for reverse dependencies because the document doesn't answer "if I change module X, what breaks?" The xray output already has bidirectional import graphs (`imported_by` lists), function-level reverse lookup (274 functions with caller lists), and 37 high-impact functions — the investigation pipeline just never looked at this data.
+
+**Goal:** Add change-oriented investigation protocols and sections to make the onboarding document actionable for modifications, not just understanding.
+
+### What Changed (6 files, 25+ edits)
+
+#### A. Two New Investigation Protocols
+**File:** SKILL.md
+
+- **Protocol E: Reverse Dependency & Change Impact** — Agent reads xray reverse dependency data + representative callers. Produces change impact cards per hub module showing importers, high-impact functions, signature-change consequences, behavior-change consequences, safe vs dangerous changes.
+- **Protocol F: Change Scenario Walkthrough** — Agent reads Protocol E impact findings + module findings + conventions. Builds step-by-step checklists for common change types derived from domain profile's primary_entity + Extension Points findings.
+
+#### B. 6-Batch Table (was 5)
+**File:** SKILL.md
+
+- Batch 2 expanded: P2 + P3 + P7 (impact analysis in parallel with module reads)
+- Batch 3 updated: now includes async boundary concerns
+- Batch 6 added: Change scenarios (Protocol F), depends on Batches 1-4
+- Batches 5+6 run concurrently (both depend on 1-4, independent of each other)
+
+#### C. Four New Template Sections
+**File:** DEEP_ONBOARD.md.template
+
+- **Change Impact Index** — after Module Behavioral Index. Per-hub-module tables showing importers, high-impact functions, safe vs dangerous changes.
+- **Data Contracts** — after Key Interfaces. Pydantic models, dataclasses, TypedDicts with serialization details.
+- **Change Playbooks** — after Extension Points. Step-by-step checklists for common modifications.
+- **Environment Bootstrap** — after Reading Order. Minimum dev environment setup from scratch.
+
+#### D. Q11 + Q12 Standard Questions
+**Files:** SKILL.md, VALIDATION_REPORT.md.template
+
+- Q11. IMPACT: If I change the most-connected module, what files are affected?
+- Q12. BOOTSTRAP: How do I set up a dev environment and run tests from scratch?
+- All "10 standard questions" references → "12 standard questions" throughout
+- Remediation gap table extended with Q11 (Protocol E) and Q12 (Protocol C) mappings
+
+#### E. Supporting Changes
+**Files:** SKILL.md, CRAWL_PLAN.md.template, compression_targets.json
+
+- Phase 0 mkdir: added `impact` and `playbooks` to findings directories
+- Phase 3 Step 1a: State diagram extraction from trace findings
+- Phase 3 Step 4: S6 assembly agent (Change Impact Index + Data Contracts + Change Playbooks)
+- Phase 3 Step 6: Orchestrator writes Environment Bootstrap section
+- Phase 3 Step 7: Updated concatenation order (20 files, was 16)
+- Phase 4: Cross-reference rules 5-8 (impact→module, playbook→gotcha, contracts→data, bootstrap→config)
+- CRAWL_PLAN: Added P7 section, updated completion criteria to P1-P7/12 questions
+- compression_targets.json: 4 new section entries (change_impact_index, data_contracts, change_playbooks, environment_bootstrap)
+- Quality checklist: 3 new items (hub module coverage, playbook exists, data contracts)
+- Async/sync boundary grep patterns added to Protocol C
+
+### Execution Results
+
+| Metric | R9 | R10 target | R10 actual (Part 2) |
+|--------|-----|-----------|------------|
+| Standard questions | 10/10 YES | 12/12 YES | 12/12 YES |
+| Fact retention | 99.9% (673/674) | >= 99% | 1484 [FACT] total (157 new in re-investigated sections) |
+| Word count | 64,891 | >= 64,891 | 70,874 (+5,983 from R9, +9.2%) |
+| Hub module impact cards | 0 | >= 3 clusters | 3 clusters, 9 hub modules — all re-investigated with file:line citations |
+| Change playbooks | 0 | >= 2 | 3 playbooks (1313w/35 FACT, 1283w/65 FACT, 1653w/21 FACT) |
+| Data contracts documented | 0 | >= 10 | 21 boundary-crossing entities, 100% with gotchas, 5 cross-boundary flow analyses |
+| [FACT] in new sections | — | >= 80 | 157 (change_impact:23 + data_contracts:27 + playbooks:69 + bootstrap:38) |
+| New section words | — | >= 5000 | 5,933 |
+| Spot checks | 10/10 | 10/10 | 10/10 CONFIRMED |
+| Adversarial | PASS (5/5) | PASS | PASS (5/5) |
+
+### Verification
+
+```bash
+# New protocols exist
+grep -n "Protocol E" .claude/skills/deep-crawl/SKILL.md
+grep -n "Protocol F" .claude/skills/deep-crawl/SKILL.md
+
+# New template sections
+grep -n "Change Impact Index" .claude/skills/deep-crawl/templates/DEEP_ONBOARD.md.template
+grep -n "Data Contracts" .claude/skills/deep-crawl/templates/DEEP_ONBOARD.md.template
+grep -n "Change Playbooks" .claude/skills/deep-crawl/templates/DEEP_ONBOARD.md.template
+grep -n "Environment Bootstrap" .claude/skills/deep-crawl/templates/DEEP_ONBOARD.md.template
+
+# 12 standard questions
+grep -c "^Q[0-9]" .claude/skills/deep-crawl/SKILL.md  # expect 12
+
+# After execution
+wc -w output/unrestricted-r10/DEEP_ONBOARD.md
+grep "Change Impact" output/unrestricted-r10/DEEP_ONBOARD.md
+grep "hub modules" output/unrestricted-r10/DEEP_ONBOARD.md
+grep -c "^### Q" output/unrestricted-r10/VALIDATION_REPORT.md
+```
+
+### R10 Part 2 Quality Retrospective
+
+Part 2 re-investigation improved 4 sections from placeholder to investigated quality.
+However, the orchestrator bypassed pipeline controls designed to prevent quality regressions:
+
+| Gap | What Happened | Pipeline Fix |
+|-----|--------------|--------------|
+| Manual assembly | Orchestrator wrote sections directly instead of spawning S6 | Added Re-investigation Protocol requiring S6 agent |
+| Self-validation | Orchestrator validated own work | Re-investigation Protocol mandates independent validator |
+| Citation density | 2.6 [FACT]/100w average (bar: 5.1) | Added density floor: 3.0/100w in Evidence Standards |
+| Aggregate quality masking | 69 FACT reported for 3 playbooks hid 21-FACT outlier | Per-playbook quality checks in S6 + VALIDATION_REPORT template |
+| No spot-checking | 157 citations trusted without verification | Orchestrator spot-check (5 citations) before quality gate |
+| Over-compression | 70% findings loss in env bootstrap assembly | 60% retention floor in Re-investigation Protocol |
+
+**Pipeline files modified:**
+- SKILL.md: Re-investigation Protocol, citation density metric, per-playbook checks, spot-check requirement
+- DEEP_ONBOARD.md.template: Hidden coupling subsection in Impact, cross-boundary flow in Data Contracts
+- VALIDATION_REPORT.md.template: Check 8 (citation density), Check 9 (playbook parity)
+- compression_targets.json: per-section min_facts
+
+### What This Tests
+
+Can structured reverse-dependency investigation and change scenario playbooks transform an understanding-oriented document into one that also supports *changing* the codebase? The hypothesis: the xray data (imported_by, reverse_lookup, high_impact) already contains the raw material — the pipeline just needed protocols to extract and present it. With 1M context, the additional sections (estimated ~5-8K words) consume less than 1% of available window.
