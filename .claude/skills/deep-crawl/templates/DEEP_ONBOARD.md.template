@@ -1,0 +1,246 @@
+# {PROJECT_NAME}: Agent Onboarding
+
+> Codebase: {FILE_COUNT} files, ~{TOTAL_TOKENS} tokens
+> This document: ~{DOC_TOKENS} tokens
+> Generated: {TIMESTAMP} from commit `{GIT_HASH}`
+> Crawl: {TASKS_COMPLETED}/{TASKS_PLANNED} tasks, {MODULES_READ} modules read
+> For complete class skeletons and import graphs: `/tmp/xray/xray.md`
+
+---
+
+## Identity
+
+<!-- 1-3 sentences. What is this, what does it do, what's the stack. No filler. -->
+
+{IDENTITY}
+
+---
+
+## Critical Paths
+
+<!-- For each major entry point, show the verified call chain from entry
+to terminal side effect. Include behavioral description at each hop and error path.
+This section has the highest file-reads-saved-per-token ratio.
+Include all verified paths. -->
+
+### {PATH_1_NAME}
+
+```
+{ENTRY} ({file}:{line})
+  → {FUNC} ({file}:{line}) — {what it does}
+    → {FUNC} ({file}:{line}) — {what it does}
+      → [{SIDE_EFFECT}] ({file}:{line})
+  ✗ on failure: {what happens}
+```
+
+---
+
+## Module Behavioral Index
+
+<!-- For every architecturally significant module: behavioral summary.
+This is WHAT it does and what's dangerous, not its structure.
+Include all modules where behavior is not obvious from the name. -->
+
+| Module | Does | Runtime Deps | Danger |
+|--------|------|--------------|--------|
+| `{path}` | {1-sentence behavior} | {what it needs at runtime} | {gotcha or "—"} |
+
+---
+
+## Change Impact Index
+
+<!-- For each hub module (high connection count in xray), show what breaks
+if you change it. Organized by hub module cluster. -->
+
+### {CLUSTER_NAME}
+
+| Hub Module | Imported By | High-Impact Functions | Signature Change Breaks | Behavior Change Breaks |
+|------------|-------------|----------------------|------------------------|----------------------|
+| `{module}` | {N} modules | {function_list with impact ratings} | {consequences} | {consequences} |
+
+**Hidden coupling discovered:**
+- {finding with [FACT] citation — one per bullet, not in table cells}
+
+**Blast radius ranking:**
+1. {entity} — {N} importers + {detail} (highest risk)
+
+**Safe changes:** {list}
+**Dangerous changes:** {list with blast radius counts}
+
+---
+
+## Key Interfaces
+
+<!-- The most important class/function signatures that downstream
+agents will need on nearly every task. Include these directly rather than
+forcing agents to open xray output. -->
+
+```python
+# {file}
+class {Name}:
+    def {method}(self, {params}) -> {return}: ...  # {1-sentence behavior}
+```
+
+---
+
+## Data Contracts
+
+<!-- Every Pydantic model, dataclass, TypedDict, and NamedTuple that crosses
+module boundaries. Focus on types that appear in function signatures of
+hub modules or are serialized/deserialized. -->
+
+| Model | File | Type | Key Fields | Serialization | Cross-Boundary Flow | Gotcha |
+|-------|------|------|------------|---------------|---------------------|--------|
+| `{Name}` | `{file}:{line}` | {type} | {fields} | {method} | {producer → consumer} | {gotcha — MUST be non-trivial for boundary-crossing types} |
+
+### Cross-Boundary Flow Analysis
+{For top 3-5 contracts by importer count: producer → transformations → consumers with [FACT] citations}
+
+### Schema Evolution Risks
+{Ranked list of contracts hardest to change and why}
+
+---
+
+## Error Handling Strategy
+
+<!-- Dominant pattern + deviations. -->
+
+**Dominant pattern:** {description} [PATTERN: observed in N/M modules]
+
+**Retry strategy:** {description or "none detected"}
+
+**Deviations:**
+
+| Module | Pattern | Risk |
+|--------|---------|------|
+| `{path}` | {how it differs} | {what could go wrong} |
+
+---
+
+## Shared State
+
+<!-- Every module-level mutable, singleton, cache, or registry. -->
+
+| State | Location | Mutated By | Risk |
+|-------|----------|------------|------|
+| `{name}` | `{file}:{line}` | `{functions}` | {description} |
+
+---
+
+## Domain Glossary
+
+<!-- Terms that mean something specific in THIS codebase.
+Only genuinely ambiguous or overloaded terms. -->
+
+| Term | Means Here | Defined In |
+|------|------------|------------|
+| {term} | {codebase-specific meaning} | `{file}` |
+
+---
+
+## Configuration Surface
+
+<!-- Every knob that changes runtime behavior. -->
+
+| Config | Source | Affects | Default |
+|--------|--------|---------|---------|
+| `{name}` | {env/file/flag} | {what behavior changes} | `{value}` |
+
+---
+
+## Conventions
+
+<!-- Implicit rules as directives. Each cites evidence count. -->
+
+1. {Convention} [PATTERN: N/M examples]
+2. {Convention} [PATTERN: N/M examples]
+
+---
+
+## Gotchas
+
+<!-- Counterintuitive behaviors organized by domain cluster, severity-tagged.
+Cluster names derived from investigation subsystems. Within each cluster,
+ordered by severity (CRITICAL > HIGH > MEDIUM). All must be [FACT]. -->
+
+### {Domain Cluster}
+
+1. [{SEVERITY}] **{title}** — {description} [FACT] (`{file}:{line}`)
+2. [{SEVERITY}] **{title}** — {description} [FACT] (`{file}:{line}`)
+
+---
+
+## Hazards — Do Not Read
+
+| Pattern | Tokens | Why |
+|---------|--------|-----|
+| `{glob}` | ~{N}K | {reason} |
+
+---
+
+## Extension Points
+
+| Task | Start Here | Also Touch | Watch Out |
+|------|------------|------------|-----------|
+| {task} | `{file}` | `{files}` | {gotcha} |
+
+---
+
+## Change Playbooks
+
+<!-- Step-by-step checklists for common modification tasks derived from
+the domain profile and hub module analysis. Each playbook is a verified
+sequence — not a suggestion list. -->
+
+### {SCENARIO_NAME}
+
+1. **{step}** — `{file}:{line}` {what to do and why}
+2. **{step}** — `{file}:{line}` {what to do and why}
+
+**Validation:** {how to verify the change worked}
+**Common mistakes:** {what goes wrong and how to avoid it}
+
+---
+
+## Reading Order
+
+1. `{file}` — {what you learn}
+2. `{file}` — {what you learn}
+
+**Skip:** `{file}` ({why})
+
+---
+
+## Environment Bootstrap
+
+<!-- Minimum steps to get a working dev environment from a clean checkout.
+Derived from configuration surface and cross-cutting findings. -->
+
+**Required services:** {list of external services that must be running}
+
+**Setup:**
+```bash
+{setup commands}
+```
+
+**Verify:**
+```bash
+{verification command that proves the environment works}
+```
+
+**Minimum env vars:** {list of required environment variables with descriptions}
+
+---
+
+## Gaps
+
+- {specific gap}
+- {specific gap}
+
+---
+
+*Generated by deep_crawl agent. {TASKS_COMPLETED} tasks,
+{MODULES_READ} modules read, {TRACES_VERIFIED} traces verified.
+Coverage: {DOC_TOKENS} tokens documenting {TOTAL_TOKENS} token codebase. {FINDINGS_COUNT} findings from {TASKS_COMPLETED} investigation tasks. Fact retention: {RETAINED}/{TOTAL} citations ({PCT}%).
+Impact: {HUB_MODULES_COVERED} hub modules, {PLAYBOOK_COUNT} change playbooks.
+Evidence: {FACT_COUNT} [FACT], {PATTERN_COUNT} [PATTERN], {ABSENCE_COUNT} [ABSENCE].*

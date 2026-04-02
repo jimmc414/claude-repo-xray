@@ -1,0 +1,30 @@
+{
+  "description": "Minimum document size floors by codebase size. Only used as a tripwire — if the document is below the floor, assembly agents dropped findings.",
+  "targets": [
+    {"max_files": 100, "label": "small", "min_tokens": 6000},
+    {"max_files": 500, "label": "medium", "min_tokens": 10000},
+    {"max_files": 2000, "label": "large", "min_tokens": 13000},
+    {"max_files": 999999, "label": "very_large", "min_tokens": 15000}
+  ],
+  "section_budgets": {
+    "identity": {"priority": "required", "stability": "high"},
+    "critical_paths": {"priority": "required", "stability": "high"},
+    "module_behavioral_index": {"priority": "required", "stability": "high"},
+    "change_impact_index": {"priority": "required", "stability": "high"},
+    "key_interfaces": {"priority": "required", "stability": "high"},
+    "data_contracts": {"priority": "required", "stability": "high"},
+    "error_handling": {"priority": "required", "stability": "high"},
+    "shared_state": {"priority": "required", "stability": "high"},
+    "domain_glossary": {"priority": "recommended", "stability": "medium"},
+    "config_surface": {"priority": "required", "stability": "medium"},
+    "conventions": {"priority": "required", "stability": "high"},
+    "gotchas": {"priority": "required", "stability": "low"},
+    "hazards": {"priority": "required", "stability": "low"},
+    "extension_points": {"priority": "recommended", "stability": "low"},
+    "change_playbooks": {"priority": "recommended", "stability": "medium"},
+    "reading_order": {"priority": "recommended", "stability": "low"},
+    "environment_bootstrap": {"priority": "recommended", "stability": "high"},
+    "gaps": {"priority": "required", "stability": "low"}
+  },
+  "note": "Sections ordered by stability (high first) to maximize prompt cache prefix hits. No token ceilings — assembly agents include everything."
+}

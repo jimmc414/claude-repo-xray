@@ -1,0 +1,68 @@
+# DEEP_ONBOARD Validation Report
+
+> Document: {PATH}  |  Validated: {TIMESTAMP}
+> HEAD: {CURRENT_HASH}  |  Document from: {DOC_HASH}
+
+## Verdict: {PASS | NEEDS FIXES | NEEDS REWORK}
+
+## Check 1: Completeness ({N}/12)
+| Q# | Topic | Result | Gap |
+|----|-------|--------|-----|
+| 1 | Purpose | {P/F} | |
+| 2 | Entry | {P/F} | |
+| 3 | Flow | {P/F} | |
+| 4 | Hazards | {P/F} | |
+| 5 | Errors | {P/F} | |
+| 6 | External | {P/F} | |
+| 7 | State | {P/F} | |
+| 8 | Testing | {P/F} | |
+| 9 | Gotchas | {P/F} | |
+| 10 | Extension | {P/F} | |
+| 11 | Impact | {P/F} | |
+| 12 | Bootstrap | {P/F} | |
+
+## Check 2: [FACT] Accuracy ({N}/10)
+| Claim | Location | Result |
+|-------|----------|--------|
+| {claim} | {loc} | {result} |
+
+## Check 3: [PATTERN] Verification ({N}/3)
+| Claim | Stated | Actual | Result |
+|-------|--------|--------|--------|
+| {claim} | {N/M} | {actual} | {result} |
+
+## Check 4: Coverage
+Pillars: {N}/{T}  |  Entry points: {N}/{T}  |  Side effects: {N}/{T}
+
+## Check 5: Redundancy (~{N} wasted tokens)
+| Section | Tokens | Redundant? |
+|---------|--------|------------|
+| {section} | {N} | {Y/N} |
+
+## Check 6: Adversarial ({SCORE}/5 — {VERDICT})
+Task: {task}
+| Step | Planned | Correct? |
+|------|---------|----------|
+| File | {path} | {Y/N} |
+| Name | {name} | {Y/N} |
+| Interface | {iface} | {Y/N} |
+| Registration | {point} | {Y/N} |
+| Test | {approach} | {Y/N} |
+Gap: {description or none}
+
+## Check 7: Freshness
+Stable-first: {Y/N}  |  Stale sections: {N}
+
+## Check 8: Citation Density
+| Section | Words | [FACT] | Density | Floor (3.0) |
+|---------|-------|--------|---------|-------------|
+| {section} | {N} | {N} | {N/100w} | {PASS/FAIL} |
+
+## Check 9: Playbook Quality Parity
+| Playbook | Words | [FACT] | Common Mistakes | Density | Target (3.0) |
+|----------|-------|--------|-----------------|---------|--------------|
+| {playbook} | {N} | {N} | {N}/10 | {N/100w} | {PASS/FAIL} |
+Reference bar: {best playbook name} ({words}w, {N} FACT, {density}/100w)
+
+## Fixes (priority order)
+1. {fix}

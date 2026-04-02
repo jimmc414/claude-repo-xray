@@ -31,6 +31,9 @@ __all__ = [
     'analyze_coupling',
     'analyze_freshness',
     'analyze_commit_sizes',
+    'analyze_function_churn',
+    'analyze_coupling_clusters',
+    'analyze_velocity',
     'get_file_expertise',
     'get_codebase_expertise',
     'get_tracked_files',
@@ -333,6 +336,240 @@ def get_codebase_expertise(files: List[str], cwd: str, verbose: bool = False) ->
         if expertise:
             results[filepath] = expertise
     return results
+
+
+def analyze_function_churn(cwd: str, files: List[str], months: int = 6,
+                           verbose: bool = False) -> List[Dict]:
+    """
+    Function-level churn analysis using git diff hunk headers.
+
+    Git's unified diff includes function context in @@ lines, e.g.:
+        @@ -291,18 +291,26 @@ def run_with_progress(...)
+
+    Extracts function names from these headers and aggregates per (file, function).
+    """
+    import re
+
+    log = run_git(
+        ["log", f"--since={months}.months", "-p", "--pretty=format:COMMIT::%an::%s"],
+        cwd,
+        verbose
+    )
+
+    if not log:
+        return []
+
+    hotfix_keywords = {"fix", "bug", "urgent", "revert", "hotfix", "patch", "emergency"}
+    # Match @@ ... @@ optional_context — extract def/class name
+    hunk_re = re.compile(r'^@@ .+ @@\s+(?:(?:async\s+)?def|class)\s+(\w+)')
+    diff_file_re = re.compile(r'^diff --git a/.+ b/(.+)$')
+
+    stats = defaultdict(lambda: {"commits": set(), "authors": set(), "hotfixes": 0})
+    current_author = ""
+    current_file = ""
+    is_hotfix = False
+    commit_id = 0  # synthetic commit counter for dedup
+
+    file_set = set(files)
+
+    for line in log.splitlines():
+        if line.startswith("COMMIT::"):
+            parts = line.split("::", 2)
+            if len(parts) >= 3:
+                current_author = parts[1]
+                subject = parts[2].lower()
+                is_hotfix = any(kw in subject for kw in hotfix_keywords)
+                commit_id += 1
+                current_file = ""
+            continue
+
+        m = diff_file_re.match(line)
+        if m:
+            current_file = m.group(1)
+            continue
+
+        if not current_file or current_file not in file_set:
+            continue
+
+        m = hunk_re.match(line)
+        if m:
+            func_name = m.group(1)
+            key = (current_file, func_name)
+            s = stats[key]
+            s["commits"].add(commit_id)
+            s["authors"].add(current_author)
+            if is_hotfix:
+                s["hotfixes"] += 1
+
+    if not stats:
+        return []
+
+    # Build results with risk score (same formula as file-level)
+    max_churn = max(len(s["commits"]) for s in stats.values())
+    results = []
+
+    for (f, func), s in stats.items():
+        commit_count = len(s["commits"])
+        author_count = len(s["authors"])
+        churn_norm = commit_count / max_churn if max_churn > 0 else 0
+        author_score = min(author_count, 5) / 5.0
+        hotfix_score = min(s["hotfixes"], 3) / 3.0
+        risk = (churn_norm * 0.4) + (hotfix_score * 0.4) + (author_score * 0.2)
+
+        if risk > 0.1:
+            results.append({
+                "file": f,
+                "function": func,
+                "commits": commit_count,
+                "hotfixes": s["hotfixes"],
+                "authors": author_count,
+                "risk_score": round(risk, 2)
+            })
+
+    return sorted(results, key=lambda x: x["risk_score"], reverse=True)[:20]
+
+
+def analyze_coupling_clusters(pairs: List[Dict]) -> List[Dict]:
+    """
+    Derive coupling clusters from co-modification pairs.
+
+    Takes existing coupling pairs (from analyze_coupling), builds an undirected
+    graph, and finds connected components via BFS.
+    """
+    if not pairs:
+        return []
+
+    # Build adjacency list
+    adj = defaultdict(set)
+    edge_weights = defaultdict(int)
+    for p in pairs:
+        a, b = p["file_a"], p["file_b"]
+        adj[a].add(b)
+        adj[b].add(a)
+        edge_weights[(a, b)] = p.get("count", 0)
+        edge_weights[(b, a)] = p.get("count", 0)
+
+    # BFS to find connected components
+    visited = set()
+    clusters = []
+
+    for node in adj:
+        if node in visited:
+            continue
+        component = []
+        queue = [node]
+        total_cochanges = 0
+        seen_edges = set()
+        while queue:
+            current = queue.pop(0)
+            if current in visited:
+                continue
+            visited.add(current)
+            component.append(current)
+            for neighbor in adj[current]:
+                edge = tuple(sorted([current, neighbor]))
+                if edge not in seen_edges:
+                    seen_edges.add(edge)
+                    total_cochanges += edge_weights[(current, neighbor)]
+                if neighbor not in visited:
+                    queue.append(neighbor)
+
+        if len(component) >= 2:
+            clusters.append({
+                "cluster_id": len(clusters),
+                "files": sorted(component),
+                "total_cochanges": total_cochanges
+            })
+
+    return sorted(clusters, key=lambda x: x["total_cochanges"], reverse=True)
+
+
+def analyze_velocity(cwd: str, files: List[str], months: int = 6,
+                     verbose: bool = False) -> List[Dict]:
+    """
+    Compute monthly commit velocity per file and classify trend.
+
+    Trend: 'accelerating' if second-half avg > first-half avg * 1.5,
+           'decelerating' if first-half avg > second-half avg * 1.5,
+           'stable' otherwise.
+    """
+    log = run_git(
+        ["log", f"--since={months}.months", "--format=format:%ct", "--name-only"],
+        cwd,
+        verbose
+    )
+
+    if not log:
+        return []
+
+    file_set = set(files)
+    # Bucket commits by (file, year-month)
+    file_months = defaultdict(lambda: defaultdict(int))
+    current_ts = 0
+
+    for line in log.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Timestamp line (digits only)
+        if line.isdigit():
+            current_ts = int(line)
+            continue
+        # File line
+        if line.endswith(".py") and line in file_set and current_ts:
+            dt = datetime.fromtimestamp(current_ts)
+            month_key = (dt.year, dt.month)
+            file_months[line][month_key] += 1
+
+    if not file_months:
+        return []
+
+    # Build a sorted list of all month slots in the range
+    now = datetime.now()
+    month_slots = []
+    for i in range(months - 1, -1, -1):
+        # Approximate: subtract i months
+        y = now.year
+        m = now.month - i
+        while m <= 0:
+            m += 12
+            y -= 1
+        month_slots.append((y, m))
+
+    results = []
+    for f, months_data in file_months.items():
+        total = sum(months_data.values())
+        if total < 2:
+            continue
+
+        monthly = [months_data.get(slot, 0) for slot in month_slots]
+
+        # Trend: compare first half vs second half averages
+        mid = len(monthly) // 2
+        first_half = monthly[:mid]
+        second_half = monthly[mid:]
+        avg_first = sum(first_half) / len(first_half) if first_half else 0
+        avg_second = sum(second_half) / len(second_half) if second_half else 0
+
+        if avg_first > 0 and avg_second > avg_first * 1.5:
+            trend = "accelerating"
+        elif avg_second > 0 and avg_first > avg_second * 1.5:
+            trend = "decelerating"
+        elif avg_first == 0 and avg_second > 0:
+            trend = "accelerating"
+        elif avg_second == 0 and avg_first > 0:
+            trend = "decelerating"
+        else:
+            trend = "stable"
+
+        results.append({
+            "file": f,
+            "monthly_commits": monthly,
+            "trend": trend,
+            "total_commits": total
+        })
+
+    return sorted(results, key=lambda x: x["total_commits"], reverse=True)[:20]
 
 
 def print_risk(results: List[Dict]):

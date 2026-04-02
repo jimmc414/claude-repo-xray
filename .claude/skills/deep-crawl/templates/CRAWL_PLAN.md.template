@@ -1,0 +1,60 @@
+# Deep Crawl Plan: {PROJECT_NAME}
+
+> Domain: {DETECTED_DOMAIN}
+> Codebase: {FILE_COUNT} files, ~{TOTAL_TOKENS} tokens
+> X-Ray scan: {XRAY_TIMESTAMP}
+> Plan generated: {TIMESTAMP}
+> Git commit: {GIT_HASH}
+
+### Priority 1: Request Traces ({COUNT} tasks)
+<!-- Note: hop counts are module-level estimates from xray.
+The crawl agent traces at function level; actual depth may differ. -->
+- [ ] {ENTRY_POINT} → {TERMINAL_EFFECTS} (est. {N} module hops)
+
+### Priority 2: High-Uncertainty Module Deep Reads ({COUNT} tasks)
+- [ ] `{MODULE}` — uncertainty {SCORE}: {REASONS}
+
+### Priority 3: Pillar Behavioral Summaries ({COUNT} tasks)
+- [ ] `{MODULE}` — pillar #{RANK}, {CALLERS} cross-module callers
+
+### Priority 4: Cross-Cutting Concerns ({COUNT} tasks)
+- [ ] Error handling strategy
+- [ ] Configuration surface
+- [ ] Shared mutable state verification
+{DOMAIN_SPECIFIC_TASKS}
+
+### Priority 5: Conventions and Patterns ({COUNT} tasks)
+- [ ] Dominant coding conventions
+- [ ] {DEVIATION_COUNT} convention deviations
+- [ ] {COUPLING_COUNT} coupling anomalies
+
+### Priority 6: Gap Investigation ({COUNT} tasks)
+- [ ] Implicit initialization sequences
+- [ ] Undocumented environment dependencies
+- [ ] Hidden coupling not captured by imports
+
+### Priority 7: Change Impact Analysis ({COUNT} tasks)
+- [ ] Hub cluster: {CLUSTER_NAME} — {MODULE_LIST}
+- [ ] Change scenario: Add new {PRIMARY_ENTITY}
+- [ ] Change scenario: Modify {TOP_HUB_MODULE} behavior
+
+## Completion Criteria
+All P1-P7 investigated + 12/12 standard questions answerable + coverage check passes (50%+ subsystems documented, modules deep-read >= max(10, file_count/40), all entry points traced, hub module coverage).
+
+## Context Management
+Write findings to /tmp/deep_crawl/findings/{type}/ after each task.
+Checkpoint this file every 5 tasks.
+
+## Progress
+
+| Priority | Total | Done |
+|----------|-------|------|
+| 1 | {N} | 0 |
+| 2 | {N} | 0 |
+| 3 | {N} | 0 |
+| 4 | {N} | 0 |
+| 5 | {N} | 0 |
+| 6 | {N} | 0 |
+| 7 | {N} | 0 |
+
+Last checkpoint: {TIMESTAMP}

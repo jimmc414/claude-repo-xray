@@ -36,7 +36,7 @@ def format_json(
         "structure", "complexity", "git", "imports", "calls",
         "side_effects", "tests", "tech_debt", "types",
         "decorators", "author_expertise", "commit_sizes",
-        "priority_files"
+        "priority_files", "investigation_targets"
     ]
 
     for section in sections:

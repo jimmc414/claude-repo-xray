@@ -333,7 +333,7 @@ def _extract_function_info(
     # Docstring
     docstring = ast.get_docstring(node)
     docstring_summary = None
-    if docstring:
+    if docstring and docstring.strip():
         docstring_summary = docstring.strip().splitlines()[0][:100]
 
     # Decorators
@@ -380,7 +380,7 @@ def _extract_class_info(
     # Docstring
     docstring = ast.get_docstring(node)
     docstring_summary = None
-    if docstring:
+    if docstring and docstring.strip():
         docstring_summary = docstring.strip().splitlines()[0][:100]
 
     # Decorators
@@ -448,7 +448,7 @@ def generate_skeleton(
 
     # Module docstring
     doc = ast.get_docstring(tree)
-    if doc:
+    if doc and doc.strip():
         summary = doc.strip().splitlines()[0][:100]
         lines.append(f'"""{summary}..."""')
         lines.append("")
@@ -503,7 +503,7 @@ def generate_skeleton(
         line_ref = f"  # L{node.lineno}-{getattr(node, 'end_lineno', node.lineno)}" if include_line_numbers else ""
         lines.append(f"{prefix}{is_async}def {node.name}({', '.join(args)}){ret}: ...{line_ref}")
 
-        if (doc := ast.get_docstring(node)):
+        if (doc := ast.get_docstring(node)) and doc.strip():
             summary = doc.strip().splitlines()[0][:80]
             lines.append(f'{prefix}    """{summary}..."""')
 
@@ -517,7 +517,7 @@ def generate_skeleton(
         line_ref = f"  # L{node.lineno}-{getattr(node, 'end_lineno', node.lineno)}" if include_line_numbers else ""
         lines.append(f"{prefix}class {node.name}{base_str}:{line_ref}")
 
-        if (doc := ast.get_docstring(node)):
+        if (doc := ast.get_docstring(node)) and doc.strip():
             summary = doc.strip().splitlines()[0][:80]
             lines.append(f'{prefix}    """{summary}..."""')
 
@@ -611,6 +611,15 @@ def analyze_file(
         result.parse_error = f"Parse error: {e}"
         return result
 
+    try:
+        return _analyze_tree(tree, source, result, include_private, include_line_numbers)
+    except RecursionError:
+        result.parse_error = "Skipped: AST too deeply nested"
+        return result
+
+
+def _analyze_tree(tree, source, result, include_private, include_line_numbers):
+    """Analyze a parsed AST tree. Extracted to catch RecursionError at the call site."""
     result.line_count = source.count('\n') + 1
     result.original_tokens = len(source) // 4
 

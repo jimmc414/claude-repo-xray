@@ -174,6 +174,7 @@ Examples:
     disable.add_argument("--no-verify-commands", action="store_true", dest="no_verify_commands", help="Disable verification commands")
     disable.add_argument("--no-explain", action="store_true", dest="no_explain", help="Disable explanatory text")
     disable.add_argument("--no-persona-map", action="store_true", dest="no_persona_map", help="Disable persona map")
+    disable.add_argument("--no-investigation-targets", action="store_true", dest="no_investigation_targets", help="Disable investigation targets section")
 
     # Legacy analysis switches (for backwards compatibility)
     switches = parser.add_argument_group("Analysis Switches (legacy, for backwards compatibility)")
@@ -255,7 +256,8 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
     from call_analysis import analyze_calls
     from git_analysis import (
         analyze_risk, analyze_coupling, analyze_freshness,
-        analyze_commit_sizes, get_tracked_files
+        analyze_commit_sizes, get_tracked_files,
+        analyze_function_churn, analyze_coupling_clusters, analyze_velocity
     )
     from tech_debt_analysis import analyze_tech_debt
     from test_analysis import analyze_tests
@@ -375,10 +377,18 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
             coupling = analyze_coupling(target, verbose=verbose)
             freshness = analyze_freshness(target, tracked_files, verbose=verbose)
 
+            # Derived git signals
+            function_churn = analyze_function_churn(target, tracked_files, verbose=verbose)
+            coupling_clusters = analyze_coupling_clusters(coupling)
+            velocity = analyze_velocity(target, tracked_files, verbose=verbose)
+
             result["git"] = {
                 "risk": risk,
                 "coupling": coupling,
-                "freshness": freshness
+                "freshness": freshness,
+                "function_churn": function_churn,
+                "coupling_clusters": coupling_clusters,
+                "velocity": velocity
             }
         except Exception as e:
             if verbose:
@@ -417,6 +427,41 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
             print("Running tech debt analysis...", file=sys.stderr)
         debt_results = analyze_tech_debt(files, verbose=verbose)
         result["tech_debt"] = debt_results
+
+    # Investigation targets (deep crawl signals from combined analysis results)
+    # NOTE: This must run AFTER all other analyses because it reads their results.
+    # Reordering the pipeline above may break this.
+    try:
+        from investigation_targets import compute_investigation_targets
+        from gap_features import detect_entry_points, extract_data_models
+
+        if verbose:
+            print("Computing investigation targets...", file=sys.stderr)
+
+        gap_results = {}
+        if result.get("structure"):
+            try:
+                gap_results["entry_points"] = detect_entry_points(result, target)
+            except Exception:
+                gap_results["entry_points"] = []
+            try:
+                gap_results["data_models"] = extract_data_models(result)
+            except Exception:
+                gap_results["data_models"] = []
+
+        investigation = compute_investigation_targets(
+            ast_results=ast_results or {},
+            import_results=result.get("imports", {}),
+            call_results=result.get("calls", {}),
+            git_results=result.get("git", {}),
+            gap_results=gap_results,
+            root_dir=target,
+            verbose=verbose,
+        )
+        result["investigation_targets"] = investigation
+    except Exception as e:
+        if verbose:
+            print(f"  Investigation targets failed: {e}", file=sys.stderr)
 
     return result
 
@@ -509,6 +554,7 @@ def config_to_gap_features(config: Dict[str, Any], target_dir: str) -> Dict[str,
         "env_defaults": is_enabled("env_defaults"),
         "test_example": is_enabled("test_example"),
         "linter_rules": is_enabled("linter_rules"),
+        "investigation_targets": is_enabled("investigation_targets"),
     }
 
 
@@ -536,6 +582,7 @@ def apply_disable_flags(config: Dict[str, Any], args) -> Dict[str, Any]:
         "no_verify_commands": "verify_commands",
         "no_explain": "explain",
         "no_persona_map": "persona_map",
+        "no_investigation_targets": "investigation_targets",
     }
 
     for flag, section_keys in disable_map.items():
