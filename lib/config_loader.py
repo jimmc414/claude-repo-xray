@@ -76,6 +76,12 @@ DEFAULT_CONFIG = {
         "test_example": True,
         "linter_rules": True,
         "investigation_targets": True,
+        # v3.2 scanner enhancements
+        "security_concerns": True,
+        "silent_failures": True,
+        "async_violations": True,
+        "db_query_patterns": True,
+        "deprecation_markers": True,
     },
 
     "output": {

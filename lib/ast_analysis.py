@@ -32,7 +32,9 @@ from typing import Any, Dict, List, Optional, Tuple
 # Patterns that indicate side effects
 SIDE_EFFECT_PATTERNS = {
     'db': ['db.save', 'db.commit', 'session.commit', 'cursor.execute',
-           'insert(', 'update(', 'delete(', 'query('],
+           'insert(', 'update(', 'delete(', 'query(',
+           '.filter', '.filter_by', '.objects.filter', '.objects.get',
+           '.raw', 'session.execute', 'graph.run', 'session.run'],
     'api': ['requests.', 'httpx.', 'aiohttp.', '.post(', '.put(', '.patch(',
            'fetch(', 'api.send'],
     'file': ['file.write', '.write(', 'json.dump', 'pickle.dump', 'export('],
@@ -50,6 +52,20 @@ SAFE_PATTERNS = [
     'endswith',
     '.read(',     # Reading is not a side effect
 ]
+
+# Security-sensitive builtins (code injection vectors)
+SECURITY_PATTERNS = ['exec', 'eval', 'compile']
+
+# Blocking calls that should not appear inside async functions
+BLOCKING_CALL_PATTERNS = {
+    'time.sleep': 'blocking_sleep',
+    'requests.get': 'blocking_http',
+    'requests.post': 'blocking_http',
+    'requests.put': 'blocking_http',
+    'requests.delete': 'blocking_http',
+    'requests.patch': 'blocking_http',
+    'requests.head': 'blocking_http',
+}
 
 
 # =============================================================================
@@ -90,6 +106,21 @@ class FileAnalysis:
         # Side effects
         self.side_effects: List[Dict] = []
 
+        # Security concerns (exec/eval/compile)
+        self.security_concerns: List[Dict] = []
+
+        # Silent failure patterns (except pass, bare except, etc.)
+        self.silent_failures: List[Dict] = []
+
+        # Async violations (blocking calls in async functions)
+        self.async_violations: List[Dict] = []
+
+        # SQL string literals
+        self.sql_strings: List[Dict] = []
+
+        # Deprecation markers from decorators
+        self.deprecation_markers: List[Dict] = []
+
         # Calls (internal)
         self.internal_calls: List[Dict] = []
 
@@ -125,6 +156,11 @@ class FileAnalysis:
                 "async_context_managers": self.async_context_managers
             },
             "side_effects": self.side_effects,
+            "security_concerns": self.security_concerns,
+            "silent_failures": self.silent_failures,
+            "async_violations": self.async_violations,
+            "sql_strings": self.sql_strings,
+            "deprecation_markers": self.deprecation_markers,
             "internal_calls": self.internal_calls,
             "tokens": {
                 "original": self.original_tokens,
@@ -259,6 +295,102 @@ def _detect_side_effect(call_text: str) -> Optional[Dict]:
                 return {"category": category, "call": call_text}
 
     return None
+
+
+def _detect_security_concern(node: ast.Call) -> Optional[Dict]:
+    """Detect exec/eval/compile builtins (code injection vectors).
+
+    Only flags bare builtins — cursor.execute() etc. are NOT flagged.
+    """
+    if isinstance(node.func, ast.Name) and node.func.id in SECURITY_PATTERNS:
+        return {"category": "code_execution", "call": node.func.id, "line": node.lineno}
+    return None
+
+
+def _detect_silent_failure(handler: ast.ExceptHandler) -> Optional[Dict]:
+    """Detect silent failure patterns in except handlers."""
+    body = handler.body
+    if not body:
+        return None
+
+    # Determine except type
+    if handler.type is None:
+        except_type = "bare"
+    elif isinstance(handler.type, ast.Name) and handler.type.id in ("Exception", "BaseException"):
+        except_type = "broad"
+    else:
+        except_type = None
+
+    # Check body pattern
+    pattern = None
+    if len(body) == 1:
+        stmt = body[0]
+        if isinstance(stmt, ast.Pass):
+            pattern = "except_pass"
+        elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            call_name = _get_call_text(stmt.value)
+            log_prefixes = ('logging.', 'logger.', 'log.', 'print')
+            if any(call_name.startswith(p) or call_name == p for p in log_prefixes):
+                pattern = "log_and_swallow"
+
+    if pattern or except_type:
+        result = {"line": handler.lineno}
+        if pattern:
+            result["pattern"] = pattern
+        if except_type:
+            result["except_type"] = except_type
+        return result
+    return None
+
+
+def _detect_async_violations(async_node) -> List[Dict]:
+    """Detect blocking calls inside async function bodies."""
+    violations = []
+    for node in ast.walk(async_node):
+        if isinstance(node, ast.Call):
+            call_name = _get_call_text(node)
+            # Check blocking call patterns
+            if call_name in BLOCKING_CALL_PATTERNS:
+                violations.append({
+                    "violation_type": BLOCKING_CALL_PATTERNS[call_name],
+                    "call": call_name,
+                    "function": async_node.name,
+                    "line": node.lineno
+                })
+            # Check run_until_complete
+            elif isinstance(node.func, ast.Attribute) and node.func.attr == "run_until_complete":
+                violations.append({
+                    "violation_type": "nested_event_loop",
+                    "call": call_name,
+                    "function": async_node.name,
+                    "line": node.lineno
+                })
+    return violations
+
+
+def _detect_sql_strings(tree) -> List[Dict]:
+    """Detect SQL/Cypher string literals in the AST."""
+    import re
+    sql_patterns = [
+        re.compile(r'SELECT\s+\S+\s+FROM', re.IGNORECASE),
+        re.compile(r'INSERT\s+INTO', re.IGNORECASE),
+        re.compile(r'DELETE\s+FROM', re.IGNORECASE),
+        re.compile(r'UPDATE\s+\S+\s+SET', re.IGNORECASE),
+        re.compile(r'CREATE\s+(TABLE|INDEX|VIEW)', re.IGNORECASE),
+        re.compile(r'MATCH\s.*RETURN', re.IGNORECASE | re.DOTALL),
+    ]
+    results = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and len(node.value) > 5:
+            for pat in sql_patterns:
+                if pat.search(node.value):
+                    truncated = node.value[:80].replace('\n', ' ').strip()
+                    results.append({
+                        "query": truncated,
+                        "line": node.lineno,
+                    })
+                    break  # one match per string is enough
+    return results
 
 
 # =============================================================================
@@ -637,9 +769,16 @@ def _analyze_tree(tree, source, result, include_private, include_line_numbers):
             class_info = _extract_class_info(node, include_line_numbers)
             result.classes.append(class_info)
 
-            # Collect decorators
+            # Collect decorators + check for deprecation
             for dec_name in class_info["decorators"]:
                 result.decorators[dec_name] += 1
+                if dec_name.lower() in ('deprecated', 'deprecate'):
+                    result.deprecation_markers.append({
+                        "name": node.name,
+                        "decorator": dec_name,
+                        "line": node.lineno,
+                        "kind": "class",
+                    })
 
             # Collect method names
             for method in class_info["methods"]:
@@ -668,11 +807,24 @@ def _analyze_tree(tree, source, result, include_private, include_line_numbers):
                 if func_info["has_type_hints"]:
                     result.typed_functions += 1
 
-            # Async tracking
+            # Async tracking + async violation detection
             if isinstance(node, ast.AsyncFunctionDef):
                 result.async_functions += 1
+                violations = _detect_async_violations(node)
+                result.async_violations.extend(violations)
             else:
                 result.sync_functions += 1
+
+            # Deprecation marker detection from decorators
+            for dec in node.decorator_list:
+                dec_name = _extract_decorator_name(dec)
+                if dec_name.lower() in ('deprecated', 'deprecate'):
+                    result.deprecation_markers.append({
+                        "name": node.name,
+                        "decorator": dec_name,
+                        "line": node.lineno,
+                        "kind": "function",
+                    })
 
         # Global constants
         elif isinstance(node, ast.Assign) and node.col_offset == 0:
@@ -684,13 +836,19 @@ def _analyze_tree(tree, source, result, include_private, include_line_numbers):
                         "line": node.lineno
                     })
 
+        # Exception handlers — silent failure detection
+        elif isinstance(node, ast.ExceptHandler):
+            failure = _detect_silent_failure(node)
+            if failure:
+                result.silent_failures.append(failure)
+
         # Async patterns
         elif isinstance(node, ast.AsyncFor):
             result.async_for_loops += 1
         elif isinstance(node, ast.AsyncWith):
             result.async_context_managers += 1
 
-        # Function calls - detect side effects and internal calls
+        # Function calls - detect side effects, security concerns, and internal calls
         elif isinstance(node, ast.Call):
             call_text = _get_call_text(node)
 
@@ -700,6 +858,11 @@ def _analyze_tree(tree, source, result, include_private, include_line_numbers):
                 side_effect["line"] = node.lineno
                 result.side_effects.append(side_effect)
 
+            # Security concern detection (exec/eval/compile builtins only)
+            concern = _detect_security_concern(node)
+            if concern:
+                result.security_concerns.append(concern)
+
             # Internal call tracking (calls to functions in this file)
             if call_text in all_function_names or any(
                 call_text.endswith(f".{name}") for name in all_function_names
@@ -708,6 +871,9 @@ def _analyze_tree(tree, source, result, include_private, include_line_numbers):
                     "call": call_text,
                     "line": node.lineno
                 })
+
+    # Detect SQL string literals (after main walk, before return)
+    result.sql_strings = _detect_sql_strings(tree)
 
     # Calculate type coverage percentage
     if result.total_functions > 0:
@@ -762,7 +928,11 @@ def analyze_codebase(
         "side_effects": {
             "by_type": defaultdict(list),
             "by_file": {}
-        }
+        },
+        "security_concerns": {},
+        "silent_failures": {},
+        "sql_strings": {},
+        "deprecation_markers": [],
     }
 
     function_count_for_avg = 0
@@ -821,6 +991,30 @@ def analyze_codebase(
 
         if analysis.side_effects:
             results["side_effects"]["by_file"][filepath] = analysis.side_effects
+
+        # Aggregate security concerns
+        if analysis.security_concerns:
+            results["security_concerns"][filepath] = analysis.security_concerns
+
+        # Aggregate silent failures
+        if analysis.silent_failures:
+            results["silent_failures"][filepath] = analysis.silent_failures
+
+        # Aggregate async violations into async_patterns
+        if analysis.async_violations:
+            results["async_patterns"].setdefault("violations", [])
+            for v in analysis.async_violations:
+                v["file"] = filepath
+                results["async_patterns"]["violations"].append(v)
+
+        # Aggregate SQL strings
+        if analysis.sql_strings:
+            results["sql_strings"][filepath] = analysis.sql_strings
+
+        # Aggregate deprecation markers
+        for dm in analysis.deprecation_markers:
+            dm["file"] = filepath
+            results["deprecation_markers"].append(dm)
 
     # Calculate averages
     if function_count_for_avg > 0:

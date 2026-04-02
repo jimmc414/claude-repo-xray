@@ -23,7 +23,7 @@ Tests: `python -m pytest tests/ -x -q`
 xray.py                        Entry point + orchestration (run_analysis → format → output)
   ├── lib/
   │   ├── file_discovery.py    Find Python files, apply ignore patterns
-  │   ├── ast_analysis.py      Single-pass AST: skeletons, complexity, types, side effects
+  │   ├── ast_analysis.py      Single-pass AST: skeletons, complexity, types, side effects, security, silent failures, async violations, SQL, deprecations
   │   ├── import_analysis.py   Dependency graph, layers, circular deps, distance
   │   ├── call_analysis.py     Cross-module call sites, reverse lookup, fan-in
   │   ├── git_analysis.py      Risk scores, co-modification coupling, freshness

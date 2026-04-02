@@ -64,7 +64,14 @@
     "linter_rules": true,
 
     "_comment_deep_crawl": "Deep Crawl investigation targets",
-    "investigation_targets": true
+    "investigation_targets": true,
+
+    "_comment_v32": "v3.2 scanner enhancements",
+    "security_concerns": true,
+    "silent_failures": true,
+    "async_violations": true,
+    "db_query_patterns": true,
+    "deprecation_markers": true
   },
 
   "output": {

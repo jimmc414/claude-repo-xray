@@ -349,6 +349,13 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
     if "side_effects" in analyses and ast_results:
         result["side_effects"] = ast_results.get("side_effects", {})
 
+    # New scanner signals from AST analysis
+    if ast_results:
+        result["security_concerns"] = ast_results.get("security_concerns", {})
+        result["silent_failures"] = ast_results.get("silent_failures", {})
+        result["sql_strings"] = ast_results.get("sql_strings", {})
+        result["deprecation_markers"] = ast_results.get("deprecation_markers", [])
+
     # Async patterns (always included with skeleton/complexity)
     if ast_results:
         result["async_patterns"] = ast_results.get("async_patterns", {})
@@ -427,6 +434,10 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
             print("Running tech debt analysis...", file=sys.stderr)
         debt_results = analyze_tech_debt(files, verbose=verbose)
         result["tech_debt"] = debt_results
+
+        # Merge comment-based deprecations into deprecation_markers
+        for dep in debt_results.get("deprecations", []):
+            result.setdefault("deprecation_markers", []).append(dep)
 
     # Investigation targets (deep crawl signals from combined analysis results)
     # NOTE: This must run AFTER all other analyses because it reads their results.
@@ -555,6 +566,12 @@ def config_to_gap_features(config: Dict[str, Any], target_dir: str) -> Dict[str,
         "test_example": is_enabled("test_example"),
         "linter_rules": is_enabled("linter_rules"),
         "investigation_targets": is_enabled("investigation_targets"),
+        # v3.2 scanner enhancements
+        "security_concerns": is_enabled("security_concerns"),
+        "silent_failures": is_enabled("silent_failures"),
+        "async_violations": is_enabled("async_violations"),
+        "db_query_patterns": is_enabled("db_query_patterns"),
+        "deprecation_markers": is_enabled("deprecation_markers"),
     }
 
 

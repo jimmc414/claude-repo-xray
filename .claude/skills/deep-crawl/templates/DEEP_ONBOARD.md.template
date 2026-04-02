@@ -8,6 +8,43 @@
 
 ---
 
+## Document Map
+
+| Section | What It Covers |
+|---------|---------------|
+| Critical Paths | Entry-to-side-effect call chains with every hop cited |
+| Module Behavioral Index | Per-module behavioral summary, runtime deps, danger flags |
+| Change Impact Index | Hub modules, blast radii, safe vs dangerous changes |
+| Key Interfaces | Most important class/function signatures |
+| Data Contracts | Cross-boundary Pydantic models, schema evolution risks |
+| Error Handling Strategy | Dominant patterns, retries, deviations, exception taxonomy |
+| Shared State | Module-level mutables, singletons, caches, thread safety |
+| Domain Glossary | Codebase-specific terminology |
+| Configuration Surface | Env vars, config files, feature flags |
+| Conventions | Implicit rules with evidence counts |
+| Gotchas | Counterintuitive behaviors, severity-tagged, clustered by subsystem |
+| Hazards | Files that waste context (large, generated, migrations) |
+| Extension Points | Common modification tasks with starting files |
+| Change Playbooks | Step-by-step modification checklists with validation |
+| Reading Order | Suggested file sequence by architectural layer |
+| Environment Bootstrap | Setup instructions and minimum env vars |
+
+**Recommended reading order for new AI sessions:** Shared State (understand
+global architecture) → Critical Path 1 (understand main flow) → Gotchas
+(Critical + High severity) → remaining sections as needed for specific tasks.
+
+**Also available in X-Ray output** (`/tmp/xray/xray.json` and `/tmp/xray/xray.md`):
+full import graph with layers and hub detection, dependency distances, circular
+dependency detection, dead code / orphan files, cyclomatic complexity per
+function, side effect categorization (DB/API/file/subprocess), git risk scores,
+co-modification coupling, author expertise, type hint coverage, environment
+variable extraction with defaults, CLI argument parsing, Pydantic validator
+constraints, TODO/FIXME markers, test file mapping, investigation targets.
+
+These signals informed this document's investigation but are not repeated here.
+
+---
+
 ## Identity
 
 <!-- 1-3 sentences. What is this, what does it do, what's the stack. No filler. -->

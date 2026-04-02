@@ -21,6 +21,7 @@ The crawl agent traces at function level; actual depth may differ. -->
 - [ ] Error handling strategy
 - [ ] Configuration surface
 - [ ] Shared mutable state verification
+- [ ] Exception taxonomy — Protocol C targeting all custom exception classes
 {DOMAIN_SPECIFIC_TASKS}
 
 ### Priority 5: Conventions and Patterns ({COUNT} tasks)
