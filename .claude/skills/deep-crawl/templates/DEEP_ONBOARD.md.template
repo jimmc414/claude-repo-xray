@@ -159,11 +159,14 @@ Only genuinely ambiguous or overloaded terms. -->
 
 ## Gotchas
 
-<!-- Counterintuitive behaviors with file:line evidence.
-Ordered by bug-likelihood. All must be [FACT]. -->
+<!-- Counterintuitive behaviors organized by domain cluster, severity-tagged.
+Cluster names derived from investigation subsystems. Within each cluster,
+ordered by severity (CRITICAL > HIGH > MEDIUM). All must be [FACT]. -->
 
-1. **{title}** — {description} [FACT] (`{file}:{line}`)
-2. **{title}** — {description} [FACT] (`{file}:{line}`)
+### {Domain Cluster}
+
+1. [{SEVERITY}] **{title}** — {description} [FACT] (`{file}:{line}`)
+2. [{SEVERITY}] **{title}** — {description} [FACT] (`{file}:{line}`)
 
 ---
 

@@ -132,5 +132,109 @@
       "deprecation": "deprecated\\|DeprecationWarning\\|warnings\\.warn",
       "thread_safety": "Lock\\|RLock\\|threading\\|asyncio\\.Lock"
     }
+  },
+  "scientific_computation": {
+    "indicators": {
+      "frameworks": ["numpy", "scipy", "matplotlib", "sympy", "pandas", "xarray"],
+      "patterns": ["np.array", "np.ndarray", "scipy.optimize", "plt.figure"],
+      "directories": ["analysis/", "compute/", "numerical/", "math/"]
+    },
+    "additional_investigation": [
+      "Numerical stability patterns (overflow, underflow, precision loss)",
+      "Data shape contracts (expected array dimensions at each stage)",
+      "Parallelism patterns (multiprocessing, joblib, dask)",
+      "Unit handling and dimensional analysis",
+      "Random seed management and reproducibility",
+      "Memory-intensive operations and chunking strategies"
+    ],
+    "additional_output_sections": [
+      "Data shape flow (input dimensions → transformations → output dimensions)",
+      "Numerical stability warnings",
+      "Reproducibility requirements (seed, ordering, precision)"
+    ],
+    "primary_entity": "computation or transformation",
+    "grep_patterns": {
+      "numerical": "np\\.float\\|np\\.int\\|dtype\\|astype\\|float64\\|float32",
+      "shapes": "\\.shape\\|\\.reshape\\|\\.transpose\\|np\\.expand_dims",
+      "parallel": "multiprocessing\\|Pool\\|joblib\\|dask\\|ray\\.remote"
+    }
+  },
+  "async_service": {
+    "indicators": {
+      "frameworks": ["asyncio", "aiohttp", "uvloop", "trio", "anyio", "httpx"],
+      "patterns": ["async def", "await ", "asyncio.run", "asyncio.gather"],
+      "directories": ["async/", "workers/", "handlers/"]
+    },
+    "additional_investigation": [
+      "Event loop lifecycle (creation, ownership, shutdown)",
+      "Sync/async boundary patterns (where sync code calls async and vice versa)",
+      "Cancellation handling (task cancellation, graceful shutdown)",
+      "asyncio.gather error propagation (return_exceptions usage)",
+      "Connection pool management (aiohttp sessions, database pools)",
+      "Structured concurrency patterns (TaskGroup, nurseries)"
+    ],
+    "additional_output_sections": [
+      "Event loop ownership map (who creates, who runs, who shuts down)",
+      "Sync/async boundary inventory",
+      "Cancellation and shutdown sequence"
+    ],
+    "primary_entity": "async handler or coroutine",
+    "grep_patterns": {
+      "boundaries": "asyncio\\.run\\|loop\\.run_until_complete\\|run_coroutine_threadsafe\\|to_thread",
+      "cancellation": "cancel\\(\\)\\|CancelledError\\|shield\\|wait_for",
+      "gather": "asyncio\\.gather\\|return_exceptions\\|TaskGroup"
+    }
+  },
+  "infrastructure_automation": {
+    "indicators": {
+      "frameworks": ["subprocess", "paramiko", "fabric", "boto3", "ansible", "terraform"],
+      "patterns": ["subprocess.run", "subprocess.Popen", "boto3.client", "ssh"],
+      "directories": ["deploy/", "infra/", "automation/", "scripts/", "ops/"]
+    },
+    "additional_investigation": [
+      "Idempotency guarantees (can operations be safely re-run?)",
+      "Rollback patterns (what happens when a step fails mid-sequence?)",
+      "Credential handling (how are secrets loaded, rotated, scoped?)",
+      "Timeout chains (nested timeouts, deadline propagation)",
+      "Dry-run support and validation modes",
+      "Resource cleanup on failure (partial creates, orphaned resources)"
+    ],
+    "additional_output_sections": [
+      "Operation idempotency matrix (which operations are safe to re-run)",
+      "Credential flow (source → usage → rotation)",
+      "Failure recovery procedures per operation"
+    ],
+    "primary_entity": "automation operation or deployment step",
+    "grep_patterns": {
+      "subprocess": "subprocess\\.run\\|subprocess\\.Popen\\|subprocess\\.check",
+      "credentials": "AWS_ACCESS\\|SECRET_KEY\\|credentials\\|get_secret\\|vault",
+      "timeout": "timeout\\|deadline\\|Timeout\\|wait_for"
+    }
+  },
+  "plugin_system": {
+    "indicators": {
+      "frameworks": ["pluggy", "stevedore", "importlib", "entry_points", "pkg_resources"],
+      "patterns": ["entry_points", "hookimpl", "hookspec", "importlib.import_module", "load_entry_point"],
+      "directories": ["plugins/", "extensions/", "contrib/", "addons/"]
+    },
+    "additional_investigation": [
+      "Plugin discovery mechanism (entry_points, directory scanning, registry)",
+      "Plugin lifecycle hooks (init, activate, deactivate, unload)",
+      "Version compatibility between host and plugins",
+      "Plugin isolation (shared state, namespace conflicts)",
+      "Error handling for bad plugins (graceful degradation vs fail-fast)",
+      "Plugin configuration and dependency injection"
+    ],
+    "additional_output_sections": [
+      "Plugin discovery and loading sequence",
+      "Plugin API surface (hooks available to plugins)",
+      "Plugin compatibility requirements"
+    ],
+    "primary_entity": "plugin or extension",
+    "grep_patterns": {
+      "discovery": "entry_points\\|iter_entry_points\\|importlib\\.import_module\\|load_plugin",
+      "hooks": "hookimpl\\|hookspec\\|hook_\\|on_\\|register_hook",
+      "lifecycle": "activate\\|deactivate\\|unload\\|initialize_plugin"
+    }
   }
 }

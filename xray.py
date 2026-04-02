@@ -256,7 +256,8 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
     from call_analysis import analyze_calls
     from git_analysis import (
         analyze_risk, analyze_coupling, analyze_freshness,
-        analyze_commit_sizes, get_tracked_files
+        analyze_commit_sizes, get_tracked_files,
+        analyze_function_churn, analyze_coupling_clusters, analyze_velocity
     )
     from tech_debt_analysis import analyze_tech_debt
     from test_analysis import analyze_tests
@@ -376,10 +377,18 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
             coupling = analyze_coupling(target, verbose=verbose)
             freshness = analyze_freshness(target, tracked_files, verbose=verbose)
 
+            # Derived git signals
+            function_churn = analyze_function_churn(target, tracked_files, verbose=verbose)
+            coupling_clusters = analyze_coupling_clusters(coupling)
+            velocity = analyze_velocity(target, tracked_files, verbose=verbose)
+
             result["git"] = {
                 "risk": risk,
                 "coupling": coupling,
-                "freshness": freshness
+                "freshness": freshness,
+                "function_churn": function_churn,
+                "coupling_clusters": coupling_clusters,
+                "velocity": velocity
             }
         except Exception as e:
             if verbose:

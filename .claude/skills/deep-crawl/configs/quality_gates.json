@@ -1,0 +1,67 @@
+{
+  "investigation_findings": {
+    "min_words_per_file": 200,
+    "min_facts_per_file": 5,
+    "fact_density_target_per_100w": 5.0
+  },
+  "calibration_findings": {
+    "min_words_per_file": 400,
+    "min_facts_per_file": 10,
+    "fact_density_target_per_100w": 6.0,
+    "max_respawn_attempts": 1
+  },
+  "assembly_sections": {
+    "retention_floor_pct": 80,
+    "density_tiers": {
+      "high_evidence": {
+        "sections": ["change_impact_index", "gotchas", "data_contracts"],
+        "floor_per_100w": 3
+      },
+      "medium_evidence": {
+        "sections": ["module_index", "key_interfaces", "shared_state", "change_playbooks", "error_handling", "hazards"],
+        "floor_per_100w": 2
+      },
+      "narrative": {
+        "sections": ["critical_paths", "config_surface", "conventions", "extension_points"],
+        "floor_per_100w": 1
+      },
+      "structural": {
+        "sections": ["domain_glossary", "reading_order", "environment_bootstrap"],
+        "floor_per_100w": 0
+      }
+    }
+  },
+  "playbooks": {
+    "min_words": 800,
+    "min_facts": 30,
+    "min_common_mistakes": 8,
+    "citation_density_floor_per_100w": 3.0
+  },
+  "structural_navigability": {
+    "min_h3_sections": 150,
+    "max_template_h2_sections": 20,
+    "min_error_handling_h3": 5,
+    "min_skeleton_h3": 25,
+    "gotcha_clusters": {
+      "method": "distinct_subsystems_minus_1",
+      "absolute_floor": 3,
+      "note": "Cluster count scales with repo complexity. Use distinct subsystems discovered during investigation minus 1, with a floor of 3 for small repos."
+    },
+    "module_h3": {
+      "method": "gte_modules_investigated",
+      "note": "Each investigated module must have its own ### in the Module Index."
+    }
+  },
+  "validation": {
+    "standard_questions_total": 12,
+    "spot_check_count": 10,
+    "spot_check_pass_floor": 9,
+    "adversarial_pass_threshold": 5
+  },
+  "document_size_floors": [
+    {"max_files": 100, "label": "small", "min_words": 4600},
+    {"max_files": 500, "label": "medium", "min_words": 7700},
+    {"max_files": 2000, "label": "large", "min_words": 10000},
+    {"max_files": 999999, "label": "very_large", "min_words": 11500}
+  ]
+}

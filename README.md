@@ -1,216 +1,108 @@
 # repo-xray
 
-AST-based Python codebase analysis for AI coding assistants.
+Deterministic codebase analysis + LLM-powered investigation for AI coding assistants. Python only. Zero dependencies. Stdlib only.
 
 ```bash
-python xray.py /path/to/project
+python xray.py /path/to/project      # 5 seconds, 15K tokens, done
 ```
 
 ## The Problem
 
-AI coding assistants face a cold start problem. A codebase might span 2 million tokens. A context window holds 200K. The assistant cannot read everything, yet must understand the architecture to work effectively.
+When a fresh AI agent lands in an unfamiliar codebase, it does one of two things: reads files at random and wastes context on implementation details, or reads nothing and guesses. Both produce confident, plausible, wrong suggestions.
 
-Reading files at random wastes context on implementation details. Reading nothing leaves the assistant guessing. What's needed is a compressed representation—a map of the codebase that fits in context and tells the AI where to look.
+The cost isn't the bad suggestion itself -- it's the compounding effect. A wrong mental model early in a session infects every subsequent decision. An agent that misidentifies the architectural style will write code that technically works but fights the existing design. An agent that doesn't know about a shared cache will introduce a concurrency bug. An agent that doesn't know which files are generated will burn half its context reading code no human wrote.
 
-## The Solution
+A codebase might span 2 million tokens. A context window holds 200K. The agent cannot read everything, but must understand the architecture to know what to read. This is the cold start problem.
 
-This tool extracts 37 signals from a Python codebase in a single pass:
+## The Insight
+
+Give the AI a map before it starts exploring.
+
+repo-xray has two layers with deliberately different properties:
+
+**Layer 1: The Scanner** -- Deterministic. Fast. Runs in 5 seconds on 500 files. Extracts 37+ signals from the AST, import graph, git history, and code patterns. Produces the same output every time for the same input. Zero dependencies, zero API calls. This is the map.
+
+**Layer 2: The Deep Crawl** -- LLM-powered. Exhaustive. Spawns parallel investigation agents that read actual source code, trace request paths, verify signals, and discover things no static analysis can see: behavioral semantics, implicit contracts, counterintuitive gotchas. Produces a comprehensive onboarding document with every claim backed by `file:line` citations. This is understanding.
+
+The scanner tells you a function has cyclomatic complexity 25 and is called from 8 modules. It cannot tell you that the function silently swallows timeout errors, or that changing its return type will break an undocumented integration three modules away. Only reading the code can tell you that. The deep crawl reads the code.
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/jimmc414/claude-repo-xray.git
+cd claude-repo-xray
+
+# Layer 1: Scan any Python project
+python xray.py /path/to/project                          # Full analysis to stdout
+python xray.py /path/to/project --output both --out /tmp/xray   # Markdown + JSON to files
+python xray.py /path/to/project --preset minimal          # ~2K tokens, quick survey
+
+# Layer 2: Deep crawl (requires Claude Code)
+cd /path/to/project
+python /path/to/xray.py . --output both --out /tmp/xray   # Scanner first
+/deep-crawl full                                           # Then exhaustive investigation
+```
+
+Requirements: Python 3.8+. No `pip install`. Layer 2 requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview).
+
+---
+
+## Layer 1: The Scanner
+
+### What It Extracts
 
 | Dimension | Signals |
 |-----------|---------|
-| Structure | Skeletons, tokens, files, interfaces |
-| Architecture | Import layers, dependency distance, circular deps, hub modules |
-| History | Risk scores, co-modification coupling, freshness, expertise |
-| Complexity | Cyclomatic complexity, hotspots, async patterns |
-| Behavior | Side effects (DB, API, file, subprocess), cross-module calls |
-| Context | CLI arguments, env vars, Pydantic validators, linter rules |
-| Safety | Hazard files, exclusion patterns |
+| **Structure** | Skeletons, tokens, files, interfaces, class hierarchies |
+| **Architecture** | Import layers, dependency distance, circular deps, hub modules, orphans |
+| **Complexity** | Cyclomatic complexity per function, hotspots, async patterns |
+| **Behavior** | Side effects (DB, API, file, subprocess), cross-module call graph |
+| **History** | Risk scores, co-modification coupling, freshness, author expertise |
+| **Context** | CLI arguments, environment variables, Pydantic validators, linter rules |
+| **Safety** | Hazard files (generated, large, migrations), exclusion patterns |
 
-Output: 2K-15K tokens (configurable) that compress a multi-million token codebase into actionable intelligence.
-
-## Usage
-
-```bash
-# Full analysis (default)
-python xray.py /path/to/project
-
-# Quick survey
-python xray.py . --preset minimal      # ~2K tokens
-
-# Balanced analysis
-python xray.py . --preset standard     # ~8K tokens
-
-# Both markdown and JSON
-python xray.py . --output both --out ./analysis
-```
+A 10K-token source file typically produces a 500-token skeleton. That's a 95% reduction while preserving every public interface and type annotation.
 
 ### Presets
 
-| Preset | Output | Use Case |
-|--------|--------|----------|
-| `minimal` | ~2K tokens | Quick reconnaissance |
-| `standard` | ~8K tokens | Balanced coverage |
-| (default) | ~15K tokens | Comprehensive analysis |
+| Preset | Tokens | Signals | Use Case |
+|--------|--------|---------|----------|
+| `minimal` | ~2K | Skeleton + imports | Quick reconnaissance |
+| `standard` | ~8K | 8 analysis passes | Balanced coverage |
+| (default) | ~15K | All 12 passes | Comprehensive map |
 
-### Selective Output
+### Configuration
 
-Disable sections you don't need:
+Three ways to control output:
 
 ```bash
+# CLI flags
 python xray.py . --no-logic-maps --no-test-example --no-prose
+
+# Project config (auto-detected)
+echo '{"sections": {"logic_maps": false}}' > .xray.json
+python xray.py .
+
+# Generate full config template
+python xray.py --init-config > .xray.json
 ```
 
-Or create a `.xray.json` config in your project root:
+### Output Formats
 
-```json
-{
-  "sections": {
-    "logic_maps": { "enabled": true, "count": 5 },
-    "hazards": true,
-    "git": true
-  }
-}
+**Markdown** -- Human/AI-readable with tables, Mermaid diagrams, code blocks. Renders in GitHub, VS Code, Obsidian.
+
+**JSON** -- Complete structured data for programmatic consumption. Agents use JSON for specific lookups and markdown for orientation.
+
+```bash
+python xray.py . --output both --out ./analysis
+# Creates: analysis.md, analysis.json
 ```
 
-Generate a config template: `python xray.py --init-config > .xray.json`
+### Selected Analysis Examples
 
----
-
-## Claude Code Integration
-
-The tool includes Claude Code agents and skills that go beyond raw analysis. Instead of dumping X-Ray output, the agents use it as a map to guide intelligent investigation.
-
-### The Design
-
-```
-X-Ray (the map)          repo_xray Agent           repo_retrospective Agent
-----------------         -------------------       ------------------------
-Extracts signals    -->  Investigates & curates   -->  QA & verification
-~15K tokens              Adds judgment                 Ensures quality
-Zero tokens              Uses Read/Grep/Glob           Scores actionability
-```
-
-### repo_xray Agent: Four-Phase Workflow
-
-The `repo_xray` agent operates in four phases:
-
-1. **ORIENT** — Run X-Ray, read the markdown summary, build mental model
-2. **INVESTIGATE** — Use signals to guide deep reading with Read/Grep/Glob
-   - **Pass 1**: Signal verification — confirm or downgrade X-Ray signals
-   - **Pass 2**: Gap discovery — find what X-Ray missed
-3. **SYNTHESIZE** — Produce curated onboarding documentation
-4. **VALIDATE** — Self-test: "Can I answer common questions from this doc?"
-
-This matters because X-Ray signals aren't always accurate. A "complexity hotspot" might be essential business logic or accidental complexity. A "pillar" module might be genuinely central or just a grab-bag of utilities. The agent verifies signals before including them in the final output.
-
-### Confidence Levels
-
-Every insight in the output is tagged:
-
-| Level | Meaning |
-|-------|---------|
-| `[VERIFIED]` | Agent read the actual code and confirmed |
-| `[INFERRED]` | Logical deduction from related code |
-| `[X-RAY SIGNAL]` | Directly from X-Ray, not independently verified |
-
-### What the Agent Produces
-
-The final onboarding document includes:
-
-- **TL;DR** — 5-bullet summary for 60-second orientation
-- **Architecture diagram** — Mermaid visualization from X-Ray
-- **Critical components** — Verified pillars with code context
-- **Data flow** — Traced request path through the system
-- **Gotchas** — Counterintuitive behaviors that would waste hours to discover
-- **Debugging guide** — Common failure modes and remediation
-- **Hazards** — Files to never read (would waste context)
-- **Quality metrics** — Transparency about investigation depth
-
-### Agent Modes
-
-| Mode | Command | Purpose |
-|------|---------|---------|
-| `survey` | `@repo_xray survey` | Quick reconnaissance (~10K tokens) |
-| `analyze` | `@repo_xray analyze` | Full onboarding document (~40K tokens) |
-| `query` | `@repo_xray query "auth"` | Targeted investigation |
-| `focus` | `@repo_xray focus ./src/api` | Deep dive on subsystem |
-| `refresh` | `@repo_xray refresh` | Update existing analysis |
-
-### Investigation Depth Presets
-
-| Preset | Pillars | Hotspots | Side Effects | Output |
-|--------|---------|----------|--------------|--------|
-| `quick` | Top 3 (skeleton) | None | None | ~5K tokens |
-| `standard` | Top 5 (100 lines) | Top 3 | Critical only | ~15K tokens |
-| `thorough` | Top 10 (full read) | Top 5 | All | ~25K tokens |
-
----
-
-## repo_retrospective Agent: Quality Assurance
-
-The `repo_retrospective` agent provides QA for AI onboarding documentation. Run it at project end or mid-project to verify the onboarding document is effective.
-
-### Five-Phase Workflow
-
-1. **INVENTORY** — Catalog all claims in the onboarding document
-2. **COVERAGE** — Compare against X-Ray source for gaps
-3. **VERIFICATION** — Spot-check `[VERIFIED]` claims against actual code
-4. **ACTIONABILITY** — Test if document answers 8 standard questions
-5. **RECOMMENDATIONS** — Produce specific fixes
-
-### Verdicts
-
-| Verdict | Meaning |
-|---------|---------|
-| **Ship It** | High quality, ready for use |
-| **Needs Minor Fixes** | Good, 1-3 small issues to address |
-| **Needs Significant Rework** | Critical problems, re-run repo_xray |
-
-### Retrospective Modes
-
-| Mode | Command | Purpose |
-|------|---------|---------|
-| `full` | `@repo_retrospective full` | Complete QA (all 5 phases) |
-| `quick` | `@repo_retrospective quick` | Verification audit only |
-| `coverage` | `@repo_retrospective coverage` | Gap analysis only |
-| `actionability` | `@repo_retrospective actionability` | Usability test only |
-
----
-
-## Complete Workflow
-
-```
-Codebase (2M+ tokens)
-       │
-       ▼
-X-Ray Scanner (Python AST, zero tokens, seconds)
-       │
-       ▼
-Signal Extraction (~15K tokens)
-       │
-       ▼
-repo_xray Agent (investigates, verifies, curates)
-       │
-       ▼
-Warm Start Document (~15K tokens)
-       │
-       ▼
-repo_retrospective Agent (QA)
-       │
-       ▼
-Fresh Claude instance is productive immediately
-```
-
-**Cold start solved: Map + Judgment + Quality Assurance**
-
----
-
-## Analysis Signals
-
-### Skeleton Extraction
-
-Extracts class definitions, method signatures, type annotations, and decorators—without function bodies. A 10K token file typically produces a 500 token skeleton. 95% reduction.
-
+**Skeleton extraction** -- Classes stripped to signatures:
 ```python
 class OrderEngine:  # L45
     def __init__(self, provider: PaymentProvider): ...
@@ -218,50 +110,7 @@ class OrderEngine:  # L45
     def validate(self, order: Order) -> bool: ...
 ```
 
-### Complexity Analysis
-
-Cyclomatic complexity per function. Counts decision points: `if`, `for`, `while`, `except`, `and`, `or`. High CC (>10) indicates code that's harder to understand and test.
-
-Also counts `BoolOp` branches correctly—`if a and b and c` adds 2 to complexity, not 1.
-
-### Import Analysis
-
-Builds a dependency graph, then extracts:
-
-- **Layers**: Orchestration (high imports, low importers), Core (balanced), Foundation (high importers)
-- **Dependency distance**: BFS shortest paths between all module pairs
-- **Hub modules**: Most connected modules (potential god objects)
-- **Circular dependencies**: Bidirectional import pairs
-- **Orphans**: Files with zero importers (dead code candidates)
-
-### Git History Analysis
-
-**Risk score** combines three signals:
-- Churn (commit frequency)
-- Hotfix density (commits containing "fix", "bug", "hotfix", "revert")
-- Author count (coordination overhead)
-
-**Co-modification coupling** finds files that change together even without import relationships. Uses frequent itemset mining on commit history, filtering bulk refactors (>20 files).
-
-**Freshness**: Active (<30 days), Aging (30-90), Stale (90-180), Dormant (>180).
-
-### Side Effect Detection
-
-Categorizes function calls by side effect type:
-
-| Category | Patterns |
-|----------|----------|
-| DB | `session.commit`, `cursor.execute`, `insert(`, `update(` |
-| API | `requests.`, `httpx.`, `.post(`, `.put(` |
-| File | `.write(`, `json.dump`, `pickle.dump` |
-| Subprocess | `subprocess.`, `os.system`, `Popen(` |
-
-Includes a whitelist to avoid false positives (`.get(`, `.read(`, `isinstance`).
-
-### Logic Maps
-
-For complex functions (CC > 15), generates a symbolic representation of control flow:
-
+**Logic maps** -- Symbolic control flow for complex functions (CC > 15):
 ```
 process_order(order):
   -> validate(order)
@@ -275,72 +124,262 @@ process_order(order):
      -> Return(success)
 ```
 
-Symbols: `->` control flow, `*` loop, `?` conditional, `{X}` state mutation, `[X]` side effect.
-
-### Hazard Detection
-
-Identifies files that would waste context:
-
-- Large files (>10K tokens)
-- Generated code (`**/generated_*.py`)
-- Migrations, fixtures, artifacts
-
-Outputs glob patterns for easy exclusion.
-
-### Additional Signals
-
-- **CLI arguments**: Extracted from argparse, Click, and Typer
-- **Environment variables**: From `os.getenv()` with default values
-- **Pydantic validators**: Field constraints and `@validator` decorators
-- **Linter rules**: From pyproject.toml, ruff.toml, .flake8
-- **Test patterns**: Representative test file as a "Rosetta Stone"
-
----
-
-## Output Formats
-
-### Markdown
-
-Human-readable summary with tables, Mermaid diagrams, and code blocks. Renders in GitHub, VS Code, Obsidian.
-
-### JSON
-
-Structured data for programmatic consumption. The agent uses JSON for specific lookups while using markdown for orientation.
-
-```bash
-python xray.py . --output both --out ./analysis
-# Creates: analysis.md, analysis.json
+**Co-modification coupling** -- Files that change together without import relationships, found via frequent itemset mining on commit history:
+```
+api/router.py <-> tests/test_api.py     (87% co-change, 23 commits)
+models/order.py <-> migrations/0047.py  (71% co-change, 14 commits)
 ```
 
+**Investigation targets** -- Prioritized signals for the crawl agent: ambiguous interfaces, coupling anomalies, high-uncertainty modules, shared mutable state. The scanner cheaply computes "this function is probably confusing" from name genericity and type coverage, saving the expensive crawl agent from deciding what to investigate.
+
 ---
 
-## Technical Details
+## Layer 2: The Deep Crawl
 
-### How It Works
+The scanner produces a map. The deep crawl produces understanding.
+
+It spawns parallel investigation agents that systematically read source code across six protocols, then assembles findings into a comprehensive onboarding document. Every claim is backed by evidence. The document is delivered via CLAUDE.md so every future agent session receives it automatically.
+
+### Six-Phase Pipeline
+
+```
+Phase 0  SETUP        Working directory, context management, calibration
+Phase 1  PLANNING     Investigation strategy from X-Ray signals
+Phase 2  CRAWL        Parallel sub-agents execute six investigation protocols
+Phase 3  ASSEMBLY     Curate findings into structured document
+Phase 4  CROSS-REF    Link sections, verify consistency
+Phase 5  VALIDATE     Independent QA (12 questions, 10 spot-checks, adversarial test)
+Phase 6  DELIVER      Copy to docs/, update CLAUDE.md, report metrics
+```
+
+### Investigation Protocols
+
+| Protocol | Focus | Output |
+|----------|-------|--------|
+| **A** | Request traces -- follow critical paths end-to-end | `findings/traces/` |
+| **B** | Module deep reads -- behavioral detail per module | `findings/modules/` |
+| **C** | Cross-cutting concerns -- error handling, config, shared state | `findings/cross_cutting/` |
+| **D** | Convention documentation -- patterns, testing, coding style | `findings/conventions/` |
+| **E** | Reverse dependency & change impact -- hub modules, blast radii | `findings/impact/` |
+| **F** | Change scenario walkthroughs -- step-by-step playbooks | `findings/playbooks/` |
+
+Batches 1-3 run in parallel. Batch 4 waits for 1-3 (conventions benefit from earlier findings). Batch 5 (impact analysis) waits for 1-4 (reads module findings). Batch 6 (playbooks) waits for 1-5 (references impact data).
+
+### Evidence Standards
+
+No inferences or unverified signals in the output document.
+
+| Tag | Standard | Example |
+|-----|----------|---------|
+| `[FACT]` | Read specific code, cite `file:line` | "3x retry with backoff [FACT] (stripe.py:89)" |
+| `[PATTERN]` | Observed in >= 3 examples, state count | "DI via `__init__` [PATTERN: 12/14 services]" |
+| `[ABSENCE]` | Searched and confirmed non-existence | "No rate limiting [ABSENCE: grep -- 0 hits]" |
+
+Citation density is mechanically enforced: >= 5.0 `[FACT]` per 100 words in investigation findings, tiered floors in assembled sections (3.0 for high-evidence, 2.0 for medium, 1.0 for narrative). Every citation from findings is verified to survive into the final document.
+
+### Domain Detection
+
+The crawl adapts its investigation based on detected frameworks:
+
+| Domain | Detection | Additional Investigation |
+|--------|-----------|------------------------|
+| Web API | FastAPI, Flask, Django | Routes, auth middleware, CORS, request lifecycle |
+| CLI Tool | argparse, click, typer | Command structure, argument parsing, output formats |
+| ML Pipeline | torch, tensorflow, keras | Training loops, data loading, model serialization |
+| Data Pipeline | airflow, dagster, prefect | DAG structure, idempotency, stage dependencies |
+| Async Service | asyncio, aiohttp, trio | Event loops, sync/async boundaries, cancellation |
+| Infrastructure | subprocess, boto3, ansible | Idempotency, rollback, credential handling |
+
+Detection uses import analysis + directory patterns. Domain-specific investigation prompts and grep patterns are defined in `configs/domain_profiles.json`.
+
+### What the Deep Crawl Produces
+
+**DEEP_ONBOARD.md** -- Comprehensive onboarding document with 17 sections:
+
+- Identity & tech stack
+- Critical paths (traced end-to-end with code citations)
+- Module behavioral index (every investigated module)
+- Change impact index (hub modules, blast radii)
+- Key interfaces (public APIs with usage patterns)
+- Data contracts (cross-boundary flows, schema evolution risks)
+- Error handling strategy (patterns, recovery mechanisms)
+- Shared state (globals, caches, singletons)
+- Domain glossary (codebase-specific terminology)
+- Configuration surface (env vars, config files, feature flags)
+- Conventions (coding patterns, testing approach)
+- Gotchas (clustered by subsystem, severity-tagged, each with `file:line` evidence)
+- Hazards (files to avoid reading)
+- Extension points (where to add new functionality)
+- Change playbooks (step-by-step modification guides with validation commands)
+- Reading order (suggested file sequence for manual exploration)
+- Environment bootstrap (setup instructions)
+
+The document is auto-loaded via CLAUDE.md. Prompt caching reduces subsequent read cost by ~90%.
+
+### Commands
+
+| Command | Mode | What It Does |
+|---------|------|--------------|
+| `/deep-crawl full` | Parallel sub-agents | Full pipeline, maximum quality |
+| `@deep_crawl full` | Sequential fallback | Same pipeline, single agent |
+| `@deep_crawl plan` | Sequential | Generate investigation plan only |
+| `@deep_crawl resume` | Sequential | Continue from last checkpoint |
+| `@deep_crawl validate` | Sequential | QA an existing document |
+| `@deep_crawl refresh` | Sequential | Incremental update for code changes |
+| `@deep_crawl focus ./path` | Sequential | Deep crawl a specific subsystem |
+
+### Validation Pipeline
+
+Phase 5 spawns an independent validator with no access to findings or X-Ray output -- it can only see the final document and the actual source code. The validator:
+
+1. Answers 12 standard questions from the document alone (can it guide a new developer?)
+2. Spot-checks 10 random `[FACT]` claims against actual source files (9/10 must verify)
+3. Runs an adversarial test: 5 deliberately tricky scenarios to find gaps
+4. Checks structural navigability (section count, gotcha clusters, module coverage)
+5. Verifies document size meets floors scaled to codebase size
+
+---
+
+## The Agent Ecosystem
+
+Four agents, three layers of verification:
+
+| Agent | Role | Approach |
+|-------|------|----------|
+| **repo_xray** | Quick onboarding from X-Ray signals | Four-phase: orient, investigate, synthesize, validate |
+| **deep_crawl** | Exhaustive investigation | Six-phase pipeline with parallel sub-agents |
+| **deep_onboard_validator** | Independent QA | 7-check protocol (completeness, accuracy, coverage, adversarial) |
+| **repo_retrospective** | Documentation audit | Five-phase: inventory, coverage, verification, actionability, recommendations |
+
+`repo_xray` is the lightweight path -- it uses X-Ray output as a map and adds judgment via targeted file reads. Output is tagged with `[VERIFIED]`, `[INFERRED]`, and `[X-RAY SIGNAL]` confidence levels.
+
+`deep_crawl` is the exhaustive path -- it reads everything worth reading and produces a document where every claim is `[FACT]`-cited. It costs more but the output is read by many future sessions. Generation cost is amortized.
+
+---
+
+## Incremental Updates
+
+Code changes but documentation stays the same until someone re-runs the pipeline. A full deep crawl is expensive. The incremental system (designed, not yet implemented) uses three mechanisms:
+
+**Dependency-scoped re-investigation** -- `git diff` identifies changed files. The import graph computes 1-hop and 2-hop dependents. Only affected modules are re-investigated. A typical 5-file PR touches ~15 modules instead of the full codebase.
+
+**Change log** -- A rule in the target repo's CLAUDE.md instructs models to append to `docs/.onboard_changes.log` when they modify code affecting documented claims:
+
+```
+2026-04-01T14:23:00Z | executor.py:617 | Gotchas / Process Management | Changed timeout mechanism
+2026-04-01T14:30:00Z | api_router.py:45 | Critical Paths / API Request | Added rate limiting
+```
+
+The section reference tells the diff crawl exactly where in the document to look, not just which source file changed. Advisory, not authoritative -- the dependency analysis still runs.
+
+**Finding merge** -- Previous findings are preserved on disk. New findings overwrite only the affected entries. Assembly reads the merged directory and doesn't know or care whether files are fresh or reused.
+
+---
+
+## How It Works
+
+### Scanner Internals
 
 Single-pass AST traversal using Python's `ast` module. Each file is parsed once; multiple analyzers extract different signals from the same tree.
 
-Key techniques:
-- `ast.walk()` for flat traversal (complexity counting)
-- `ast.NodeVisitor` subclasses for stateful traversal (call graph)
-- `collections.Counter` for frequency analysis
-- `collections.deque` for BFS (dependency distance)
-- Custom git log parsing with delimiter format
+| Technique | Used For |
+|-----------|----------|
+| `ast.walk()` | Flat traversal (complexity counting, side effect detection) |
+| `ast.NodeVisitor` | Stateful traversal (call graph, skeleton extraction) |
+| `collections.Counter` | Frequency analysis (pattern detection) |
+| `collections.deque` | BFS (dependency distance computation) |
+| Git log parsing | Risk scores, coupling, freshness |
 
 ### Performance
 
 For a 500-file codebase:
 - AST analysis: ~2 seconds
-- Git analysis: ~1 second (shells out to git)
+- Git analysis: ~1 second
 - Total: ~5 seconds
 
-No external dependencies. Stdlib only.
+No external dependencies. Python 3.8+ stdlib only.
 
-### Limitations
+### Deep Crawl Internals
 
-- Python only (uses Python's AST parser)
-- Git history analysis requires a git repository
-- Some signals are heuristic (side effect detection uses pattern matching)
+All intermediate state lives on disk (`/tmp/deep_crawl/`), not in conversation context. Sub-agents write findings to individual markdown files. The orchestrator never reads finding content until assembly -- it only checks sentinel files for completion.
+
+Findings are quality-gated between batches. If a finding has fewer than 200 words or 5 `[FACT]` citations, the sub-agent is re-spawned with corrective instructions. Batch 2 (module deep reads) uses elevated thresholds: 400 words and 10 citations.
+
+Calibration runs before the main crawl: three exemplar investigations (one trace, one module, one cross-cutting concern) establish quality baselines. All subsequent sub-agent prompts reference these exemplars.
+
+---
+
+## Design Decisions
+
+**Why AST-only for the scanner.** We considered pytest tracing, coverage integration, and runtime type capture. Each would produce more accurate data. We rejected them because they add dependencies, require a working test suite, take minutes instead of seconds, and produce non-deterministic output. The scanner's value is that it works on any Python codebase with zero setup.
+
+**Why the output is for AI, not humans.** Early versions served both audiences. The result was too verbose for AI (wasting context on prose) and too structured for humans (tables and compact notation). We chose the AI audience because that's where the leverage is -- a human can read code directly, but an AI's effectiveness is bottlenecked by what fits in context.
+
+**Why investigation targets in the scanner.** The scanner was originally pure observation. We added investigation targets (ambiguous interfaces, coupling anomalies, high-uncertainty modules) because without them, the crawl agent wastes significant time deciding what to investigate. The scanner cheaply computes "this is probably confusing" from name genericity and type coverage. Surfacing that as a prioritized list makes the crawl agent 2-3x more efficient.
+
+**Why delivered via CLAUDE.md, not read on demand.** An agent that has to know to look for the onboarding document sometimes won't. An agent that receives it automatically in system context always has it. The token cost of auto-loading is less than the cost of a single session where the agent works without orientation. Prompt caching makes the ongoing cost negligible.
+
+**Why unlimited generation budget for deep crawl.** The document is read by many future sessions. Optimizing for cheap generation at the expense of output quality is a false economy when the output is read hundreds of times. We removed token budget ceilings and let content determine size.
+
+---
+
+## Limitations
+
+- **Python only.** The scanner uses Python's AST parser. The agent layer and document format are language-agnostic -- a future scanner for TypeScript or Rust could feed into the same pipeline.
+- **Git history required** for risk, coupling, and freshness signals. Works without git, just with fewer signals.
+- **Side effect detection is heuristic.** Pattern matching on function names (`session.commit`, `requests.post`). Has a whitelist to reduce false positives, but won't catch novel patterns.
+- **Documents go stale.** Code changes but the document stays the same until refresh. A slightly stale onboarding document is better than none.
+- **Deep crawl output is non-deterministic.** Two runs on the same codebase produce different documents. The value comes from investigation and synthesis, not reproducibility. The scanner provides the reproducible foundation.
+
+---
+
+## File Structure
+
+```
+repo-xray/
+├── xray.py                          Entry point + orchestration
+├── lib/
+│   ├── ast_analysis.py              Single-pass AST extraction
+│   ├── import_analysis.py           Dependency graph, layers, hub detection
+│   ├── call_analysis.py             Cross-module call sites, reverse lookup
+│   ├── git_analysis.py              Risk scores, coupling, freshness
+│   ├── gap_features.py              Logic maps, hazards, data models, mermaid
+│   ├── investigation_targets.py     Prioritized signals for crawl agents
+│   ├── file_discovery.py            Python file discovery, ignore patterns
+│   ├── test_analysis.py             Test file detection, pattern extraction
+│   ├── tech_debt_analysis.py        TODO/FIXME markers
+│   └── config_loader.py             Config file loading, validation
+├── formatters/
+│   ├── markdown_formatter.py        Human/AI-readable output
+│   └── json_formatter.py            Structured output
+├── configs/
+│   ├── default_config.json          All sections enabled
+│   └── presets.json                 Preset definitions
+├── tools/
+│   └── enrich_onboard.py           Inject git signals into DEEP_ONBOARD.md
+├── tests/
+│   ├── test_gap_features.py         Gap analysis tests
+│   └── test_investigation_targets.py Signal computation tests
+├── docs/
+│   └── PLAN_INCREMENTAL_CRAWL.md    Incremental refresh design
+└── .claude/
+    ├── agents/
+    │   ├── repo_xray.md             Investigation agent
+    │   ├── deep_crawl.md            Sequential fallback agent
+    │   ├── deep_onboard_validator.md Independent QA agent
+    │   └── repo_retrospective.md    Documentation audit agent
+    └── skills/
+        └── deep-crawl/
+            ├── SKILL.md             Orchestrator instructions (1,600 lines)
+            ├── configs/
+            │   ├── domain_profiles.json   Framework detection + investigation prompts
+            │   ├── quality_gates.json     Citation density, word count floors
+            │   └── compression_targets.json Section size targets
+            └── templates/
+                ├── DEEP_ONBOARD.md.template
+                ├── CRAWL_PLAN.md.template
+                └── VALIDATION_REPORT.md.template
+```
 
 ---
 
@@ -352,63 +391,14 @@ cd claude-repo-xray
 python xray.py /path/to/your/project
 ```
 
-Or copy `xray.py`, `lib/`, `formatters/`, and `configs/` to your project.
-
 Requirements: Python 3.8+, no external dependencies.
 
----
-
-## File Structure
-
-```
-repo-xray/
-├── xray.py                     # Entry point
-├── lib/
-│   ├── ast_analysis.py         # Skeleton, complexity, types
-│   ├── import_analysis.py      # Dependency graph, layers, distance
-│   ├── call_analysis.py        # Cross-module calls
-│   ├── git_analysis.py         # Risk, coupling, freshness
-│   ├── gap_features.py         # Logic maps, hazards, data models
-│   ├── test_analysis.py        # Test coverage
-│   └── tech_debt_analysis.py   # TODO/FIXME markers
-├── formatters/
-│   ├── markdown_formatter.py
-│   └── json_formatter.py
-├── configs/
-│   ├── default_config.json
-│   └── presets.json
-├── examples/
-│   ├── kosmos_xray_output_v31.md    # X-Ray output example
-│   ├── KOSMOS_ONBOARD.md            # Agent output v1
-│   └── KOSMOS_ONBOARD_v2.md         # Agent output v2
-└── .claude/
-    ├── agents/
-    │   ├── repo_xray.md             # Analysis agent
-    │   └── repo_retrospective.md    # QA agent
-    └── skills/
-        ├── repo-xray/               # Analysis skill
-        │   ├── SKILL.md
-        │   ├── COMMANDS.md
-        │   └── templates/
-        │       └── ONBOARD.md.template
-        └── repo-retrospective/      # QA skill
-            ├── SKILL.md
-            ├── COMMANDS.md
-            └── templates/
-                └── RETROSPECTIVE.md.template
+To install the deep crawl skill globally in Claude Code:
+```bash
+./setup_deep_crawl.sh
 ```
 
----
-
-## Why This Exists
-
-AI coding assistants are powerful but context-limited. They can understand code they read, but they can't read everything. This creates a bootstrapping problem: the assistant needs to understand the architecture to know what to read, but needs to read to understand the architecture.
-
-X-Ray provides the bootstrap. It compresses a codebase into signals that fit in context and guide further investigation. The agent layer adds judgment—turning raw signals into verified, curated documentation. The retrospective layer ensures quality—verifying that the documentation actually works.
-
-The goal is not to replace reading code. It's to make reading code efficient by telling the AI where to look first.
-
----
+This creates a symlink so `/deep-crawl full` is available in any project directory.
 
 ## License
 

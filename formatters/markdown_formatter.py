@@ -952,6 +952,56 @@ def format_markdown(
         except Exception:
             pass
 
+        # Function-Level Hotspots
+        function_churn = git.get("function_churn", [])
+        if function_churn:
+            lines.append("### Function-Level Hotspots")
+            lines.append("")
+            lines.append("*Most volatile functions (by commit frequency):*")
+            lines.append("")
+            lines.append("| Risk | Function | File | Commits | Hotfixes |")
+            lines.append("|------|----------|------|---------|----------|")
+            for fc in function_churn[:10]:
+                lines.append(f"| {fc.get('risk_score', 0):.2f} | `{fc.get('function', '')}` | {Path(fc.get('file', '')).name} | {fc.get('commits', 0)} | {fc.get('hotfixes', 0)} |")
+            lines.append("")
+
+        # Change Clusters
+        coupling_clusters = git.get("coupling_clusters", [])
+        if coupling_clusters:
+            lines.append("### Change Clusters")
+            lines.append("")
+            lines.append("*Files that form change groups (modify one → check all):*")
+            lines.append("")
+            lines.append("| Cluster | Files | Co-changes |")
+            lines.append("|---------|-------|------------|")
+            for cc in coupling_clusters[:10]:
+                file_list = ", ".join(f"`{Path(f).name}`" for f in cc.get("files", []))
+                lines.append(f"| {cc.get('cluster_id', 0) + 1} | {file_list} | {cc.get('total_cochanges', 0)} |")
+            lines.append("")
+
+        # Velocity Trends
+        velocity = git.get("velocity", [])
+        if velocity:
+            # Only show non-stable trends (accelerating/decelerating are the actionable ones)
+            notable = [v for v in velocity if v.get("trend") != "stable"]
+            if notable:
+                lines.append("### Velocity Trends")
+                lines.append("")
+                lines.append("*Files with accelerating or decelerating churn:*")
+                lines.append("")
+                lines.append("| File | Trend | Monthly |")
+                lines.append("|------|-------|---------|")
+                for v in notable[:10]:
+                    monthly = v.get("monthly_commits", [])
+                    lines.append(f"| `{Path(v.get('file', '')).name}` | {v.get('trend', '')} | {monthly} |")
+                lines.append("")
+            # If all stable, show top files by volume
+            elif velocity:
+                lines.append("### Velocity Trends")
+                lines.append("")
+                lines.append("*All active files show stable churn velocity.*")
+                lines.append("")
+
     # Side Effects
     side_effects = results.get("side_effects", {})
     if side_effects:
