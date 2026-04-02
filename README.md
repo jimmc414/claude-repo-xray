@@ -13,6 +13,13 @@ Phase 2 — Deep Crawl: /deep-crawl full                    # 30-70 min, ~60K wo
 
 Most users only need Phase 1. Phase 2 pays for itself on codebases where multiple AI sessions will work over time — the generation cost is amortized across every future session that reads the document.
 
+### Example: Kosmos (802 files, ~2.4M tokens)
+
+[Kosmos](https://github.com/jimmc414/Kosmos) is an AI Scientist platform — 802 Python files totaling over 2.4 million tokens. Far too large for any AI context window. Here's what each phase produces:
+
+- **Phase 1 output**: [X-Ray scan](examples/kosmos_xray_output_v31.md) — deterministic map in ~15K tokens. Skeletons, dependency graph, complexity hotspots, git risk, side effects. Produced in seconds.
+- **Phase 2 output**: [Deep Crawl onboarding document](docs/DEEP_ONBOARD.md) — ~60K words of verified behavioral documentation with `file:line` citations throughout. Critical paths, module analysis, gotchas, change playbooks, error handling — everything a fresh AI session needs to work confidently in the codebase.
+
 ## The Problem
 
 When a fresh AI agent lands in an unfamiliar codebase, it does one of two things: reads files at random and wastes context on implementation details, or reads nothing and guesses. Both produce confident, plausible, wrong suggestions.
