@@ -1,10 +1,17 @@
 # repo-xray
 
-Deterministic codebase analysis + LLM-powered investigation for AI coding assistants. Python only. Zero dependencies. Stdlib only.
+Solve the cold start problem for AI coding assistants. Two phases: a fast deterministic scan, then an optional LLM-powered deep investigation.
 
-```bash
-python xray.py /path/to/project      # 5 seconds, 15K tokens, done
 ```
+Phase 1 — X-Ray:     python xray.py /path/to/project     # 5 seconds, ~15K tokens, zero dependencies
+Phase 2 — Deep Crawl: /deep-crawl full                    # 30-70 min, ~60K words, every claim cited
+```
+
+**Phase 1 (X-Ray)** runs in seconds with no API calls. It produces a lean, deterministic map of the codebase — skeletons, dependency graph, complexity hotspots, git risk, side effects — that fits in a single context window. Same input, same output, every time. This is enough for most tasks: the AI knows where to look and what to be careful about.
+
+**Phase 2 (Deep Crawl)** is the optional second stage for when you want comprehensive understanding. It uses the X-Ray output as its map, then spawns parallel LLM agents that read actual source code, trace request paths, verify signals, and document everything they find with `file:line` evidence citations. The result is a complete onboarding document that auto-loads in every future AI session. Run it once, benefit for months.
+
+Most users only need Phase 1. Phase 2 pays for itself on codebases where multiple AI sessions will work over time — the generation cost is amortized across every future session that reads the document.
 
 ## The Problem
 
@@ -14,15 +21,29 @@ The cost isn't the bad suggestion itself -- it's the compounding effect. A wrong
 
 A codebase might span 2 million tokens. A context window holds 200K. The agent cannot read everything, but must understand the architecture to know what to read. This is the cold start problem.
 
-## The Insight
+## Two Phases
 
-Give the AI a map before it starts exploring.
+**Phase 1: X-Ray** (deterministic scanner)
 
-repo-xray has two layers with deliberately different properties:
+| | |
+|---|---|
+| Speed | 5 seconds on 500 files |
+| Output | ~15K tokens (configurable: 2K-15K) |
+| Dependencies | None. Python 3.8+ stdlib only. |
+| Determinism | Same input produces identical output every time |
+| What it extracts | 37+ signals: AST skeletons, import layers, complexity, git risk, side effects, call graph, hub modules |
+| What it can't do | Read code semantically. It knows a function has CC=25 and 8 callers. It doesn't know why. |
 
-**Layer 1: The Scanner** -- Deterministic. Fast. Runs in 5 seconds on 500 files. Extracts 37+ signals from the AST, import graph, git history, and code patterns. Produces the same output every time for the same input. Zero dependencies, zero API calls. This is the map.
+**Phase 2: Deep Crawl** (LLM-powered investigation, optional)
 
-**Layer 2: The Deep Crawl** -- LLM-powered. Exhaustive. Spawns parallel investigation agents that read actual source code, trace request paths, verify signals, and discover things no static analysis can see: behavioral semantics, implicit contracts, counterintuitive gotchas. Produces a comprehensive onboarding document with every claim backed by `file:line` citations. This is understanding.
+| | |
+|---|---|
+| Speed | 30-70 minutes (parallel sub-agents) |
+| Output | ~60K words, 17 sections, every claim backed by `file:line` citations |
+| Dependencies | Claude Code with sub-agent support (Opus/Sonnet) |
+| Determinism | Non-deterministic. Two runs produce different documents. The value is in the investigation. |
+| What it does | Traces request paths end-to-end, reads module source, documents error handling, discovers gotchas, builds change playbooks |
+| Prerequisite | X-Ray output (Phase 1 must run first) |
 
 The scanner tells you a function has cyclomatic complexity 25 and is called from 8 modules. It cannot tell you that the function silently swallows timeout errors, or that changing its return type will break an undocumented integration three modules away. Only reading the code can tell you that. The deep crawl reads the code.
 
