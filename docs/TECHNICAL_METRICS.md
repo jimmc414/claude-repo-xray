@@ -29,6 +29,12 @@ This document describes every technical metric collected by Repo X-Ray, the tech
 21. [State Mutation Tracking](#21-state-mutation-tracking)
 22. [Linter Rules Configuration](#22-linter-rules-configuration)
 23. [GitHub Repository Metadata](#23-github-repository-metadata)
+24. [Security Concerns](#24-security-concerns)
+25. [Silent Failures](#25-silent-failures)
+26. [Async/Sync Violations](#26-asyncsync-violations)
+27. [SQL String Detection](#27-sql-string-detection)
+28. [Deprecation Markers](#28-deprecation-markers)
+29. [DB Side Effects (Expanded)](#29-db-side-effects-expanded)
 
 ---
 
@@ -578,6 +584,167 @@ Line length, enabled/disabled rule codes (`select`/`ignore`), Python target vers
 ### How it works
 
 First attempts to use the `gh` CLI (which handles authentication for private repos). Falls back to the public GitHub API via `urllib` if `gh` is unavailable. The remote URL is parsed from `.git/config` to extract the `owner/repo` pair.
+
+---
+
+## 24. Security Concerns
+
+**Collected by:** `lib/ast_analysis.py` — `_detect_security_concern()` (line 300)
+
+**Technology:** Python `ast` module — inspects `ast.Call` nodes
+
+### What is collected
+
+| Metric | Description |
+|--------|-------------|
+| **Code injection vectors** | Calls to `exec()`, `eval()`, `compile()` builtins |
+
+### How it works
+
+For every `ast.Call` node in the file, checks if `node.func` is an `ast.Name` (bare function call, not method call) with `id` in `SECURITY_PATTERNS = ['exec', 'eval', 'compile']`. This deliberately excludes method calls like `cursor.execute()`, `pool.execute()`, or `asyncio.get_event_loop().run_until_complete()` — those are attribute access (`ast.Attribute`), not bare name calls.
+
+### Output
+
+Per file: list of `{"category": "code_execution", "call": "exec", "line": 272}`. Aggregated in JSON under `security_concerns` keyed by file path. Rendered in markdown as `## Security Concerns`.
+
+---
+
+## 25. Silent Failures
+
+**Collected by:** `lib/ast_analysis.py` — `_detect_silent_failure()` (line 310)
+
+**Technology:** Python `ast` module — inspects `ast.ExceptHandler` nodes
+
+### What is collected
+
+| Metric | Description |
+|--------|-------------|
+| **Except type** | `bare` (no type specified), `broad` (catches `Exception` or `BaseException`) |
+| **Body pattern** | `except_pass` (body is only `pass`), `log_and_swallow` (body is single logging/print call) |
+
+### How it works
+
+Every `ast.ExceptHandler` is inspected. The except type is classified: `None` type → `bare`, `Exception`/`BaseException` → `broad`. The body is inspected: single `ast.Pass` → `except_pass`, single call to `logging.*`, `logger.*`, `log.*`, or `print` → `log_and_swallow`. Both dimensions are reported independently — a handler can be both `broad` and `except_pass`.
+
+### Output
+
+Per file: list of `{"line": 25, "pattern": "except_pass", "except_type": "bare"}`. Aggregated in JSON under `silent_failures` keyed by file path. Rendered in markdown as `## Silent Failures` with a table showing Pattern, Exception Type, and Location.
+
+---
+
+## 26. Async/Sync Violations
+
+**Collected by:** `lib/ast_analysis.py` — `_detect_async_violations()` (line 346)
+
+**Technology:** Python `ast` module — walks `ast.AsyncFunctionDef` bodies
+
+### What is collected
+
+| Metric | Description |
+|--------|-------------|
+| **Blocking calls in async** | `time.sleep`, `requests.*` (get/post/put/delete/patch/head), `loop.run_until_complete` |
+
+### How it works
+
+For every `ast.AsyncFunctionDef`, walks the function body with `ast.walk()`. Each `ast.Call` is checked against `BLOCKING_CALL_PATTERNS`:
+
+| Call Pattern | Violation Type |
+|-------------|---------------|
+| `time.sleep` | `blocking_sleep` |
+| `requests.get` | `blocking_http` |
+| `requests.post` | `blocking_http` |
+| `requests.put` | `blocking_http` |
+| `requests.delete` | `blocking_http` |
+| `requests.patch` | `blocking_http` |
+| `requests.head` | `blocking_http` |
+| `*.run_until_complete` | `nested_event_loop` |
+
+### Output
+
+Per file: list of `{"violation_type": "blocking_sleep", "call": "time.sleep", "function": "my_async_fn", "line": 227}`. Aggregated under `async_patterns.violations` in JSON (file-level grouping within the existing async_patterns section). Rendered in markdown as `### Async/Sync Violations` subsection under `## Async Patterns`.
+
+---
+
+## 27. SQL String Detection
+
+**Collected by:** `lib/ast_analysis.py` — `_detect_sql_strings()` (line 371)
+
+**Technology:** Python `ast` module + `re` regex — scans `ast.Constant` string nodes
+
+### What is collected
+
+| Metric | Description |
+|--------|-------------|
+| **SQL/Cypher string literals** | String constants containing SQL or Cypher query patterns |
+
+### How it works
+
+Walks the entire AST for `ast.Constant` nodes where `isinstance(value, str)` and `len(value) > 5`. Tests each string against 6 compiled regex patterns:
+
+| Pattern | What It Matches |
+|---------|----------------|
+| `SELECT\s+\S+\s+FROM` | SELECT queries |
+| `INSERT\s+INTO` | INSERT statements |
+| `DELETE\s+FROM` | DELETE statements |
+| `UPDATE\s+\S+\s+SET` | UPDATE statements |
+| `CREATE\s+(TABLE\|INDEX\|VIEW)` | DDL statements |
+| `MATCH\s.*RETURN` (DOTALL) | Neo4j Cypher queries |
+
+First match wins per string. Strings are truncated to 80 characters in output.
+
+**Known limitation:** Can flag docstrings or comments containing SQL-like keywords (e.g., a docstring saying "Search drugs by name" could match if it contains SQL keywords in a larger context).
+
+### Output
+
+Per file: list of `{"query": "SELECT name FROM sqlite_master...", "line": 138}`. Aggregated in JSON under `sql_strings` keyed by file path. Rendered in markdown as `## Database Queries (String Literals)` with a table.
+
+---
+
+## 28. Deprecation Markers
+
+**Collected by:** `lib/ast_analysis.py` (decorator detection) + `lib/tech_debt_analysis.py` — `analyze_deprecation_markers()` (line 89)
+
+**Technology:** Python `ast` module + regex on raw source
+
+### What is collected
+
+| Metric | Description |
+|--------|-------------|
+| **Decorator-based** | `@deprecated` decorator on functions/classes |
+| **Comment-based** | `# deprecated`, `# DEPRECATED:` comments |
+| **Warning-based** | `DeprecationWarning` class references, `warnings.warn` calls |
+
+### How it works
+
+Two detection paths:
+1. **AST-based (decorator):** During class/function extraction in `_analyze_tree()`, if `@deprecated` appears in the decorator list, it's flagged.
+2. **Text-based (comments + warnings):** `tech_debt_analysis.py:analyze_deprecation_markers()` reads raw source and scans for: lines containing `deprecated` (case-insensitive), `DeprecationWarning` class usage, `warnings.warn` calls.
+
+### Output
+
+List of `{"type": "decorator|comment", "file": "...", "line": 98, "text": "# DEPRECATED: Use review_confirmation agents instead"}`. Rendered in markdown as `## Deprecated APIs`.
+
+---
+
+## 29. DB Side Effects (Expanded)
+
+**Collected by:** `lib/ast_analysis.py` — `_detect_side_effect()` (line 252)
+
+**Technology:** Python `ast` module — string pattern matching on call text
+
+### What was added in v3.2
+
+The existing `db` category in `SIDE_EFFECT_PATTERNS` was expanded with ORM-style patterns:
+
+| Original Patterns | v3.2 Additions |
+|-------------------|---------------|
+| `db.save`, `db.commit`, `session.commit`, `cursor.execute`, `insert(`, `update(`, `delete(`, `query(` | `.filter(`, `.objects.get(`, `.objects.filter(`, `.objects.create(`, `.objects.all(` |
+
+These detect Django ORM and SQLAlchemy query patterns that represent database side effects not caught by the original patterns.
+
+### Output
+
+Same format as existing side effects: categorized under `side_effects.by_type.db` and `side_effects.by_file`. No new markdown section — results appear in the existing `## Side Effects` section.
 
 ---
 

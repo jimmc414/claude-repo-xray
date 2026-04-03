@@ -1,5 +1,7 @@
 # Incremental Deep Crawl — Implementation Plan
 
+> **Status:** Design document — not yet implemented. The `@deep_crawl refresh` command currently runs a full crawl.
+
 ## Problem
 
 The deep crawl pipeline produces a 62K word onboarding document that takes ~800K tokens and ~30 minutes across 12+ agent spawns. When code changes, the entire pipeline re-runs from scratch. Changing 5 files costs the same as scanning 802.

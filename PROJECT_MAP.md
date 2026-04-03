@@ -313,11 +313,30 @@ The R14 output contains:
 | `INTENT.md` | Why this project exists and the design constraints. **Read before any modification.** | Before changing anything |
 | `CLAUDE.md` | How to run, architecture, conventions, don'ts | Before working on scanner code |
 | `README.md` | User guide, quick start, examples | Understanding the product |
-| `docs/METHODOLOGY.md` | Technical reference for pipeline algorithms | Understanding scanner internals |
-| `docs/TECHNICAL_METRICS.md` | Thresholds and formulas | Tuning quality gates |
-| `docs/PLAN_INCREMENTAL_CRAWL.md` | Design for `@deep_crawl refresh` | Working on incremental updates |
-| `docs/DEEP_ONBOARD.md` | repo-xray's own onboarding document (self-referential) | Understanding what deep crawl output looks like |
-| `docs/DEEP_ONBOARD_VALIDATION.md` | Validation report for the above | Understanding what validation output looks like |
+| `PROJECT_MAP.md` | Complete project reference for AI agents (this file) | First-time onboarding |
+| `docs/METHODOLOGY.md` | Technical reference for pipeline algorithms (updated for v3.2) | Understanding scanner internals |
+| `docs/TECHNICAL_METRICS.md` | Thresholds and formulas (29 sections, updated for v3.2) | Tuning quality gates |
+| `docs/PLAN_INCREMENTAL_CRAWL.md` | Design for `@deep_crawl refresh` (not yet implemented) | Working on incremental updates |
+| `MULTI_LANGUAGE_RESEARCH.md` | Research on extending scanner beyond Python | Planning multi-language support |
+
+**Examples** (`examples/`):
+
+| File | Content |
+|------|---------|
+| `examples/kosmos_xray_output_v31.md` | X-Ray markdown output for Kosmos (802 files) |
+| `examples/KOSMOS_DEEP_ONBOARD.md` | Deep crawl onboarding document for Kosmos (~60K words) |
+| `examples/KOSMOS_DEEP_ONBOARD_VALIDATION.md` | Validation report for the Kosmos deep crawl |
+| `examples/KOSMOS_ONBOARD.md` | Earlier repo_xray agent output for Kosmos |
+| `examples/KOSMOS_ONBOARD_v2.md` | Second iteration repo_xray agent output |
+
+**Archived** (`archive/`):
+
+| File | What It Was |
+|------|------------|
+| `archive/plans/deep-crawl-spec-v1.md` | Original deep crawl specification (superseded by SKILL.md) |
+| `archive/plans/deep-crawl-spec-v2.md` | Revised specification (superseded by SKILL.md) |
+| `archive/plans/kickoff-prompt.md` | Implementation kickoff prompt |
+| `archive/command_reference.md` | Duplicate of deep-crawl COMMANDS.md |
 
 ---
 

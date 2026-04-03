@@ -43,7 +43,7 @@ flowchart LR
 - Expensive — amortized across many future agent sessions
 - Unlimited budget — depth over brevity, no token ceilings on output
 
-**Design philosophy:** The scanner exists because a map is not understanding. It extracts 37+ signals from AST, import graph, git history, and code patterns without interpreting them. The deep crawl agent uses those signals as a prioritized investigation roadmap, spending tokens on reading actual code to discover behavioral semantics, implicit assumptions, and counterintuitive gotchas that static analysis cannot see.
+**Design philosophy:** The scanner exists because a map is not understanding. It extracts 42+ signals from AST, import graph, git history, and code patterns without interpreting them. The deep crawl agent uses those signals as a prioritized investigation roadmap, spending tokens on reading actual code to discover behavioral semantics, implicit assumptions, and counterintuitive gotchas that static analysis cannot see.
 
 ---
 
@@ -128,6 +128,11 @@ Investigation targets (Step 8) **must** run last because it reads combined resul
 | Async patterns | Counts of `AsyncFunctionDef`, `AsyncFor`, `AsyncWith` |
 | Side effects | `_detect_side_effect()` per `ast.Call` node |
 | Internal calls | Call text matching against `all_function_names` set |
+| Security concerns | `_detect_security_concern()` per `ast.Call` — exec/eval/compile only |
+| Silent failures | `_detect_silent_failure()` per `ast.ExceptHandler` — bare except, except-pass, log-and-swallow |
+| Async violations | `_detect_async_violations()` per `ast.AsyncFunctionDef` — blocking calls in async context |
+| SQL strings | `_detect_sql_strings()` — SQL/Cypher keyword regex on string literals |
+| Deprecation markers | Decorator-based `@deprecated` detection during class/function extraction |
 | Skeleton | `generate_skeleton()` from parsed AST |
 
 #### Cyclomatic Complexity Formula
@@ -161,6 +166,32 @@ Safe patterns excluded: `.get(`, `ast.get_`, `isupper`, `islower`, `startswith`,
 #### Type Coverage
 
 Per function: counted as "typed" if `returns` annotation exists OR any non-self/cls argument has a type annotation. Per codebase: `typed_functions / total_functions × 100`.
+
+#### v3.2 Detection Categories
+
+Six new detectors added in v3.2, all extracted during the single AST pass:
+
+**Security Concerns** — `_detect_security_concern()` (line 300)
+
+Flags `exec()`, `eval()`, `compile()` builtins as code injection vectors. Only bare builtins are flagged — `cursor.execute()`, `pool.execute()`, etc. are NOT flagged because the detection checks `isinstance(node.func, ast.Name)` (bare name call), not `ast.Attribute` (method call). Output: `{"category": "code_execution", "call": "exec", "line": N}`.
+
+**Silent Failures** — `_detect_silent_failure()` (line 310)
+
+Inspects every `ast.ExceptHandler` node. Classifies the except type (`bare` if no type specified, `broad` if `Exception` or `BaseException`). Classifies the body pattern (`except_pass` if body is a single `Pass`, `log_and_swallow` if body is a single logging/print call). Reports both dimensions. Output: `{"line": N, "pattern": "except_pass", "except_type": "broad"}`.
+
+**Async/Sync Violations** — `_detect_async_violations()` (line 346)
+
+Walks the body of every `AsyncFunctionDef` looking for blocking calls. Patterns checked via `BLOCKING_CALL_PATTERNS` dict (line 60): `time.sleep` → `blocking_sleep`, `requests.get/post/put/delete/patch/head` → `blocking_http`. Also detects `run_until_complete` calls → `nested_event_loop`. Output: `{"violation_type": "blocking_sleep", "call": "time.sleep", "function": "my_async_fn", "line": N}`.
+
+**SQL String Literals** — `_detect_sql_strings()` (line 371)
+
+Walks the entire AST for `ast.Constant` string nodes longer than 5 characters. Tests against 6 regex patterns: `SELECT ... FROM`, `INSERT INTO`, `DELETE FROM`, `UPDATE ... SET`, `CREATE TABLE/INDEX/VIEW`, `MATCH ... RETURN` (Cypher). First match wins. Output: `{"query": "SELECT name FROM ...", "line": N}`. Known limitation: can flag docstrings containing SQL-like keywords.
+
+**Deprecation Markers** — detected during class/function extraction in `_analyze_tree()` and separately by `tech_debt_analysis.py:analyze_deprecation_markers()`. Decorator-based: `@deprecated` in decorator list. Comment-based: regex scan for `# deprecated`, `DeprecationWarning`, `warnings.warn`. Output: `{"type": "decorator|comment", "file": "...", "line": N, "text": "..."}`.
+
+**DB Side Effects (expanded)** — The existing `_detect_side_effect()` (line 252) `db` category was expanded to include ORM patterns: `.filter(`, `.objects.get(`, `.objects.filter(`, `.objects.create(`. These join the existing patterns (`db.save`, `session.commit`, `cursor.execute`, etc.).
+
+**Value to downstream AI:** Security concerns identify code injection vectors for safety review. Silent failures reveal error-swallowing patterns that hide bugs. Async violations catch blocking calls that degrade async performance. SQL strings flag raw query construction (injection risk). Deprecation markers identify APIs scheduled for removal. These signals feed directly into the deep crawl's Protocol C (cross-cutting concern investigation).
 
 **Value to downstream AI:** Skeleton extraction provides a compressed structural view (typically 10-15% of original token count). CC hotspots direct investigation to the most complex logic. Side effect detection identifies functions with external impact. Type coverage reveals where signatures alone are insufficient to understand behavior.
 
@@ -562,7 +593,7 @@ Complete structured output containing all analysis results. This is the primary 
 
 **Source:** `formatters/markdown_formatter.py` (50K+ lines — the largest file)
 
-Curated human/AI-readable output. 32 conditional sections, each enabled/disabled via config. Section ordering and token budget management happen here. The `format_markdown()` function assembles sections from analysis results and gap features.
+Curated human/AI-readable output. 38 conditional sections, each enabled/disabled via config. v3.2 added 6 new sections: Security Concerns, Database Queries (String Literals), Silent Failures, Deprecated APIs, Async/Sync Violations, and Environment Variables (with fallback detection). Section ordering and token budget management happen here. The `format_markdown()` function assembles sections from analysis results and gap features.
 
 **Config-to-gap-features bridge:** `xray.py:config_to_gap_features()` converts config section flags into the gap_features dict that the markdown formatter expects. Each section can be disabled via `--no-{section}` CLI flags.
 
