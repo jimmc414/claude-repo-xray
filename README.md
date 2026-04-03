@@ -430,6 +430,38 @@ To install the deep crawl skill globally in Claude Code:
 
 This creates a symlink so `/deep-crawl full` is available in any project directory.
 
+## Using the Output to Onboard an AI
+
+After running Phase 1 (and optionally Phase 2), you'll have one or two files to provide to the AI:
+
+| File | Source | Purpose |
+|------|--------|---------|
+| `xray.md` | Phase 1 scanner | Deterministic codebase map — structure, dependencies, complexity, risk |
+| `DEEP_ONBOARD.md` | Phase 2 deep crawl | Comprehensive behavioral documentation with code citations |
+
+Attach these files to your prompt when starting a new AI session. Here's a sample prompt:
+
+```
+I'm providing two reference documents for the codebase we'll be working in:
+
+1. **xray.md** — A deterministic structural scan of the codebase (architecture,
+   dependencies, complexity hotspots, risk signals)
+2. **DEEP_ONBOARD.md** — A comprehensive onboarding document with verified code
+   citations covering critical paths, module behavior, error handling, gotchas,
+   and change playbooks
+
+Use these documents to orient yourself before reading or modifying any code.
+When the documents reference specific files and line numbers, trust those as
+your starting points but verify current state since code may have changed
+since generation.
+
+The codebase is located at: /path/to/project
+
+My task: [describe what you want the AI to do]
+```
+
+If you only ran Phase 1, omit the `DEEP_ONBOARD.md` reference — the X-Ray scan alone is enough for most targeted tasks. The deep crawl document adds the most value for open-ended work, complex modifications, or when multiple AI sessions will work on the same codebase over time.
+
 ## License
 
 MIT
