@@ -3,6 +3,7 @@
 *_output.txt
 *_output.md
 output.txt
+output/
 examples/*.json
 
 # Env
