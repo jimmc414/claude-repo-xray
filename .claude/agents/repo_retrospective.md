@@ -271,7 +271,7 @@ Workflow:
 ## Example Session
 
 ```
-User: @repo_retrospective full --onboard examples/KOSMOS_ONBOARD_v2.md --xray examples/kosmos_xray_output_v31.md --codebase /mnt/c/python/kosmos
+User: @repo_retrospective full --onboard examples/KOSMOS_DEEP_ONBOARD.md --xray examples/KOSMOS_XRAY.md --codebase /mnt/c/python/kosmos
 
 Agent: I'll perform a full retrospective analysis of the KOSMOS onboarding document.
 

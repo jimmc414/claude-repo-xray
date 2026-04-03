@@ -19,8 +19,8 @@ Quick reference for the repo-retrospective skill.
 
 ```bash
 @repo_retrospective full \
-  --onboard examples/KOSMOS_ONBOARD_v2.md \
-  --xray examples/kosmos_xray_output_v31.md \
+  --onboard examples/KOSMOS_DEEP_ONBOARD.md \
+  --xray examples/KOSMOS_XRAY.md \
   --codebase /mnt/c/python/kosmos
 ```
 
@@ -28,7 +28,7 @@ Quick reference for the repo-retrospective skill.
 
 ```bash
 @repo_retrospective quick \
-  --onboard examples/KOSMOS_ONBOARD_v2.md \
+  --onboard examples/KOSMOS_DEEP_ONBOARD.md \
   --codebase /mnt/c/python/kosmos
 ```
 
@@ -36,15 +36,15 @@ Quick reference for the repo-retrospective skill.
 
 ```bash
 @repo_retrospective coverage \
-  --onboard examples/KOSMOS_ONBOARD_v2.md \
-  --xray examples/kosmos_xray_output_v31.md
+  --onboard examples/KOSMOS_DEEP_ONBOARD.md \
+  --xray examples/KOSMOS_XRAY.md
 ```
 
 ### Actionability Test
 
 ```bash
 @repo_retrospective actionability \
-  --onboard examples/KOSMOS_ONBOARD_v2.md
+  --onboard examples/KOSMOS_DEEP_ONBOARD.md
 ```
 
 ---
@@ -66,7 +66,7 @@ Reports are written to the same directory as the ONBOARD document:
 
 ```
 examples/
-├── KOSMOS_ONBOARD_v2.md
+├── KOSMOS_DEEP_ONBOARD.md
 └── KOSMOS_RETROSPECTIVE.md  ← Generated report
 ```
 
