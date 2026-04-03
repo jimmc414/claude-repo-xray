@@ -2,9 +2,9 @@
 
 ## Executive Summary
 
-repo-xray currently analyzes Python codebases using Python's `ast` module — a zero-dependency, deterministic, single-pass approach that extracts 37+ signals from syntax, import graphs, git history, and code patterns. This document evaluates how to replicate that approach for TypeScript, Rust, Go, C#, and COBOL.
+repo-xray currently analyzes Python codebases using Python's `ast` module — a zero-dependency, deterministic, single-pass approach that extracts 42+ signals from syntax, import graphs, git history, and code patterns. This document evaluates how to replicate that approach for 13 target languages: Go, TypeScript, Rust, C#, COBOL, JavaScript, Java, SQL, C++, C, Swift, Kotlin, and AcuCobol.
 
-**The central finding:** The quality of multi-language analysis hinges entirely on the static analysis foundation available for each language. Python's `ast` module provides a rare sweet spot — built into the language runtime, zero setup, full syntax tree access. No other language has an exact equivalent, but some come remarkably close (Go), while others require significant tradeoffs (COBOL).
+**The central finding:** The quality of multi-language analysis hinges entirely on the static analysis foundation available for each language. Python's `ast` module provides a rare sweet spot — built into the language runtime, zero setup, full syntax tree access. No other language has an exact equivalent, but some come remarkably close (Go), while others require significant tradeoffs (C/C++, AcuCobol). The hybrid architecture (shared core + language-specific frontends emitting a standardised JSON IR) remains the best fit across all 13 languages, but the parsability and "pretty-good call graph" ceiling varies dramatically by language family (dynamic vs static; preprocessor-heavy vs not; tooling maturity).
 
 **Recommendation summary:**
 
@@ -15,6 +15,14 @@ repo-xray currently analyzes Python codebases using Python's `ast` module — a 
 | Rust | `syn` crate + `cargo metadata` | Compiled binary | Medium | Medium |
 | C# | Roslyn (`Microsoft.CodeAnalysis`) | NuGet package | High | Medium-High |
 | COBOL | Custom regex/pattern parser | Zero-dep | Low-Medium | High |
+| JavaScript | TypeScript Compiler API (JS/JSX mode) | Single npm pkg (`typescript`) | Medium-High | Medium |
+| Java | JavaParser + optional symbol solver | JVM + library | High | Medium |
+| SQL | SQLGlot + optional SQLFluff | Python package (no deps) | Low-Medium | Medium |
+| C++ | Clang tooling + compile db | Clang/LLVM libraries | High | High |
+| C | Clang tooling + compile db | Clang/LLVM libraries | High | High |
+| Swift | SwiftParser/SwiftSyntax | Swift toolchain | Medium-High | Medium |
+| Kotlin | tree-sitter-kotlin + Kotlin Analysis API (K2) | tree-sitter runtime + grammar | Medium | Medium-High |
+| AcuCobol | GnuCOBOL compat layer + tolerant heuristics | External compiler/toolchain | Low-Medium | High |
 
 ---
 
@@ -43,6 +51,11 @@ These signals exist in every language and form the backbone of the scanner outpu
 | **Entry point detection** | `gap_features.py` | Main functions, CLI handlers, HTTP routes |
 | **Logic maps** | `gap_features.py` | Control flow visualization for complex functions |
 | **Hazard detection** | `gap_features.py` | Large files, high complexity, low test coverage warnings |
+| **Security concerns** | `gap_features.py` | eval/exec equivalents, dynamic code execution, injection risks |
+| **Silent failures** | `gap_features.py` | Empty catch/except blocks, swallowed errors |
+| **Async violations** | `gap_features.py` | Blocking calls inside async contexts, mixed sync/async patterns |
+| **SQL string detection** | `gap_features.py` | Raw SQL strings in application code, query builder usage |
+| **Deprecation markers** | `gap_features.py` | `@deprecated`, `@obsolete`, language-specific deprecation annotations |
 
 ### Language-Specific Signals to Add
 
@@ -55,6 +68,14 @@ Each target language has unique constructs that matter for AI orientation:
 | **Go** | Goroutine spawns, channel usage patterns, interface satisfaction, defer/panic/recover, embedded structs, build tags |
 | **C#** | Nullable reference types, LINQ patterns, attribute-driven frameworks (ASP.NET, EF), partial classes, source generators, async state machines |
 | **COBOL** | Division structure, level-number hierarchies (01-49, 66, 77, 88), COPY/copybook dependencies, PERFORM call graphs, EXEC SQL/CICS blocks, file I/O declarations |
+| **JavaScript** | CommonJS vs ESM module mode, framework routes/components, event-driven "implied calls", JSDoc type annotations |
+| **Java** | Annotation-driven endpoints, DI wiring, ORM mappings, reflection hotspots, Lombok-generated members |
+| **SQL** | Lineage graph, migration sequencing, dbt model dependencies, query anti-patterns, DML/DDL classification |
+| **C++** | Preprocessor footprint, macro-conditioned "variant code", template-heavy hotspots, RAII patterns |
+| **C** | Preprocessor footprint, macro-conditioned "variant code", function pointer dispatch, platform-specific entry points |
+| **Swift** | Protocol-oriented architecture, property wrappers, actor isolation boundaries, structured concurrency |
+| **Kotlin** | `suspend` functions, coroutine builders, sealed hierarchies, extension functions |
+| **AcuCobol** | Screen/UI statements, Vision file usage, embedded SQL precompiler markers, ACU-specific extensions |
 
 ---
 
@@ -617,6 +638,564 @@ Since the zero-dep approach is a custom parser, this could be:
 
 ---
 
+### 6. JavaScript — The Largest Addressable Market
+
+JavaScript has the largest addressable market (66% of developers worked with it in the past year) and appears in nearly every polyglot codebase. The core tradeoff: structural signals are readily extractable, but high-quality interprocedural call graphs remain a known research problem due to JavaScript's dynamic nature.
+
+#### Tool Options
+
+| Tool | Type Resolution | Speed | Dependencies | API Stability |
+|------|----------------|-------|--------------|---------------|
+| **TypeScript Compiler API** (JS/JSX mode) | Yes (optional via JSDoc) | Medium | Node + `typescript` | High (widely used) |
+| Babel parser (`@babel/parser`) | No (syntax only) | Fast | Node + Babel packages | Medium |
+| Acorn (+ JSX plugin) | No | Very fast | Node + small deps | Medium |
+| Espree (ESLint parser) | No (ESTree) | Fast | Node + ESLint ecosystem | Medium |
+| tree-sitter-javascript | No | Fast | tree-sitter runtime (native/WASM) | Medium |
+
+#### Recommended Approach: TypeScript Compiler API in JS/JSX mode
+
+**Why reuse the TypeScript Compiler API for JavaScript:**
+- TypeScript explicitly supports parsing JavaScript and JSX files
+- TypeScript can derive type information from JavaScript via JSDoc annotations when present
+- Unifies the JS and TS scanning frontends (one AST model, reduced maintenance)
+- `ts.createSourceFile()` works identically on `.js` and `.jsx` files
+
+**Two operating modes (same as TypeScript):**
+
+1. **`ts.createSourceFile()` — syntax-only, fast**
+   - Parses JS/JSX into the same AST as TypeScript
+   - Functions, classes, arrow functions, exports all visible
+   - CommonJS `require()` and ESM `import` both extractable
+
+2. **`ts.createProgram()` with `allowJs` + `checkJs` — partial semantic analysis**
+   - Derives types from JSDoc when present (`@param`, `@returns`, `@type`)
+   - Provides type inference for many patterns even without annotations
+   - Requires project context (`jsconfig.json` or `tsconfig.json` with `allowJs`)
+
+**Signal extraction:**
+
+| xray Signal | Syntax-Only | With Type Resolution | Notes |
+|-------------|-------------|---------------------|-------|
+| Code skeletons | Excellent | Excellent | Functions/classes visible; arrow functions and exports require conventions |
+| Complexity | Excellent | Excellent | Branches, ternaries, logical ops are syntactic |
+| Type annotation coverage | Partial | Good | JS lacks types; JSDoc can supply types and TS can derive typings |
+| Import/dependency graph | Good | Excellent | ESM imports easy; CommonJS `require()` is syntactic but dynamic requires heuristic |
+| Cross-module call graph | Partial | Good | Static call graphs for JS are known-hard; syntax-only misses dynamic dispatch, callbacks, event emitters |
+| Side effect detection | Good | Good | Pattern-match `fs`, `fetch`, network libs |
+| Security concerns | Excellent | Excellent | `eval`, `Function()`, dynamic import patterns |
+| Silent failures | Good | Good | Empty `catch` blocks are syntactic |
+| Async/concurrency | Excellent | Excellent | `async/await`, Promises are syntactic; event-driven edges require heuristics |
+| Decorators | Partial | Good | Decorators are proposal-dependent; frameworks often use function wrappers instead |
+| Data models | Partial | Good | Classes exist; many models are plain objects or external schemas |
+| Entry points | Good | Good | `package.json` scripts and framework conventions drive this |
+| SQL string detection | Good | Good | Tagged templates and raw strings identifiable |
+| Deprecation markers | Partial | Partial | No universal marker; JSDoc `@deprecated` can be parsed |
+
+#### Key Honest Assessment
+
+JavaScript's call graph precision is a known research problem. Syntax-only extraction delivers useful *structural* signals, but interprocedural call graphs suffer from callbacks, event emitters, dynamic `require()`, and prototype-based dispatch. Expect roughly **65% of Python-equivalent signal quality** at the syntax-only tier, improving to **~75% with project metadata** and **~85% with full semantic analysis** (still limited by inherently dynamic features).
+
+For onboarding orientation, the structural signals (skeletons, imports, side effects, entry points) carry most of the value. The imprecise call graph is supplementary, not load-bearing.
+
+#### Deployment
+
+```bash
+# Unified with TypeScript frontend
+node xray-ts.js --language js /path/to/project
+
+# Or bundled as single binary
+npx pkg xray-ts.js --target node18-linux-x64
+```
+
+#### Effort Estimate
+
+Incremental on top of the TypeScript frontend:
+- JS/JSX-specific handling: ~300 lines (CommonJS detection, JSDoc extraction, module mode detection)
+- Framework pattern recognition: ~200 lines (Express routes, React components, event patterns)
+- Total incremental: **~500 lines** on top of the TypeScript scanner
+- Standalone: **~2,700 lines of JavaScript** including shared TS/JS infrastructure
+
+---
+
+### 7. Java — The Enterprise Workhorse
+
+Java has high enterprise prevalence (29.4% of developers), large codebases, and strong onboarding value. Its robust tooling ecosystem offers a clear syntax-first path with optional semantic enhancement.
+
+#### Tool Options
+
+| Tool | Type Resolution | Speed | Dependencies | API Stability |
+|------|----------------|-------|--------------|---------------|
+| **JavaParser** | Optional (via symbol solver) | Fast-Medium | JVM + library | Medium |
+| javac Tree API (`JavacTask`) | Yes (analyse stage) | Medium | JDK toolchain | Medium (some internals not supported API) |
+| Eclipse JDT ASTParser | Optional (bindings recovery) | Medium | JVM + Eclipse libs | Medium |
+| tree-sitter-java | No | Fast | tree-sitter runtime + grammar | Medium |
+
+#### Recommended Approach: JavaParser (primary), javac/JDT for optional semantic tier
+
+**Why JavaParser:**
+- Explicitly an AST library designed for standalone use (not embedded in an IDE or compiler)
+- Parses individual `.java` files without project context
+- Optional symbol solving for type resolution when classpath/project info is available
+- Active maintenance and community
+
+**Why not javac Tree API?** The javac Tree API supports parse and analyse stages, but some compiler internals are explicitly "not supported API." Suitable as a semantic-tier backend when full JDK context is available, but not ideal as the primary parser.
+
+**Two operating modes:**
+
+1. **JavaParser syntax-only — fast, no project setup**
+   - Parses individual files into an AST
+   - Extracts declarations, annotations, imports, control flow
+   - No classpath or build system needed
+
+2. **JavaParser with symbol solver — semantic tier**
+   - Resolves types against classpath
+   - Builds accurate cross-module references
+   - Requires `javac` or Maven/Gradle output on the classpath
+
+**Signal extraction:**
+
+| xray Signal | Syntax-Only | With Type Resolution | Notes |
+|-------------|-------------|---------------------|-------|
+| Code skeletons | Excellent | Excellent | Declarations are fully explicit |
+| Complexity | Excellent | Excellent | `if/for/while/switch/catch` nodes |
+| Type annotation coverage | Good | Excellent | Java is statically typed; `var` inference and lambdas benefit from semantics |
+| Import/dependency graph | Excellent | Excellent | `import` and package structure |
+| Cross-module call graph | Partial | Excellent | Virtual dispatch and interfaces need semantic model for precision |
+| Side effect detection | Good | Good | Identify IO/network/DB APIs; semantics reduces false positives |
+| Security concerns | Good | Good | Reflection (`Class.forName`) and dynamic classloading patterns detectable |
+| Silent failures | Excellent | Excellent | Empty catches are syntactically visible |
+| Async/concurrency | Good | Good | Threads/executors visible; frameworks can abstract concurrency |
+| Annotation inventory | Excellent | Excellent | Annotations are syntactic markers central to Spring, JPA, JAX-RS |
+| Data models | Excellent | Excellent | Classes/records/enums; Lombok-generated members invisible syntax-only |
+| Entry points | Good | Good | `main` method; Spring/framework entry requires annotation heuristics |
+| SQL string detection | Good | Good | JDBC strings, query builders, raw strings detectable |
+| Deprecation markers | Excellent | Excellent | `@Deprecated` is explicit and universal |
+
+#### Key Honest Assessment
+
+Java syntax-only gives roughly **75% of Python-equivalent signal quality**, rising to **~85% with project metadata** and **~95% with full semantic analysis**. The primary blind spot is reflection and dynamic proxies — well-documented in empirical research as a persistent challenge for static Java analysis. Lombok-generated code is also invisible at the syntax tier.
+
+For enterprise codebases, the annotation inventory alone carries outsized value — `@RestController`, `@Entity`, `@Inject`, `@Transactional` tell an AI assistant more about architecture than most function bodies do.
+
+#### Deployment
+
+```bash
+# Build as JAR (requires JVM on target)
+mvn package -q
+java -jar xray-java.jar /path/to/project
+
+# Or build with GraalVM native-image for a standalone binary
+native-image -jar xray-java.jar xray-java
+./xray-java /path/to/project
+```
+
+#### Effort Estimate
+
+- `AstAnalyzer.java`: ~900 lines (skeleton + complexity + annotations + async + data models)
+- `ImportAnalyzer.java`: ~400 lines (import graph, package structure)
+- `CallAnalyzer.java`: ~400 lines (invocation extraction, cross-file matching)
+- `SemanticEnhancer.java`: ~400 lines (symbol solver setup, type resolution)
+- Total: **~2,100 lines of Java**, JavaParser as primary dependency
+
+---
+
+### 8. SQL — The Scope-Dependent Case
+
+SQL is the second most widely used language (58.6% of developers) but poses a unique challenge: it is declarative, not procedural. The 42+ signals defined for procedural languages map differently to SQL. Scope definition (migrations vs dbt vs stored procedures vs embedded SQL) drives both parser choice and which signals are meaningful.
+
+#### Tool Options
+
+| Tool | Type Resolution | Speed | Dependencies | Dialect Coverage |
+|------|----------------|-------|--------------|-----------------|
+| **SQLGlot** | No (syntax/AST only) | Fast-Medium | Python package (no deps) | Multi-dialect |
+| SQLFluff | No (parse tree + lint rules) | Medium | Python package | Multi-dialect, dbt/Jinja support |
+| libpg_query (Postgres parser) | Partial (Postgres-specific AST) | Fast | Native library + bindings | PostgreSQL only |
+| tree-sitter-sql | No | Fast | tree-sitter runtime + grammar | General SQL |
+| sqlparse | No (non-validating) | Fast | Python module | General (limited introspection) |
+
+#### Recommended Approach: SQLGlot as baseline AST, SQLFluff if templating/dbt is in scope
+
+**Why SQLGlot:**
+- Declares no external dependencies — close to the "zero-dep" ideal
+- Multi-dialect support (PostgreSQL, MySQL, BigQuery, Snowflake, etc.)
+- Produces a proper AST, not just token streams
+- Deterministic parsing suitable for structural signal extraction
+
+**Why SQLFluff as a complement:** SQLFluff explicitly targets dialect flexibility and dbt/Jinja contexts. If the scanner needs to handle templated SQL (dbt models, Jinja macros), SQLFluff handles the preprocessing that SQLGlot alone cannot.
+
+**Scope decision required before building:** Concretely pick (a) migration-first (Flyway naming and ordering), (b) dbt-first (SQL + project YAML + templating), (c) stored procedure-first (procedural dialect), or (d) a layered approach. The codebase shape differs substantially between dbt projects and migration folders.
+
+**Signal extraction (reframed for SQL):**
+
+| xray Signal | SQL Interpretation | Feasibility | Notes |
+|-------------|-------------------|-------------|-------|
+| Code skeletons | DDL object definitions: tables, views, functions, procedures | Good | Schema objects ARE the skeletons |
+| Complexity | Query complexity proxies: CTE depth, nesting, join count, subquery depth | Partial | Not directly analogous to cyclomatic complexity |
+| Type annotation coverage | N/A | N/A | SQL "types" are schema-level, not function annotations |
+| Import/dependency graph | Object dependencies: view→table, model ref graphs (dbt) | Good | Structural lineage is high-value |
+| Cross-module call graph | N/A — reframed as data lineage graph | N/A | Better modeled as lineage than call graph |
+| Side effect detection | DML/DDL classification: SELECT vs INSERT/UPDATE/DELETE/ALTER | Good | Read vs write distinction is the core signal |
+| Security concerns | Dynamic SQL in stored procedures, injection-prone patterns | Partial | Mostly a host-language concern |
+| Data model extraction | Schema objects are literally the data models | Excellent | This is SQL's primary strength |
+| Entry points | Migration ordering (Flyway naming), dbt model selection | Partial | Framework-dependent |
+| Git risk scores | Language-agnostic (already implemented) | Excellent | Works unchanged |
+| Test coverage mapping | dbt tests exist; elsewhere depends on pipeline | Partial | Convention-dependent |
+| Tech debt markers | Language-agnostic (TODO/FIXME) | Excellent | Works unchanged |
+| Deprecation markers | Engine-specific deprecations exist but are not uniform | Partial | No universal marker |
+
+#### Key Honest Assessment
+
+SQL is the language where the procedural signal model fits worst. Expect roughly **60% of Python-equivalent signal quality** at the syntax-only tier, improving to **~80% with project metadata** (dbt/migration context) and **~90% with engine-specific semantics**. The value proposition is different — SQL analysis excels at data model extraction, lineage mapping, and migration ordering rather than function-level structural signals.
+
+Peer-reviewed work (SQLCheck, SIGMOD 2020) demonstrates that SQL tooling value often comes from detecting and ranking anti-patterns — query complexity, risky DDL changes, missing indexes — which aligns with the "orientation + risk" goals even though the signals differ from procedural-language scanning.
+
+#### Deployment
+
+```bash
+# As a Python module (extends xray.py directly)
+python xray.py /path/to/sql/project --language sql
+
+# Or standalone
+python xray-sql.py /path/to/migrations
+```
+
+#### Effort Estimate
+
+- `sql_parser.py`: ~500 lines (SQLGlot integration, dialect detection, object extraction)
+- `sql_dependency_analysis.py`: ~400 lines (lineage graph, object references, migration ordering)
+- `sql_complexity.py`: ~300 lines (query complexity heuristics, anti-pattern detection)
+- `sql_model_extraction.py`: ~200 lines (schema object extraction, relationship mapping)
+- Total: **~1,400 lines of Python**, SQLGlot as primary dependency
+
+---
+
+### 9. C++ — The Preprocessor Problem
+
+C++ is widely used in high-value domains (systems, HPC, games, finance) with 23.5% developer prevalence. The fundamental challenge: the C/C++ preprocessor makes zero-setup scanning unreliable. Real-world C++ code requires compile configuration for robust parsing.
+
+#### Tool Options
+
+| Tool | Type Resolution | Speed | Dependencies | API Stability |
+|------|----------------|-------|--------------|---------------|
+| **Clang libclang** | Yes (via AST + compilation flags) | Medium | Clang/LLVM libraries | Medium-High |
+| Clang tooling with `compile_commands.json` | Yes | Medium | Clang + compilation database | High (standard in ecosystem) |
+| tree-sitter-cpp | No | Fast | tree-sitter runtime + grammar | Medium |
+
+#### Recommended Approach: Clang tooling with compilation database
+
+**Why Clang tooling:**
+- Clang provides a C interface for parsing into AST
+- The compilation database (`compile_commands.json`) is the standard mechanism for correct flags and include resolution — a JSON array of compile commands per translation unit
+- This is the approach the entire C++ tooling ecosystem (clangd, clang-tidy, etc.) relies on
+
+**Why `compile_commands.json` should be the expected happy path, not an optional extra:** The preprocessor (`#include`, `#ifdef`, `#define`) means that parsing without compile flags produces unreliable results. Headers cannot be resolved, conditional compilation is guessed at, and macros remain unexpanded. Treat "project metadata available" as the default expectation.
+
+**Signal extraction:**
+
+| xray Signal | Syntax-Only (tree-sitter) | With Compile DB (Clang) | Notes |
+|-------------|--------------------------|------------------------|-------|
+| Code skeletons | Good | Excellent | Headers, templates, macros complicate pure syntax-only |
+| Complexity | Excellent | Excellent | Control flow nodes visible once parsed |
+| Type annotations | Good | Excellent | Types exist but `auto`, templates require semantic resolution |
+| Import/dependency graph | Partial | Good | `#include` requires preprocessing; compile db resolves paths |
+| Cross-module call graph | Partial | Good | Virtual dispatch requires semantic; templates and macros hide edges |
+| Side effect detection | Good | Good | Pattern-match IO/syscalls |
+| Security concerns | Good | Good | `system()`, unsafe functions, format string usage |
+| Async/concurrency | Good | Good | `std::thread`, `std::async`, mutexes detectable |
+| Data models | Excellent | Excellent | Classes/structs/enums; templates complicate representation |
+| Entry points | Good | Good | `main`; platform-specific entry points exist |
+| SQL string detection | Good | Good | String literals passed to DB libs |
+| Deprecation markers | Good | Good | `[[deprecated]]` attribute is syntactic (C++14+) |
+
+#### Key Honest Assessment
+
+C++ syntax-only analysis gives roughly **45% of Python-equivalent signal quality** — the lowest of any language on this list. The preprocessor is the root cause: empirical research repeatedly identifies it as a major source of complexity for code analysis. With a compilation database, quality jumps to **~80%**, and with full semantic analysis to **~90%** (templates and macros remain hard even then).
+
+This means C++ scanning is practical but not "zero-setup." CI environments that already produce `compile_commands.json` (CMake does this natively with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`) will get excellent results. Developers scanning ad-hoc without build context will get degraded output.
+
+#### Deployment
+
+```bash
+# Build the analyzer (uses Clang libraries)
+cmake -B build && cmake --build build
+
+# Run with compile database (recommended)
+./xray-cpp /path/to/project --compile-db /path/to/compile_commands.json
+
+# Degraded mode without compile database (tree-sitter fallback)
+./xray-cpp /path/to/project --syntax-only
+```
+
+#### Effort Estimate
+
+- `clang_ast_analysis.cpp`: ~1,200 lines (skeleton + complexity + templates + attributes)
+- `include_analysis.cpp`: ~500 lines (include graph resolution, header vs source classification)
+- `call_analysis.cpp`: ~400 lines (call expression extraction, virtual dispatch detection)
+- `compile_db_loader.cpp`: ~200 lines (JSON compilation database parsing)
+- Total: **~2,300 lines of C++**, Clang/LLVM libraries as dependency
+
+---
+
+### 10. C — The Preprocessor Problem (Simpler Language, Same Tooling Challenge)
+
+C shares C++'s preprocessor challenge but has a simpler language model (no templates, no classes, no overloading). Developer prevalence is 22.0%. The same Clang tooling applies, and `pycparser` offers a constrained alternative for simple cases.
+
+#### Tool Options
+
+| Tool | Type Resolution | Speed | Dependencies | API Stability |
+|------|----------------|-------|--------------|---------------|
+| **Clang tooling with `compile_commands.json`** | Yes | Medium | Clang + compilation database | High |
+| Clang libclang | Yes (via AST + flags) | Medium | Clang/LLVM libraries | Medium-High |
+| tree-sitter-c | No | Fast | tree-sitter runtime + grammar | Medium |
+| pycparser (C only) | No | Fast (after preprocessing) | Python package + C preprocessor | Medium |
+
+#### Recommended Approach: Clang tooling with compilation database; pycparser only for constrained subsets
+
+**Why Clang:** Same rationale as C++. The compilation database provides correct flags and include paths. C's simpler type system means the gap between syntax-only and semantic analysis is smaller than in C++.
+
+**Why pycparser is limited:** pycparser's own documentation warns that realistic C code typically requires running the C preprocessor before parsing, making it unsuitable for a "no-setup" tier unless preprocessing is already available or the code targets a constrained subset (e.g., no platform-specific headers).
+
+**Signal extraction:**
+
+| xray Signal | Syntax-Only (tree-sitter) | With Compile DB (Clang) | Notes |
+|-------------|--------------------------|------------------------|-------|
+| Code skeletons | Good | Excellent | Macros and includes impede raw parsing |
+| Complexity | Excellent | Excellent | Straightforward once parsed |
+| Type annotations | Good | Excellent | Types explicit; macro types and typedef webs benefit from semantics |
+| Import/dependency graph | Partial | Good | `#include` requires preprocessor and flags |
+| Cross-module call graph | Partial | Good | Function pointers and macros reduce precision |
+| Side effect detection | Good | Good | Syscalls, file IO detectable |
+| Security concerns | Good | Good | Unsafe libc functions, buffer patterns |
+| Async/concurrency | Partial | Good | Platform/threading API dependent |
+| Data models | Good | Excellent | `struct/enum/typedef`; macros affect |
+| Entry points | Good | Good | `main` plus embedded/platform entry points |
+| SQL string detection | Good | Good | Strings passed to DB clients |
+| Deprecation markers | Partial | Partial | Compiler attributes vary |
+
+#### Key Honest Assessment
+
+C syntax-only gives roughly **55% of Python-equivalent signal quality**, jumping to **~80% with a compilation database** and **~90% with full semantic analysis**. The gap from C++ is smaller because C has no templates, no classes, and no overloading — but the preprocessor remains the same fundamental obstacle.
+
+The practical advice is the same: treat `compile_commands.json` as required for production use. Syntax-only mode (tree-sitter) is a useful degraded fallback.
+
+#### Deployment
+
+```bash
+# Same tooling as C++ (Clang handles both)
+./xray-c /path/to/project --compile-db /path/to/compile_commands.json
+
+# Degraded mode
+./xray-c /path/to/project --syntax-only
+```
+
+#### Effort Estimate
+
+Incremental on C++ scanner (shared Clang infrastructure):
+- C-specific patterns: ~300 lines (function pointer detection, C-specific idioms)
+- Total standalone: **~1,800 lines of C**, Clang libraries as dependency
+- If built alongside C++ scanner: **~600 incremental lines**
+
+---
+
+### 11. Swift — The Protocol-Oriented Case
+
+Swift has a smaller market (5.4% of developers) but high codebase complexity in iOS/macOS ecosystems. SwiftParser/SwiftSyntax provides reliable structural extraction, and Swift's modern concurrency features (async/await, actors) are cleanly detectable at the syntax level.
+
+#### Tool Options
+
+| Tool | Type Resolution | Speed | Dependencies | API Stability |
+|------|----------------|-------|--------------|---------------|
+| **SwiftParser + SwiftSyntax** | No (syntax tree) | Fast-Medium | Swift toolchain / SwiftPM deps | Medium |
+| SourceKit/Swift compiler services | Yes (semantic indexing) | Medium-Slow | Toolchain + indexing | Medium |
+| tree-sitter-swift | No | Fast | tree-sitter runtime | Varies |
+
+#### Recommended Approach: SwiftParser/SwiftSyntax
+
+**Why SwiftParser/SwiftSyntax:**
+- SwiftParser produces SwiftSyntax syntax trees — source-accurate, lossless representation
+- SwiftSyntax is foundational to Swift's macro system, ensuring long-term maintenance
+- Parses individual files without project context
+- Reliable error recovery for partial files
+
+**Why defer semantic resolution:** SourceKit provides type resolution and cross-module references, but requires the full Swift toolchain and project compilation context. The syntax tier captures the structural signals needed for orientation. Semantic enhancement should wait for a clear operational requirement.
+
+**Signal extraction:**
+
+| xray Signal | Syntax-Only | With Type Resolution | Notes |
+|-------------|-------------|---------------------|-------|
+| Code skeletons | Excellent | Excellent | Syntax tree supports all declarations; source-accurate |
+| Complexity | Excellent | Excellent | `if/guard/switch/for/while/catch` are syntactic |
+| Type annotation coverage | Good | Excellent | Swift inference means many annotations missing; semantic tier helps |
+| Import/dependency graph | Excellent | Excellent | `import` statements visible |
+| Cross-module call graph | Partial | Good | Protocol dispatch and extensions need semantics for precision |
+| Side effect detection | Good | Good | File/network/DB APIs identifiable |
+| Security concerns | Partial | Partial | Less direct `eval`; dangerous patterns are API-dependent |
+| Silent failures | Good | Good | Empty catches; Swift has `try?` patterns that silently discard errors |
+| Async/concurrency | Excellent | Excellent | `async/await`, actors, structured concurrency all syntactic |
+| Attribute inventory | Good | Good | `@MainActor`, `@Published`, property wrappers are syntactic |
+| Data models | Excellent | Excellent | structs/enums/classes/protocols |
+| Entry points | Good | Good | `@main`, App entry for SwiftUI; project metadata helps |
+| SQL string detection | Good | Good | Raw strings and DB client patterns |
+| Deprecation markers | Good | Good | `@available(*, deprecated, ...)` is explicit |
+
+#### Key Honest Assessment
+
+Swift syntax-only gives roughly **70% of Python-equivalent signal quality**, rising to **~80% with project metadata** and **~90% with full toolchain semantic analysis**. The gap comes from Swift's extensive type inference (many annotations absent in source) and protocol-oriented dispatch (implementations scattered across extensions). Swift's concurrency model is a bright spot — `async`, `await`, `actor`, `@MainActor` are all syntactically visible, unlike many languages where concurrency is library-driven.
+
+#### Deployment
+
+```bash
+# Build with Swift Package Manager
+swift build -c release
+
+# Run (requires Swift runtime on target)
+.build/release/xray-swift /path/to/swift/project
+```
+
+#### Effort Estimate
+
+- `SyntaxAnalyzer.swift`: ~900 lines (skeleton + complexity + attributes + async + protocols)
+- `ImportAnalyzer.swift`: ~300 lines (import statements, module structure)
+- `CallAnalyzer.swift`: ~350 lines (call expression extraction, cross-file matching)
+- `ModelExtractor.swift`: ~250 lines (struct/enum/class/protocol extraction)
+- Total: **~1,800 lines of Swift**, SwiftSyntax as primary dependency
+
+---
+
+### 12. Kotlin — The Improving Tooling Story
+
+Kotlin has 10.8% developer prevalence, concentrated in Android and JVM server-side applications. Parsing is solvable at the syntax tier; stable semantic access is improving with K2 and the Kotlin Analysis API, but integration effort is non-trivial.
+
+#### Tool Options
+
+| Tool | Type Resolution | Speed | Dependencies | API Stability |
+|------|----------------|-------|--------------|---------------|
+| **tree-sitter-kotlin** | No | Fast | tree-sitter runtime + grammar | Medium |
+| Kotlin compiler PSI via `kotlin-compiler-embeddable` | Partial/Optional | Medium | Large compiler jar + IntelliJ PSI | Low-Medium (version-sensitive) |
+| **Kotlin Analysis API** (K2-era) | Yes | Medium | Kotlin tooling (IDE-linked) | Improving (explicitly positioned as stable API) |
+
+#### Recommended Approach: tree-sitter-kotlin for syntax tier, Kotlin Analysis API for semantic tier
+
+**Why tree-sitter-kotlin for syntax:**
+- Deterministic, fast parsing without JVM overhead
+- No dependency on compiler version
+- Produces a concrete syntax tree suitable for structural extraction
+
+**Why Kotlin Analysis API for semantics:**
+- JetBrains explicitly positions the Kotlin Analysis API as a documented, stable abstraction for semantic access
+- K2 compiler provides performance improvements for analysis phases
+- Avoids depending on compiler internals (the historical pain point with `kotlin-compiler-embeddable` and PSI)
+- Designed to provide predictable semantic access without IDE context
+
+**Signal extraction:**
+
+| xray Signal | Syntax-Only | With Type Resolution | Notes |
+|-------------|-------------|---------------------|-------|
+| Code skeletons | Excellent | Excellent | Declarations are syntactic |
+| Complexity | Excellent | Excellent | Control flow nodes are syntactic |
+| Type annotation coverage | Partial | Excellent | Kotlin inference is extensive; many types omitted in source |
+| Import/dependency graph | Good | Excellent | Imports visible; Gradle/project model improves mapping |
+| Cross-module call graph | Partial | Good | Extension functions and dispatch benefit from semantics |
+| Side effect detection | Good | Good | Pattern-match IO/HTTP/DB |
+| Security concerns | Partial | Partial | `kotlin.reflect` exists; risks are application-specific |
+| Silent failures | Good | Good | Empty catches, `runCatching` patterns |
+| Async/concurrency | Excellent | Excellent | `suspend`, coroutine builders, channels identifiable |
+| Annotation inventory | Excellent | Excellent | Annotations are central to DI and Android frameworks |
+| Data models | Excellent | Excellent | `data class`, sealed hierarchies, objects |
+| Entry points | Good | Good | `main`, Android manifests/Gradle are metadata-dependent |
+| SQL string detection | Good | Good | Raw strings, Exposed/Room patterns |
+| Deprecation markers | Excellent | Excellent | `@Deprecated` is explicit |
+
+#### Key Honest Assessment
+
+Kotlin syntax-only gives roughly **65% of Python-equivalent signal quality**, rising to **~75% with project metadata** and **~90% with the Analysis API (K2)**. The gap comes from Kotlin's extensive type inference (more aggressive than Java's `var`) and extension functions that are invisible at call sites without type resolution.
+
+The Kotlin Analysis API's stability is improving but still evolving. A practical strategy: ship the syntax tier first, add semantic enhancement as a separate milestone when the API stabilizes further.
+
+#### Deployment
+
+```bash
+# Syntax tier (lightweight, no JVM)
+./xray-kotlin /path/to/project --syntax-only
+
+# With semantic analysis (requires Kotlin toolchain)
+./xray-kotlin /path/to/project --semantic
+```
+
+#### Effort Estimate
+
+- `syntax_analyzer.py`: ~700 lines (tree-sitter integration, skeleton + complexity + annotations)
+- `import_analyzer.py`: ~300 lines (import graph, Gradle metadata parsing)
+- `call_analyzer.py`: ~350 lines (call extraction, extension function detection)
+- `semantic_enhancer.kt`: ~500 lines (Kotlin Analysis API integration, type resolution)
+- Total: **~1,850 lines** (mixed Python for syntax tier, Kotlin for semantic tier)
+
+---
+
+### 13. AcuCobol — The High-Risk Niche
+
+AcuCobol (ACUCOBOL-GT) is the highest-risk, lowest-ROI language on this list. It is a dialect of COBOL with vendor-specific extensions (screen handling, Vision files, embedded SQL via AcuSQL). Open-source tooling support exists but is incomplete. This should be treated as a customer-driven build.
+
+#### Tool Options
+
+| Tool | Type Resolution | Speed | Dependencies | Dialect Coverage |
+|------|----------------|-------|--------------|-----------------|
+| **GnuCOBOL** (dialect support incl. ACUCOBOL-GT terminal format) | Partial (compiler-level) | Medium | External compiler/toolchain | Partial — supports terminal format and many extensions, but not all (notably GUI/screen syntax) |
+| tree-sitter COBOL85 grammars | None | Fast | tree-sitter runtime + grammar | COBOL 85 core only |
+| Strumenta COBOL parser (partial ACUCOBOL-GT support) | Optional (product-dependent) | Unknown | External product/library | Partial |
+| Vendor precompilers (e.g., Rocket AcuSQL) | N/A (precompile) | Medium | Vendor tool | AcuCobol-specific |
+
+#### Recommended Approach: GnuCOBOL as compatibility layer, tolerant heuristic parsing as fallback
+
+**Why GnuCOBOL as the highest-leverage path:**
+- GnuCOBOL supports ACUCOBOL-GT terminal source format and many extensions
+- Acts as a preprocessor/compatibility layer for standard COBOL signals
+- Active project with ongoing development
+- However: coverage is incomplete for some ACU extensions — GUI/screen syntax, certain Vision file operations, and some vendor-specific clauses may not parse
+
+**Fallback strategy:** For constructs GnuCOBOL cannot handle, use tolerant heuristic token patterns (similar to the regex approach in section 5 for standard COBOL). Accept "best effort" results with explicit quality flags.
+
+**Signal extraction:**
+
+| xray Signal | Syntax-Only | With GnuCOBOL Preprocessing | Notes |
+|-------------|-------------|----------------------------|-------|
+| Code skeletons | Good | Good | COBOL divisions/paragraphs; ACU extensions may not parse in general grammars |
+| Complexity | Good | Good | IF/EVALUATE/PERFORM sequences |
+| Type annotation coverage | N/A | N/A | Data models are data division declarations |
+| Import/dependency graph | Good | Good | COPY/copybook resolution is critical; toolchain support varies |
+| Cross-module call graph | Good | Good | CALL and PERFORM graph; inline PERFORM and THRU need careful modelling |
+| Side effect detection | Good | Good | File IO verbs; embedded SQL via AcuSQL precompiler |
+| Data model extraction | Excellent | Excellent | Level-number structures and PIC clauses (once parsed) |
+| Entry points | Good | Good | Procedure division; runtime/environment entry points |
+| SQL string detection | N/A | N/A | Better addressed as embedded SQL blocks (`EXEC SQL ... END-EXEC`) |
+
+#### Key Honest Assessment
+
+AcuCobol is the language where the risk/reward ratio is worst. Expect roughly **55% of Python-equivalent signal quality** at the syntax-only tier, **~70% with GnuCOBOL preprocessing**, and **~80% with vendor tooling**. The gap comes from dialect-specific extensions that no single parser handles completely, embedded SQL precompilation requirements (Rocket AcuSQL scans COBOL source for SQL statements and translates them for ACUCOBOL-GT compilation), and the narrow user base that limits community tooling investment.
+
+**Build this only if a specific customer need exists.** The standard COBOL scanner (section 5) covers the majority of signals; AcuCobol-specific work is incremental but carries sustained maintenance burden from dialect variance.
+
+#### Deployment
+
+```bash
+# Extends the COBOL scanner with ACU-specific patterns
+python xray-cobol.py /path/to/acucobol/project --dialect acucobol
+
+# With GnuCOBOL preprocessing
+python xray-cobol.py /path/to/project --dialect acucobol --preprocess
+```
+
+#### Effort Estimate
+
+Incremental on top of the COBOL scanner (section 5):
+- ACU dialect patterns: ~400 lines (screen section, Vision file operations, ACU-specific clauses)
+- AcuSQL embedded SQL detection: ~200 lines (EXEC SQL block extraction and classification)
+- GnuCOBOL integration: ~200 lines (dialect flag handling, preprocessing)
+- Total incremental: **~800 lines** on top of the COBOL scanner
+- Total standalone: **~2,600 lines of Python** including shared COBOL infrastructure
+
+---
+
 ## Cross-Cutting Concerns
 
 ### The Shared Output Schema
@@ -683,46 +1262,224 @@ The existing `git_analysis.py` module (risk scores, co-modification coupling, fr
 | Rust | `#[cfg(test)] mod tests`, `tests/` dir | `#[test] fn test_*` |
 | C# | `*.Tests.csproj`, `*Tests.cs` | `[Test]`, `[Fact]`, `[Theory]`, `[TestMethod]` |
 | COBOL | No standard convention | N/A (tested via JCL job streams) |
+| JavaScript | `*.test.js`, `*.spec.js`, `__tests__/` | `describe()`, `it()`, `test()` |
+| Java | `*Test.java`, `*Tests.java`, `src/test/` | `@Test`, `@ParameterizedTest` |
+| SQL | dbt tests (`tests/`), framework-specific | `SELECT` assertions, dbt `schema.yml` tests |
+| C++ | `*_test.cpp`, `*_tests.cpp` | `TEST()`, `TEST_F()` (gtest), `TEST_CASE()` (Catch2) |
+| C | `test_*.c`, `*_test.c` | Framework-dependent (Unity, Check) |
+| Swift | `*Tests.swift` | `func test*()`, XCTest conventions |
+| Kotlin | `*Test.kt`, `*Tests.kt`, `src/test/` | `@Test`, Kotest conventions |
+| AcuCobol | No standard convention | External harness/job control |
+
+---
+
+## Priority Ranking
+
+The priority ranking uses a structured score: `(market_demand x feasibility x signal_quality) / effort`. Each factor is scored 1-5 as an ordinal planning heuristic, grounded in market data (Stack Overflow 2025 Developer Survey, GitHub Octoverse 2025) and the tooling constraints documented above.
+
+| Language | Market Demand (1-5) | Feasibility (1-5) | Signal Quality (1-5) | Effort (1-5) | Score |
+|----------|---:|---:|---:|---:|---:|
+| Go | 3 | 5 | 5 | 1.5 | 50.0 |
+| JavaScript | 5 | 4 | 3.5 | 3 | 23.3 |
+| TypeScript | 4.5 | 4.5 | 4 | 2.5 | 32.4 |
+| Java | 4 | 4 | 4 | 3.5 | 18.3 |
+| SQL | 5 | 3.5 | 3 | 3 | 17.5 |
+| Rust | 3 | 3.5 | 3.5 | 2.5 | 17.2 |
+| C# | 3.5 | 4 | 4 | 3 | 18.7 |
+| C | 3 | 3 | 3.5 | 4 | 7.9 |
+| Swift | 2 | 3.5 | 3.5 | 3.5 | 7.0 |
+| C++ | 3 | 2.5 | 4 | 4.5 | 6.7 |
+| Kotlin | 2 | 3 | 3.5 | 4 | 5.3 |
+| COBOL | 1.5 | 2.5 | 3 | 4 | 2.8 |
+| AcuCobol | 1 | 2.5 | 3 | 4.5 | 1.7 |
+
+Market demand is anchored in survey prevalence (JavaScript/SQL highest; Java and C-family significant; Kotlin/Swift smaller; COBOL niche). Go scores highest overall due to its exceptional feasibility (stdlib tooling) and minimal effort.
+
+---
+
+## The 80% Scanner Concept
+
+Estimated percentage of Python repo-xray "signal quality" achievable under three tiers. These percentages reflect documented structural limits: dynamic JS call graphs, C/C++ preprocessor complexity, Kotlin/Swift type inference, SQL conceptual mismatch, Rust macro opacity, COBOL dialect fragmentation.
+
+| Language | Syntax-Only | Syntax + Project Metadata | Full Semantic Analysis |
+|----------|---:|---:|---:|
+| Go | ~90% | ~95% | ~98% |
+| Python (current) | ~85% | N/A | N/A |
+| TypeScript | ~75% | ~85% | ~95% |
+| COBOL | ~85% | ~90% | ~92% |
+| Java | ~75% | ~85% | ~95% (reflection remains a blind spot) |
+| C# | ~70% | ~80% | ~95% |
+| Rust | ~70% | ~80% | ~90% (macros remain partially opaque) |
+| Swift | ~70% | ~80% | ~90% (toolchain-dependent) |
+| JavaScript | ~65% | ~75% | ~85% (still limited vs dynamic features) |
+| Kotlin | ~65% | ~75% | ~90% (K2/Analysis API) |
+| SQL | ~60% | ~80% (dbt/migration context) | ~90% (engine-specific semantics) |
+| C | ~55% | ~80% (compile db) | ~90% (macro configurations still complex) |
+| C++ | ~45% | ~80% (compile db) | ~90% (templates/macros remain hard) |
+| AcuCobol | ~55% | ~70% | ~80% (dialect + vendor tooling constraints) |
+
+The "80% scanner" concept: for most languages, the syntax-only tier plus project metadata gets you to 75-85% of Python's signal quality. Full semantic analysis adds another 5-15% but at significantly higher deployment cost. The syntax + metadata tier is the sweet spot for a general-purpose scanner.
+
+---
+
+## Shared Infrastructure Opportunities
+
+The hybrid architecture (Option C) maximizes shared infrastructure. The greatest cross-language leverage lies in:
+
+1. **A minimal but extensible IR schema.** The schema should represent *files → declarations → relationships* (imports, calls, data-model relations) and permit language-specific "extensions" without breaking the shared formatter contract. The JSON schema shown above in "The Shared Output Schema" is the starting point.
+
+2. **A shared "pattern vocabulary" layer for side-effect detection and security hazards.** Even when call graphs are imprecise, pattern-matched APIs (`eval`, IO, subprocess, network) are useful and consistent across languages. A shared registry of hazardous API patterns — organized by category (IO, network, subprocess, dynamic execution) — reduces per-language effort.
+
+3. **tree-sitter as a universal fallback.** tree-sitter is explicitly designed as a parsing library producing concrete syntax trees. Its common interface and grammar ecosystem provide a consistent baseline for any language without a dedicated frontend. This is the "better than nothing" tier.
+
+4. **Language-agnostic modules already exist.** Git analysis, tech debt markers (TODO/FIXME), config loading, file discovery, and the output pipeline (markdown + JSON formatters) are already language-agnostic. These represent ~40% of the current codebase and require zero changes for new languages.
+
+5. **Test detection as a shared framework.** While test file/function patterns differ per language, the detection framework (pattern registry → file matching → coverage mapping) is shared. Each language adds patterns to a registry; the infrastructure is written once.
+
+```mermaid
+flowchart LR
+  subgraph Core["Shared repo-xray core (already exists)"]
+    GIT["Git risk scoring\n(churn, coupling, recency)"]
+    CFG["Config + file discovery"]
+    OUT["Shared output pipeline\n(JSON + Markdown)"]
+  end
+
+  subgraph Frontends["Language-specific frontends (to build)"]
+    GO["Go frontend\n(go/ast + go/types)"]
+    TS["TypeScript frontend\n(TS Compiler API)"]
+    JS["JS frontend\n(TS Compiler API, JS mode)"]
+    RUST["Rust frontend\n(syn + cargo metadata)"]
+    CS["C# frontend\n(Roslyn)"]
+    COBOL["COBOL frontend\n(regex + GnuCOBOL)"]
+    JAVA["Java frontend\n(JavaParser + optional semantic)"]
+    SQL["SQL frontend\n(SQLGlot + optional templating)"]
+    CC["C/C++ frontend\n(Clang + compile_commands.json)"]
+    SWIFT["Swift frontend\n(SwiftParser/SwiftSyntax)"]
+    KOT["Kotlin frontend\n(tree-sitter + optional Analysis API)"]
+    ACU["AcuCobol frontend\n(GnuCOBOL + heuristics)"]
+  end
+
+  IR["Standardised JSON IR\n(files, decls, imports, calls, models)"]
+
+  Core --> Frontends
+  Frontends --> IR --> OUT
+  CFG --> Frontends
+  GIT --> OUT
+```
 
 ---
 
 ## Implementation Roadmap
 
-### Phase 1: Go Scanner (Highest ROI, Lowest Risk)
-- **Why first:** Best stdlib tooling, simplest type system, zero-dep binary, growing demand
+### Phase 1: Foundations (Weeks 1-3)
+
+**Scope:** IR schema specification, golden tests, benchmark harness
+
+Before building any language frontend, stabilize the cross-language JSON output schema. Extract the Python output schema used today and formalize the minimal required fields and extension mechanism. Build a benchmark harness (same 500-file, 5-second target) with representative repos per language.
+
+**Key risk:** Schema churn; "one schema fits all" tension. Mitigate by starting with the existing Python output and extending conservatively.
+
+### Phase 2: Go Scanner (Highest ROI, Lowest Risk)
+- **Why first:** Best stdlib tooling, simplest type system, zero-dep binary, growing demand, highest priority score
 - **Scope:** Full signal parity with Python scanner using `go/ast`
 - **Timeline driver:** ~1,700 lines of Go
 - **Deliverable:** `xray-go` binary that produces JSON feeding into existing formatters
 
-### Phase 2: TypeScript Scanner (Largest User Base)
-- **Why second:** Biggest user base (TypeScript/JavaScript are the most common languages in many orgs), single well-understood dependency (`typescript` npm package)
-- **Scope:** Syntax-only tier + optional semantic tier via `ts.createProgram()`
-- **Timeline driver:** ~2,200 lines of JS/TS
-- **Deliverable:** `xray-ts` Node.js tool or bundled binary
+### Phase 3: TypeScript + JavaScript Scanner (Largest User Base)
+- **Why second:** Biggest combined user base (TypeScript + JavaScript), single well-understood dependency (`typescript` npm package), JS frontend is incremental on TS
+- **Scope:** Syntax-only tier + optional semantic tier via `ts.createProgram()`, JS/JSX mode
+- **Timeline driver:** ~2,700 lines of JS/TS (unified)
+- **Deliverable:** `xray-ts` Node.js tool or bundled binary, handles both TS and JS
 
-### Phase 3: Rust Scanner (Growing Demand)
-- **Why third:** Growing systems-programming adoption, `syn` is a strong foundation, macro opacity is manageable
+### Phase 4: Java Scanner (Enterprise Demand)
+- **Why third:** High enterprise prevalence, large codebases, strong onboarding value, robust tooling
+- **Scope:** JavaParser syntax tier + optional symbol solver semantic tier
+- **Timeline driver:** ~2,100 lines of Java
+- **Deliverable:** `xray-java` JAR or GraalVM native binary
+
+### Phase 5: Rust Scanner (Growing Demand)
+- **Why fourth:** Growing systems-programming adoption, `syn` is a strong foundation, macro opacity is manageable
 - **Scope:** Syntax extraction via `syn` + `cargo metadata` for dependency graphs
 - **Timeline driver:** ~2,300 lines of Rust
 - **Deliverable:** `xray-rust` static binary
 
-### Phase 4: C# Scanner (Enterprise Demand)
-- **Why fourth:** Large enterprise user base, Roslyn is powerful but deployment is heavier
+### Phase 6: C# Scanner (Enterprise Demand)
+- **Why fifth:** Large enterprise user base, Roslyn is powerful but deployment is heavier
 - **Scope:** Three-tier approach (syntax → ad-hoc compilation → MSBuild)
 - **Timeline driver:** ~2,300 lines of C#
 - **Deliverable:** `xray-csharp` self-contained .NET binary
 
-### Phase 5: COBOL Scanner (Niche but Unique Value)
-- **Why last:** Smallest user base, but AI-assisted COBOL comprehension has outsized value (millions of lines of underdocumented mainframe code). This is where repo-xray could be genuinely transformative — no other tool does this.
+### Phase 7: SQL Scanner (Scope-Selected MVP)
+- **Why here:** Huge ubiquity but scope must be defined first. Build after foundational languages prove the IR schema.
+- **Scope:** SQLGlot baseline, scope selected between migrations/dbt/stored procedures
+- **Timeline driver:** ~1,400 lines of Python
+- **Deliverable:** SQL module integrated into `xray.py` or standalone script
+
+### Phase 8: Swift Scanner
+- **Why here:** Smaller market but high codebase complexity, good tooling via SwiftParser
+- **Scope:** SwiftSyntax syntax tier, defer semantic resolution
+- **Timeline driver:** ~1,800 lines of Swift
+- **Deliverable:** `xray-swift` binary
+
+### Phase 9: C/C++ Scanner (Compile-DB Required)
+- **Why later:** Material demand but compile configuration makes zero-setup scanning unreliable
+- **Scope:** Clang tooling with compilation database, degradation mode without it
+- **Timeline driver:** ~2,300 lines of C++ (shared C/C++ infrastructure)
+- **Deliverable:** `xray-cpp` binary handling both C and C++
+
+### Phase 10: Kotlin Scanner
+- **Why later:** Parsing solvable but semantic tier (Analysis API) is still maturing
+- **Scope:** tree-sitter syntax tier first, Analysis API semantic spike as separate milestone
+- **Timeline driver:** ~1,850 lines (mixed Python/Kotlin)
+- **Deliverable:** `xray-kotlin` with syntax tier, semantic tier added when API stabilizes
+
+### Phase 11: COBOL Scanner (Niche but Unique Value)
+- **Why near last:** Smallest user base, but AI-assisted COBOL comprehension has outsized value (millions of lines of underdocumented mainframe code). This is where repo-xray could be genuinely transformative — no other tool does this.
 - **Scope:** Regex/pattern parser in Python, optional GnuCOBOL enhancement
 - **Timeline driver:** ~1,800 lines of Python
 - **Deliverable:** `xray-cobol` Python script or module integrated into existing `xray.py`
 
+### Phase 12: AcuCobol Scanner (Conditional — Customer-Driven)
+- **Why last:** Highest-risk niche, build only if driven by explicit user demand
+- **Scope:** Incremental on COBOL scanner, GnuCOBOL compatibility + vendor precompile recognition
+- **Timeline driver:** ~800 incremental lines
+- **Deliverable:** AcuCobol dialect mode within `xray-cobol`
+
 ### Cross-Phase Work
-- Define and stabilize the cross-language JSON output schema (before Phase 1)
-- Refactor markdown formatter to accept language-agnostic JSON (during Phase 1)
+- Define and stabilize the cross-language JSON output schema (Phase 1)
+- Refactor markdown formatter to accept language-agnostic JSON (Phase 1-2)
 - Add `--language` flag to the main `xray.py` entry point that dispatches to the appropriate scanner (Phase 2+)
 - tree-sitter fallback mode for unsupported languages (Phase 3+)
+
+```mermaid
+gantt
+  title repo-xray multi-language expansion roadmap
+  dateFormat  YYYY-MM-DD
+  axisFormat  %b %Y
+
+  section Foundations
+  IR schema + tests + harness        :a1, 2026-04-03, 21d
+
+  section Wave 1 — High ROI
+  Go frontend (go/ast)               :a2, after a1, 21d
+  TypeScript+JS frontend (TS API)    :a3, after a1, 35d
+  Java frontend (JavaParser)         :a4, after a1, 35d
+
+  section Wave 2 — Strong Demand
+  Rust frontend (syn)                :a5, after a2, 28d
+  C# frontend (Roslyn)              :a6, after a2, 35d
+  SQL scanner MVP                    :a7, after a3, 28d
+
+  section Wave 3 — Specialized
+  Swift frontend (SwiftParser)       :a8, after a5, 28d
+  C/C++ scanner (Clang + compile db) :a9, after a7, 56d
+  Kotlin syntax tier (tree-sitter)   :a10, after a7, 35d
+
+  section Wave 4 — Niche
+  Kotlin semantic spike (Analysis API):a11, after a10, 21d
+  COBOL scanner (regex + GnuCOBOL)  :a12, after a8, 28d
+  AcuCobol spike (conditional)       :a13, after a12, 56d
+```
 
 ---
 
@@ -736,10 +1493,18 @@ How much of the code's "truth" can a syntax-only scanner capture?
 |----------|---------------------|-----|
 | **Go** | ~90% | No macros, explicit types everywhere, simple module system |
 | **Python** | ~85% | Dynamic typing means types are often unknown; decorators/metaclasses generate code |
+| **COBOL** | ~85% | What you see is what you get — no metaprogramming, but COPY inclusion is a gap |
 | **TypeScript** | ~75% | `type` inference means many types are invisible; decorators and build transforms |
+| **Java** | ~75% | Explicit types; Lombok and annotation processors generate invisible code |
 | **C#** | ~70% | `var` inference, source generators, partial classes, extension methods |
 | **Rust** | ~70% | Macro-generated code invisible, trait dispatch unresolvable, generics opaque |
-| **COBOL** | ~85% | What you see is what you get — no metaprogramming, but COPY inclusion is a gap |
+| **Swift** | ~70% | Type inference means many annotations absent; protocol dispatch scattered |
+| **JavaScript** | ~65% | No types, dynamic dispatch, callbacks and events hide control flow |
+| **Kotlin** | ~65% | Extensive type inference, extension functions invisible at call sites |
+| **SQL** | ~60% | Declarative language; signal model maps differently than procedural |
+| **C** | ~55% | Preprocessor hides includes/macros; function pointers obscure dispatch |
+| **C++** | ~45% | Preprocessor + templates + macros; lowest syntax-only coverage |
+| **AcuCobol** | ~55% | Dialect extensions unparseable by general tools; vendor tooling gaps |
 
 ### Dependency Weight
 
@@ -747,9 +1512,17 @@ How much of the code's "truth" can a syntax-only scanner capture?
 |----------|-------------------|----------------------|-------------------|
 | Go | Go | None (stdlib only) | None (static binary) |
 | TypeScript | JavaScript | `typescript` (npm) | Node.js |
+| JavaScript | JavaScript | `typescript` (npm) | Node.js (shared with TS) |
 | Rust | Rust | `syn` (crate) | None (static binary) |
 | C# | C# | `Microsoft.CodeAnalysis` (NuGet) | None (self-contained publish) or .NET runtime |
 | COBOL | Python | None | Python 3.8+ |
+| Java | Java | JavaParser (Maven/Gradle) | JVM (or GraalVM native) |
+| SQL | Python | SQLGlot (pip) | Python 3.8+ |
+| C++ | C++ | Clang/LLVM libraries | Clang runtime |
+| C | C++ | Clang/LLVM libraries (shared with C++) | Clang runtime |
+| Swift | Swift | SwiftSyntax (SwiftPM) | Swift runtime |
+| Kotlin | Python + Kotlin | tree-sitter-kotlin + Analysis API | Python + JVM (semantic tier) |
+| AcuCobol | Python | None (+ optional GnuCOBOL) | Python 3.8+ |
 | Python (current) | Python | None (stdlib only) | Python 3.8+ |
 
 ### The Honest Take
@@ -758,10 +1531,24 @@ How much of the code's "truth" can a syntax-only scanner capture?
 
 **TypeScript is the highest impact.** Largest potential user base, well-understood tooling, single dependency. Build this second.
 
+**JavaScript rides for free.** Unified with the TypeScript frontend, JS support is incremental. The call-graph ceiling is real but the structural signals carry most of the onboarding value.
+
+**Java is the enterprise play.** JavaParser provides clean syntax-first access, annotations carry outsized architectural signal, and enterprise codebases have the strongest onboarding need.
+
 **Rust is doable but imperfect.** The macro gap is real but manageable. The `syn` crate is excellent. Worth building for the growing Rust ecosystem.
 
 **C# is powerful but heavy.** Roslyn gives you everything if you can accept the .NET dependency. The three-tier approach makes it practical. Enterprise demand justifies the effort.
 
+**SQL is valuable but different.** The procedural signal model doesn't map cleanly. Define scope first, then build. The data model and lineage signals alone justify the effort.
+
+**Swift is solid but niche.** SwiftParser/SwiftSyntax provides reliable extraction. The smaller market means lower priority, but iOS/macOS codebases have genuine complexity.
+
+**C/C++ require compile context.** The preprocessor makes zero-setup scanning unreliable. Practical for CI environments that already produce `compile_commands.json`, degraded without it.
+
+**Kotlin is improving.** The syntax tier is straightforward; the semantic tier depends on the Kotlin Analysis API maturing. Build the syntax tier, plan the semantic tier.
+
 **COBOL is the sleeper.** Tiny user base but massive untapped value. Millions of lines of critical mainframe code with no modern tooling for AI-assisted comprehension. A COBOL scanner, even at 85% accuracy, would be genuinely novel and valuable. The regex approach is unsexy but practical — and it's how most real-world COBOL analysis tools started.
 
-**The tree-sitter universal fallback** handles everything else (Java, Ruby, PHP, Swift, Kotlin...) at 60-70% quality. Not great, not terrible, better than nothing. Good enough for the long tail of languages.
+**AcuCobol is customer-driven.** Build only on demand. The standard COBOL scanner covers most signals; AcuCobol-specific work is incremental but carries sustained maintenance burden.
+
+**The tree-sitter universal fallback** handles everything else (Ruby, PHP, Scala, Haskell...) at 60-70% quality. Not great, not terrible, better than nothing. Good enough for the long tail of languages.
