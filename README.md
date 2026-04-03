@@ -7,7 +7,7 @@ Phase 1 — X-Ray:     python xray.py /path/to/project     # 5 seconds, ~15K tok
 Phase 2 — Deep Crawl: /deep-crawl full                    # 30-70 min, ~60K words, every claim cited
 ```
 
-**Phase 1 (X-Ray)** runs in seconds with no API calls. It produces a lean, deterministic map of the codebase — skeletons, dependency graph, complexity hotspots, git risk, side effects — that fits in a single context window. Same input, same output, every time. This is enough for most tasks: the AI knows where to look and what to be careful about.
+**Phase 1 (X-Ray)** runs in seconds with no API calls or inference tokens expended. It produces a lean, deterministic map of the codebase — skeletons, dependency graph, complexity hotspots, git risk, side effects — that fits in a single context window. Same input, same output, every time. This is enough for most tasks: the AI knows where to look and what to be careful about.
 
 **Phase 2 (Deep Crawl)** is the optional second stage for when you want comprehensive understanding. It uses the X-Ray output as its map, then spawns parallel LLM agents that read actual source code, trace request paths, verify signals, and document everything they find with `file:line` evidence citations. The result is a complete onboarding document that auto-loads in every future AI session. Run it once, benefit for months.
 
