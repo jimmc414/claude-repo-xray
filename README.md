@@ -17,8 +17,8 @@ Most users only need Phase 1. Phase 2 pays for itself on codebases where multipl
 
 [Kosmos](https://github.com/jimmc414/Kosmos) is an AI Scientist platform — 802 Python files totaling over 2.4 million tokens. Far too large for any AI context window. Here's what each phase produces:
 
-- **Phase 1 output**: [X-Ray scan](examples/kosmos_xray_output_v31.md) — deterministic map in ~15K tokens. Skeletons, dependency graph, complexity hotspots, git risk, side effects, security concerns, silent failures. Produced in seconds.
-- **Phase 2 output**: [Deep Crawl onboarding document](examples/KOSMOS_DEEP_ONBOARD.md) — ~58K words of verified behavioral documentation with 777 `[FACT]` citations. Critical paths, module analysis, gotchas, change playbooks, error handling — everything a fresh AI session needs to work confidently in the codebase. Validation: 12/12 standard questions, 10/10 spot checks, adversarial PASS.
+- **Phase 1 output**: [X-Ray scan](examples/KOSMOS_XRAY.md) — deterministic map in ~15K tokens. Skeletons, dependency graph, complexity hotspots, git risk, side effects, security concerns, silent failures. Produced in seconds.
+- **Phase 2 output**: [Deep Crawl onboarding document](examples/KOSMOS_DEEP_ONBOARD.md) — ~58K words of verified behavioral documentation with 444 `[FACT]` citations. Critical paths, module analysis, gotchas, change playbooks, error handling — everything a fresh AI session needs to work confidently in the codebase. Validation: 12/12 standard questions, 10/10 spot checks, adversarial PASS.
 
 ## The Problem
 

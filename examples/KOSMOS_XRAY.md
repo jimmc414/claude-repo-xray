@@ -1,29 +1,29 @@
-# Codebase Analysis: kosmos
+# Codebase Analysis: Kosmos
 
-Generated: 2025-12-15T07:34:46.234236Z | Preset: None | Files: 793
+Generated: 2026-04-02T20:31:46.089122Z | Preset: None | Files: 802
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Python files | 793 |
-| Total lines | 278,390 |
-| Functions | 2147 |
-| Classes | 1542 |
-| Type coverage | 36.1% |
-| Est. tokens | 2,394,233 |
+| Python files | 802 |
+| Total lines | 284,471 |
+| Functions | 2189 |
+| Classes | 1558 |
+| Type coverage | 36.6% |
+| Est. tokens | 2,455,608 |
 
 ## Architecture Overview
 
-**kosmos** is a Python application with agent-based architecture, workflow orchestration, REST/HTTP API. The codebase contains **793** Python files with **2147** functions and **1542** classes, organized across 4 architectural layers (92 foundation, 298 core, 146 orchestration, 257 leaf).
+**Kosmos** is a Python application with agent-based architecture, workflow orchestration, REST/HTTP API. The codebase contains **802** Python files with **2189** functions and **1558** classes, organized across 4 architectural layers (94 foundation, 302 core, 147 orchestration, 259 leaf).
 
 **Key Components:**
-- **54 agent modules** for autonomous task execution
+- **56 agent modules** for autonomous task execution
 - **47 workflow modules** for process coordination
 - **20 API handlers** for external integration
 - **63 CLI modules** for user interaction
 - **43 data model definitions**
-- **246 test modules** for validation
+- **249 test modules** for validation
 
 
 ## Architecture Diagram
@@ -38,25 +38,25 @@ graph TD
         kosmos_core_workflow[workflow]
         kosmos_workflow_research_loop[research_loop]
         kosmos_world_model_factory[factory]
+        kosmos_agents_experiment_designer[experiment_designer]
         kosmos_agents_literature_analyzer[literature_analyzer]
         kosmos_core_cache_manager[cache_manager]
-        kosmos_hypothesis_novelty_checker[novelty_checker]
-        kosmos_agents_experiment_designer[experiment_designer]
         kosmos_claude_skills_kosmos_e2e_testing_lib_config_manager[config_manager]
+        kosmos_analysis_summarizer[summarizer]
         kosmos_core_feedback[feedback]
         kosmos_core_memory[memory]
     end
     subgraph CORE
         kosmos_agents_research_director[research_director]
-        kosmos_knowledge_vector_db[vector_db]
         kosmos_execution_executor[executor]
-        kosmos_knowledge_graph[graph]
-        kosmos_safety_code_validator[code_validator]
-        kosmos_core_providers_anthropic[anthropic]
         kosmos_agents_hypothesis_generator[hypothesis_generator]
-        kosmos_cli_main[main]
-        kosmos_core_async_llm[async_llm]
-        kosmos_literature_unified_search[unified_search]
+        kosmos_knowledge_vector_db[vector_db]
+        kosmos_safety_code_validator[code_validator]
+        kosmos_core_convergence[convergence]
+        kosmos_knowledge_graph[graph]
+        kosmos_agents_data_analyst[data_analyst]
+        kosmos_core_providers_anthropic[anthropic]
+        kosmos_execution_code_generator[code_generator]
     end
     subgraph FOUNDATION
         kosmos_core_logging[logging]
@@ -65,8 +65,8 @@ graph TD
         kosmos_literature_base_client[base_client]
         kosmos_models_experiment[experiment]
         kosmos_core_llm[llm]
-        kosmos[kosmos]
         kosmos_models_result[result]
+        kosmos[kosmos]
         kosmos_reference_kosmos_agentic_data_scientist_src_agentic_data_scientist[agentic_data_scientist]
         kosmos_world_model_models[models]
     end
@@ -75,12 +75,12 @@ graph TD
     kosmos_workflow_research_loop --> kosmos_core_logging
     kosmos_world_model_factory --> kosmos_core_logging
     kosmos_world_model_factory --> kosmos_config
+    kosmos_agents_experiment_designer --> kosmos_core_logging
+    kosmos_agents_experiment_designer --> kosmos_core_llm
     kosmos_agents_literature_analyzer --> kosmos_core_logging
     kosmos_agents_literature_analyzer --> kosmos_core_llm
-    kosmos_core_cache_manager --> kosmos_core_logging
-    kosmos_core_cache_manager --> kosmos_config
-    kosmos_core_llm <-.-> kosmos_core_providers_anthropic
     kosmos_world_model <-.-> kosmos_world_model_artifacts
+    kosmos_core_llm <-.-> kosmos_core_providers_anthropic
 ```
 
 ## Architectural Pillars
@@ -93,16 +93,16 @@ graph TD
 
 | # | File | Imported By | Key Dependents |
 |---|------|-------------|----------------|
-| 1 | `logging.py` | 136 modules | kosmos.alembic.env, kosmos-reference.kosmos-agentic-data-scientist.src.agentic_data_scientist.agents.adk.agent, kosmos-reference.kosmos-agentic-data-scientist.src.agentic_data_scientist.agents.adk.event_compression... |
-| 2 | `hypothesis.py` | 46 modules | kosmos.agents.data_analyst, kosmos.agents.experiment_designer, kosmos.agents.hypothesis_generator... |
-| 3 | `base_client.py` | 34 modules | kosmos.agents.hypothesis_generator, kosmos.agents.literature_analyzer, kosmos.hypothesis.novelty_checker... |
-| 4 | `experiment.py` | 27 modules | kosmos.agents.experiment_designer, kosmos.core.memory, kosmos.execution.code_generator... |
-| 5 | `llm.py` | 26 modules | kosmos.claude.skills.kosmos-e2e-testing.templates.benchmark, kosmos.claude.skills.kosmos-e2e-testing.templates.sanity-test, kosmos.claude.skills.kosmos-e2e-testing.templates.smoke-test... |
-| 6 | `__init__.py` | 25 modules | kosmos.claude.skills.kosmos-e2e-testing.lib, kosmos.claude.skills.kosmos-e2e-testing.templates.sanity-test, kosmos.examples.01_biology_metabolic_pathways... |
-| 7 | `result.py` | 25 modules | kosmos.agents.data_analyst, kosmos.analysis.summarizer, kosmos.analysis.visualization... |
-| 8 | `workflow.py` | 23 modules | kosmos.agents.research_director, kosmos.cli.commands.run, kosmos.core.convergence... |
-| 9 | `__init__.py` | 20 modules | kosmos-reference.kosmos-agentic-data-scientist.src.agentic_data_scientist.agents.adk, kosmos-reference.kosmos-agentic-data-scientist.src.agentic_data_scientist.agents.adk.agent, kosmos-reference.kosmos-agentic-data-scientist.src.agentic_data_scientist.agents.adk.event_compression... |
-| 10 | `research_director.py` | 20 modules | kosmos, kosmos.cli.commands.run, kosmos.tests.e2e.test_full_research_workflow... |
+| 1 | `logging.py` | 140 modules | kosmos.alembic.env, kosmos.evaluation.scientific_evaluation, kosmos-reference.kosmos-agentic-data-scientist.src.agentic_data_scientist.agents.adk.agent... |
+| 2 | `hypothesis.py` | 48 modules | kosmos.evaluation.run_phase2_tests, kosmos.agents.data_analyst, kosmos.agents.experiment_designer... |
+| 3 | `base_client.py` | 35 modules | kosmos.agents.hypothesis_generator, kosmos.agents.literature_analyzer, kosmos.hypothesis.novelty_checker... |
+| 4 | `experiment.py` | 30 modules | kosmos.evaluation.run_phase2_tests, kosmos.agents.experiment_designer, kosmos.agents.research_director... |
+| 5 | `llm.py` | 27 modules | kosmos.claude.skills.kosmos-e2e-testing.templates.benchmark, kosmos.claude.skills.kosmos-e2e-testing.templates.sanity-test, kosmos.claude.skills.kosmos-e2e-testing.templates.smoke-test... |
+| 6 | `result.py` | 27 modules | kosmos.evaluation.run_phase2_tests, kosmos.agents.data_analyst, kosmos.agents.research_director... |
+| 7 | `workflow.py` | 26 modules | kosmos.evaluation.run_phase2_tests, kosmos.evaluation.scientific_evaluation, kosmos.agents.research_director... |
+| 8 | `__init__.py` | 25 modules | kosmos.claude.skills.kosmos-e2e-testing.lib, kosmos.claude.skills.kosmos-e2e-testing.templates.sanity-test, kosmos.examples.01_biology_metabolic_pathways... |
+| 9 | `research_director.py` | 22 modules | kosmos.evaluation.scientific_evaluation, kosmos, kosmos.cli.commands.run... |
+| 10 | `__init__.py` | 20 modules | kosmos-reference.kosmos-agentic-data-scientist.src.agentic_data_scientist.agents.adk, kosmos-reference.kosmos-agentic-data-scientist.src.agentic_data_scientist.agents.adk.agent, kosmos-reference.kosmos-agentic-data-scientist.src.agentic_data_scientist.agents.adk.event_compression... |
 
 ## Maintenance Hotspots
 
@@ -114,16 +114,16 @@ graph TD
 
 | # | File | Risk | Factors |
 |---|------|------|---------|
-| 1 | `config.py` | 0.96 | churn:23, hotfixes:14, authors:4 |
-| 2 | `research_director.py` | 0.82 | churn:17, hotfixes:13 |
-| 3 | `llm.py` | 0.71 | churn:11, hotfixes:5 |
-| 4 | `executor.py` | 0.68 | churn:9, hotfixes:5 |
-| 5 | `run.py` | 0.67 | churn:11, hotfixes:9 |
-| 6 | `anthropic.py` | 0.66 | churn:8, hotfixes:4 |
-| 7 | `main.py` | 0.65 | churn:10, hotfixes:6 |
-| 8 | `async_llm.py` | 0.62 | churn:6, hotfixes:3 |
-| 9 | `openai.py` | 0.62 | churn:8, hotfixes:4 |
-| 10 | `sandbox.py` | 0.62 | churn:6, hotfixes:3 |
+| 1 | `config.py` | 0.96 | churn:27, hotfixes:18, authors:4 |
+| 2 | `research_director.py` | 0.83 | churn:21, hotfixes:17 |
+| 3 | `llm.py` | 0.70 | churn:12, hotfixes:6 |
+| 4 | `executor.py` | 0.70 | churn:12, hotfixes:8 |
+| 5 | `code_generator.py` | 0.67 | churn:10, hotfixes:8 |
+| 6 | `run.py` | 0.66 | churn:12, hotfixes:10 |
+| 7 | `anthropic.py` | 0.65 | churn:9, hotfixes:5 |
+| 8 | `experiment_designer.py` | 0.64 | churn:11, hotfixes:10 |
+| 9 | `main.py` | 0.63 | churn:10, hotfixes:6 |
+| 10 | `sandbox.py` | 0.62 | churn:7, hotfixes:4 |
 
 ## Entry Points
 
@@ -134,13 +134,41 @@ graph TD
 | `main()` | ./.claude/skills/kosmos-e2e-testing/templates/sanity-test.py | `python ./.claude/skills/kosmos-e2e-testing/templates/sanity-test.py` |
 | `main()` | ./.claude/skills/kosmos-e2e-testing/templates/smoke-test.py | `python ./.claude/skills/kosmos-e2e-testing/templates/smoke-test.py` |
 | `main()` | ./.claude/skills/kosmos-e2e-testing/templates/workflow-test.py | `python ./.claude/skills/kosmos-e2e-testing/templates/workflow-test.py` |
+| `main()` | ./evaluation/personas/compare_runs.py | `python ./evaluation/personas/compare_runs.py` |
+| `main()` | ./evaluation/personas/run_persona_eval.py | `python ./evaluation/personas/run_persona_eval.py` |
+| `main()` | ./evaluation/scientific_evaluation.py | `python ./evaluation/scientific_evaluation.py` |
 | `main()` | ./examples/01_biology_metabolic_pathways.py | `python ./examples/01_biology_metabolic_pathways.py` |
 | `main()` | ./kosmos-claude-scientific-skills/scientific-skills/biomni/scripts/generate_report.py | `python ./kosmos-claude-scientific-skills/scientific-skills/biomni/scripts/generate_report.py` |
-| `main()` | ./kosmos-claude-scientific-skills/scientific-skills/biomni/scripts/setup_environment.py | `python ./kosmos-claude-scientific-skills/scientific-skills/biomni/scripts/setup_environment.py` |
-| `main()` | ./kosmos-claude-scientific-skills/scientific-skills/biorxiv-database/scripts/biorxiv_search.py | `python ./kosmos-claude-scientific-skills/scientific-skills/biorxiv-database/scripts/biorxiv_search.py` |
-| `main()` | ./kosmos-claude-scientific-skills/scientific-skills/bioservices/scripts/batch_id_converter.py | `python ./kosmos-claude-scientific-skills/scientific-skills/bioservices/scripts/batch_id_converter.py` |
 
 ### CLI Arguments
+
+**compare_runs.py:**
+
+| Argument | Required | Default | Help |
+|----------|----------|---------|------|
+| `--persona` | Yes | - | Persona name (e.g., 001_enzyme_kinetics_biologist) |
+| `--v1` | Yes | - | Baseline version directory name (e.g., v001_202... |
+| `--v2` | Yes | - | Current version directory name (e.g., v002_2026... |
+| `--output` | No | None | Output file path (default: regression/{v1}_vs_{... |
+
+**run_persona_eval.py:**
+
+| Argument | Required | Default | Help |
+|----------|----------|---------|------|
+| `--persona` | Yes | - | Persona name (e.g., 001_enzyme_kinetics_biologist) |
+| `--tier` | No | 1 | Tier to run (currently only Tier 1 is automated) |
+| `--dry-run` | No | - | Show what would execute without running |
+| `--version` | No | None | Override version string (default: auto-increment) |
+
+**scientific_evaluation.py:**
+
+| Argument | Required | Default | Help |
+|----------|----------|---------|------|
+| `--output-dir` | No | None | Write report to this directory instead of the d... |
+| `--research-question` | No | None | Override research question for all phases |
+| `--domain` | No | None | Override domain for all phases |
+| `--data-path` | No | None | Override dataset path for Phase 4 |
+| `--max-iterations` | No | None | Override max iterations for Phase 3 |
 
 **generate_report.py:**
 
@@ -166,34 +194,6 @@ graph TD
 | `--search-fields` | No | ... | Fields to search in for keywords |
 | `--output` | No | - | Output file (default: stdout) |
 
-**batch_id_converter.py:**
-
-| Argument | Required | Default | Help |
-|----------|----------|---------|------|
-| `input_file` | Yes | - | Input file with IDs (one per line) |
-| `--from` | Yes | - | Source database code |
-| `--to` | Yes | - | Target database code |
-| `-o` | No | None | Output CSV file (default: mapping_results.csv) |
-| `--chunk-size` | No | 100 | Number of IDs per batch (default: 100) |
-| `--delay` | No | 0.5 | Delay between batches in seconds (default: 0.5) |
-| `--save-failed` | No | - | Save failed IDs to separate file |
-| `--list-databases` | No | - | List common database codes and exit |
-
-**compound_cross_reference.py:**
-
-| Argument | Required | Default | Help |
-|----------|----------|---------|------|
-| `compound` | Yes | - | Compound name to search |
-| `--output` | No | None | Output file for results (optional) |
-
-**pathway_analysis.py:**
-
-| Argument | Required | Default | Help |
-|----------|----------|---------|------|
-| `organism` | Yes | - | KEGG organism code (e.g., hsa, mmu) |
-| `output_dir` | Yes | - | Output directory for results |
-| `--limit` | No | None | Limit analysis to first N pathways |
-
 ## Critical Classes
 
 > **How to use:** These classes are ranked by architectural importance: import weight,
@@ -202,24 +202,24 @@ graph TD
 
 *Top 10 classes by architectural importance:*
 
-### ResearchDirectorAgent(BaseAgent) (research_director.py:52)
+### ResearchDirectorAgent(BaseAgent) (research_director.py:53)
 
 > Master orchestrator for autonomous research.
 
 ```python
-class ResearchDirectorAgent(BaseAgent):  # L52
+class ResearchDirectorAgent(BaseAgent):  # L53
     def __init__(self, research_question: str, domain: Optional[str], agent_id: Optional[str], config: Optional[Dict[str, Any]])
 
     # Instance variables:
     self.research_question = research_question
     self.domain = domain
+    self.data_path = get(...)
     self.max_iterations = get(...)
     self.max_runtime_hours = get(...)
     self.mandatory_stopping_criteria = get(...)
     self.optional_stopping_criteria = get(...)
     self.research_plan = ResearchPlan(...)
-    self.workflow = ResearchWorkflow(...)
-    # ... and 16 more
+    # ... and 25 more
 
     def _validate_domain(...)
     def _load_skills(...)
@@ -231,7 +231,7 @@ class ResearchDirectorAgent(BaseAgent):  # L52
     def _research_plan_context(...)
     def _strategy_stats_context(...)
     def _workflow_context(...)
-    # ... and 36 more methods
+    # ... and 44 more methods
 ```
 
 ### LiteratureAnalyzerAgent(BaseAgent) (literature_analyzer.py:49)
@@ -293,7 +293,7 @@ class ExperimentDesignerAgent(BaseAgent):  # L48
     def _parse_claude_protocol(...)
     def _enhance_protocol_with_llm(...)
     def _validate_protocol(...)
-    # ... and 6 more methods
+    # ... and 7 more methods
 ```
 
 ### DataAnalystAgent(BaseAgent) (data_analyst.py:96)
@@ -375,6 +375,24 @@ class LoopDetectionAgent(LlmAgent):  # L22
     async def _run_live_impl(...)
 ```
 
+### Hypothesis(BaseModel) (hypothesis.py:32)
+
+> Runtime hypothesis model.
+
+```python
+class Hypothesis(BaseModel):  # L32
+    id: Optional[str]
+    research_question: str
+    statement: str
+    rationale: str
+    domain: str
+    def validate_statement(...)
+    def validate_rationale(...)
+    def to_dict(...)
+    def is_testable(...)
+    def is_novel(...)
+```
+
 ### ClaudeCodeAgent(Agent) (agent.py:147)
 
 > Agent that uses Claude Agent SDK for coding tasks.
@@ -394,29 +412,6 @@ class ClaudeCodeAgent(Agent):  # L147
     def output_key(...)
     def _truncate_summary(...)
     async def _run_async_impl(...)
-```
-
-### StageOrchestratorAgent(BaseAgent) (stage_orchestrator.py:56)
-
-> Custom orchestrator that manages stage-by-stage implementation.
-
-```python
-class StageOrchestratorAgent(BaseAgent):  # L56
-    def __init__(self, implementation_loop: BaseAgent, criteria_checker: BaseAgent, stage_reflector: BaseAgent, name: str, description: str)
-
-    # Instance variables:
-    self._implementation_loop = implementation_loop
-    self._criteria_checker = criteria_checker
-    self._stage_reflector = stage_reflector
-
-    _implementation_loop: Any
-    _criteria_checker: Any
-    _stage_reflector: Any
-    def implementation_loop(...)
-    def criteria_checker(...)
-    def stage_reflector(...)
-    async def _run_async_impl(...)
-    async def _run_live_impl(...)
 ```
 
 ### Neo4jWorldModel(WorldModelStorage, EntityManager) (simple.py:45)
@@ -443,13 +438,20 @@ class Neo4jWorldModel(WorldModelStorage, EntityManager):  # L45
     # ... and 13 more methods
 ```
 
-### NonEscalatingLoopAgent(LoopAgent) (agent.py:379)
+### HypothesisGenerationResponse(BaseModel) (hypothesis.py:199)
 
-> A loop agent that does not propagate escalate flags upward.
+> Response from hypothesis generation.
 
 ```python
-class NonEscalatingLoopAgent(LoopAgent):  # L379
-    async def _run_async_impl(...)
+class HypothesisGenerationResponse(BaseModel):  # L199
+    hypotheses: List[Hypothesis]
+    research_question: str
+    domain: str
+    generation_time_seconds: float
+    num_papers_analyzed: int
+    def get_best_hypothesis(...)
+    def filter_testable(...)
+    def filter_novel(...)
 ```
 
 ## Data Models
@@ -458,7 +460,7 @@ class NonEscalatingLoopAgent(LoopAgent):  # L379
 > They're grouped by domain: API models, Config, Agents, etc. Understanding these
 > helps you know what data shapes to expect when calling functions.
 
-*188 Pydantic/dataclass models found:*
+*192 Pydantic/dataclass models found:*
 
 ### API
 
@@ -656,20 +658,22 @@ class LLMResponse:  # L58
     metadata: Optional[Dict[str, Any]]
 ```
 
-*...and 173 more models*
+*...and 177 more models*
 ## Context Hazards
 
 ### Patterns to Exclude
 
 *Use these glob patterns to skip large files:*
 
-- `kosmos/agents/research_director.py` (1 files, ~21K tokens)
+- `kosmos/agents/research_director.py` (1 files, ~30K tokens)
+- `kosmos/execution/*.py` (2 files, ~20K tokens)
+- `evaluation/scientific_evaluation.py` (1 files, ~14K tokens)
 - `kosmos-claude-scientific-skills/scientific-skills/document-skills/docx/scripts/document.py` (1 files, ~12K tokens)
 - `kosmos/workflow/ensemble.py` (1 files, ~10K tokens)
 - `tests/requirements/core/test_req_llm.py` (1 files, ~10K tokens)
 - `tests/requirements/literature/test_req_literature.py` (1 files, ~10K tokens)
-- `kosmos/execution/data_analysis.py` (1 files, ~10K tokens)
 - `tests/requirements/scientific/test_req_sci_analysis.py` (1 files, ~10K tokens)
+- `kosmos/world_model/simple.py` (1 files, ~10K tokens)
 
 ### Large Files
 
@@ -677,13 +681,16 @@ class LLMResponse:  # L58
 
 | Tokens | File | Recommendation |
 |--------|------|----------------|
-| 21,274 | `research_director.py` | Use skeleton view |
+| 30,715 | `research_director.py` | Use skeleton view |
+| 14,334 | `scientific_evaluation.py` | Use skeleton view |
 | 12,598 | `document.py` | Use skeleton view |
 | 10,747 | `ensemble.py` | Use skeleton view |
 | 10,684 | `test_req_llm.py` | Skip unless debugging tests |
 | 10,664 | `test_req_literature.py` | Skip unless debugging tests |
 | 10,624 | `data_analysis.py` | Use skeleton view |
 | 10,481 | `test_req_sci_analysis.py` | Skip unless debugging tests |
+| 10,367 | `code_generator.py` | Use skeleton view |
+| 10,247 | `simple.py` | Use skeleton view |
 
 ### Skip Directories
 
@@ -865,40 +872,31 @@ try:
 ... (1 more lines)
 ```
 
-### recalc() - recalc.py:53 (CC:28)
+### run_phase6_rigor_scorecard() - scientific_evaluation.py:816 (CC:28)
 
-**Summary:** Iterates over 8 collections. 11 decision branches. handles 2 exception types. returns early on error.
+> Score each scientific rigor feature from the paper.
+
+**Summary:** 1 decision branch. handles 8 exception types. single return point.
 
 ```
--> not Path(...).exists(...)?
-  -> Return(...)
--> not setup_libreoffice_macro(...)?
-  -> Return(...)
--> platform.system(...) != 'Windows'?
-  -> platform.system(...) == 'Darwin'?
-    try:
-    ! except Exception
-  -> timeout_cmd?
--> result.returncode != 0 and result.returncode != 124?
-  -> 'Module1' in error_msg or 'RecalculateAndSave' not in error_msg?
-    -> Return(...)
-    -> Return(...)
 try:
-  * for sheet_name in wb.sheetnames:
-    * for row in ws.iter_rows(...):
-      * for cell in row:
-        -> cell.value is not None and isinstance(...)?
-          * for err in excel_errors:
-            -> err in cell.value?
-  * for ... in error_details.items(...):
-    -> locations?
-  * for sheet_name in wb_formulas.sheetnames:
-    * for row in ws.iter_rows(...):
-      * for cell in row:
-        -> cell.value and isinstance(...) and cell.value.startswith(...)?
-  -> Return(result)
-  -> Return(...)
 ! except Exception
+try:
+! except Exception
+try:
+! except Exception
+try:
+! except Exception
+try:
+! except Exception
+try:
+! except Exception
+try:
+! except Exception
+try:
+! except Exception
+-> failed > 0?
+-> Return(result)
 ```
 
 ### Logic Map Legend
@@ -942,6 +940,13 @@ async def handle_read_skill_document(arguments: dict[str, Any], search_engine) -
 ```
 > Handle read_skill_document tool calls (standalone version for HTTP server).
 
+### run_phase6_rigor_scorecard() - scientific_evaluation.py:816
+
+```python
+def run_phase6_rigor_scorecard() -> PhaseResult
+```
+> Score each scientific rigor feature from the paper.
+
 ### recalc() - recalc.py:53
 
 ```python
@@ -976,13 +981,6 @@ def test_anthropic_specific_skills()
 def validate_csv(csv_path, base_dir = None)
 ```
 > Validate a DiffDock batch input CSV file.
-
-### main() - main.py:79
-
-```python
-def main(query: Optional[str], files: tuple, mode: str, working_dir: Optional[str], temp_dir: bool, keep_files: bool, verbose: bool, log_file: Optional[str])
-```
-> Run Agentic Data Scientist with a query.
 
 ## Side Effects (Detailed)
 
@@ -1065,20 +1063,37 @@ def main(query: Optional[str], files: tuple, mode: str, working_dir: Optional[st
 
 ## Import Verification
 
-**Summary:** 1106 passed, 0 failed
+**Summary:** 1175 passed, 0 failed
 
 ## Quick Verification
 
 ```bash
 # Check import health
-python -c "import kosmos; print('OK')"
+python -c "import Kosmos; print('OK')"
 
 # Run tests
 pytest tests/ -x -q
 
 # CLI help
-python -m kosmos --help
+python -m Kosmos --help
 ```
+
+## Investigation Targets (for Deep Crawl)
+
+**High-uncertainty modules (20):** base.py (0.5), extract_form_field_info.py (0.5), base.py (0.5), base.py (0.5), extract_form_field_info.py (0.5), base.py (0.5)
+
+**Ambiguous interfaces (30):** main() in 30 modules
+
+**Traced entry→side-effect paths (10):** compare_runs.py → 1 module hops → file, env, api; scientific_evaluation.py → 1 module hops → file, env, api; eda_analyzer.py → 1 module hops → file, api; build_decision_tree.py → 1 module hops → file; build_decision_tree.py → 1 module hops → file
+  *(Note: hop counts are module-level estimates; actual function call depth may differ)*
+
+**Coupling anomalies (6):** config.py ↔ anthropic.py (no imports, 100% co-modified), experiment_designer.py ↔ research_director.py (no imports, 80% co-modified), research_director.py ↔ code_generator.py (no imports, 80% co-modified), research_director.py ↔ run.py (no imports, 80% co-modified)
+
+**Shared mutable state (1):** results in run_phase2_tests.py
+
+**Convention deviations (1):** class_init_typed_injection (36 violations)
+
+**Domain entities (20):** AflowMaterial, ApprovalRequest, BatchRequest, BatchResponse, CitrinationData, ConnectomeDataset, DifferentialExpressionResult, ExperimentDesignRequest
 
 ## Complexity Hotspots
 
@@ -1090,66 +1105,66 @@ python -m kosmos --help
 | 36 | `load_from_github` | src/claude_skills_mcp_backend/skill_loader.py |
 | 34 | `create_compression_callback` | agents/adk/event_compression.py |
 | 29 | `handle_read_skill_document` | src/claude_skills_mcp_backend/mcp_handlers.py |
+| 28 | `run_phase6_rigor_scorecard` | Kosmos/evaluation/scientific_evaluation.py |
 | 28 | `recalc` | document-skills/xlsx/recalc.py |
 | 27 | `test_anthropic_specific_skills` | backend/tests/test_integration.py |
 | 26 | `validate_csv` | diffdock/scripts/prepare_batch_csv.py |
 | 25 | `main` | agentic_data_scientist/cli/main.py |
 | 25 | `scan_paper_directory` | kosmos-claude-scientific-writer/scientific_writer/utils.py |
-| 25 | `run_with_progress_async` | cli/commands/run.py |
 
 ## Import Analysis
 
 ### Architectural Layers
 
-**FOUNDATION** (92 modules)
+**FOUNDATION** (94 modules)
 
 | Module | Imported By | Imports |
 |--------|-------------|---------|
-| `kosmos.core.logging` | 136 | 1 |
-| `kosmos.config` | 51 | 1 |
-| `kosmos.models.hypothesis` | 46 | 1 |
-| `kosmos.literature.base_client` | 34 | 1 |
-| `kosmos.models.experiment` | 27 | 2 |
-| `kosmos.core.llm` | 26 | 7 |
+| `kosmos.core.logging` | 140 | 1 |
+| `kosmos.config` | 53 | 1 |
+| `kosmos.models.hypothesis` | 48 | 1 |
+| `kosmos.literature.base_client` | 35 | 1 |
+| `kosmos.models.experiment` | 30 | 3 |
+| `kosmos.core.llm` | 27 | 8 |
+| `kosmos.models.result` | 27 | 1 |
 | `kosmos` | 25 | 2 |
-| `kosmos.models.result` | 25 | 1 |
 | `kosmos-reference.kosmos-agentic-data-scientist.src.agentic_data_scientist` | 20 | 0 |
 | `kosmos.world_model.models` | 16 | 0 |
-| *...and 82 more* | | |
+| *...and 84 more* | | |
 
-**CORE** (298 modules)
+**CORE** (302 modules)
 
 | Module | Imported By | Imports |
 |--------|-------------|---------|
-| `kosmos.agents.research_director` | 20 | 16 |
+| `kosmos.agents.research_director` | 22 | 28 |
+| `kosmos.execution.executor` | 10 | 7 |
+| `kosmos.agents.hypothesis_generator` | 9 | 11 |
 | `kosmos.knowledge.vector_db` | 9 | 4 |
-| `kosmos.execution.executor` | 8 | 5 |
+| `kosmos.safety.code_validator` | 9 | 4 |
+| `kosmos.core.convergence` | 8 | 5 |
 | `kosmos.knowledge.graph` | 8 | 3 |
-| `kosmos.safety.code_validator` | 8 | 4 |
-| `kosmos.core.providers.anthropic` | 7 | 8 |
-| `kosmos.agents.hypothesis_generator` | 6 | 10 |
-| `kosmos.cli.main` | 6 | 9 |
-| `kosmos.core.async_llm` | 6 | 4 |
-| `kosmos.literature.unified_search` | 6 | 7 |
-| *...and 288 more* | | |
+| `kosmos.agents.data_analyst` | 7 | 5 |
+| `kosmos.core.providers.anthropic` | 7 | 9 |
+| `kosmos.execution.code_generator` | 7 | 7 |
+| *...and 292 more* | | |
 
-**ORCHESTRATION** (146 modules)
+**ORCHESTRATION** (147 modules)
 
 | Module | Imported By | Imports |
 |--------|-------------|---------|
-| `kosmos.core.workflow` | 23 | 2 |
+| `kosmos.core.workflow` | 26 | 2 |
 | `kosmos.workflow.research_loop` | 10 | 9 |
-| `kosmos.world_model.factory` | 6 | 4 |
-| `kosmos.agents.literature_analyzer` | 4 | 11 |
-| `kosmos.core.cache_manager` | 4 | 3 |
-| `kosmos.hypothesis.novelty_checker` | 4 | 8 |
-| `kosmos.agents.experiment_designer` | 3 | 10 |
+| `kosmos.world_model.factory` | 7 | 5 |
+| `kosmos.agents.experiment_designer` | 6 | 12 |
+| `kosmos.agents.literature_analyzer` | 5 | 11 |
+| `kosmos.core.cache_manager` | 5 | 3 |
 | `kosmos.claude.skills.kosmos-e2e-testing.lib.config_manager` | 2 | 1 |
+| `kosmos.analysis.summarizer` | 2 | 4 |
 | `kosmos.core.feedback` | 2 | 4 |
 | `kosmos.core.memory` | 2 | 5 |
-| *...and 136 more* | | |
+| *...and 137 more* | | |
 
-**LEAF** (257 modules)
+**LEAF** (259 modules)
 
 | Module | Imported By | Imports |
 |--------|-------------|---------|
@@ -1157,18 +1172,18 @@ python -m kosmos --help
 | `kosmos.alembic.versions.dc24ead48293_add_profiling_tables` | 0 | 0 |
 | `kosmos.alembic.versions.fb9e61f33cbf_add_performance_indexes` | 0 | 0 |
 | `kosmos.docs.conf` | 0 | 0 |
+| `kosmos.evaluation.personas.compare_runs` | 0 | 0 |
+| `kosmos.evaluation.personas.run_persona_eval` | 0 | 0 |
 | `kosmos.examples.02_biology_gene_expression` | 0 | 0 |
 | `kosmos.examples.03_placeholder` | 0 | 0 |
 | `kosmos.examples.04_placeholder` | 0 | 0 |
 | `kosmos.examples.05_placeholder` | 0 | 0 |
-| `kosmos.examples.06_placeholder` | 0 | 0 |
-| `kosmos.examples.07_placeholder` | 0 | 0 |
-| *...and 247 more* | | |
+| *...and 249 more* | | |
 
 ### Circular Dependencies
 
-- `kosmos.core.llm` <-> `kosmos.core.providers.anthropic`
 - `kosmos.world_model` <-> `kosmos.world_model.artifacts`
+- `kosmos.core.llm` <-> `kosmos.core.providers.anthropic`
 
 ### Orphan Candidates
 
@@ -1182,10 +1197,10 @@ python -m kosmos --help
 
 ### External Dependencies
 
-*119 third-party packages:*
+*121 third-party packages:*
 
-`Bio`, `PIL`, `PyPDF2`, `alembic`, `anndata`, `arboreto`, `arviz`, `arxiv`, `ase`, `atexit`, `bibtexparser`, `bioservices`, `cProfile`, `chembl_webresource_client`, `chromadb`, `claude_agent_sdk`, `cryptography`, `csv`, `datamol`, `deepchem`, `defusedxml`, `difflib`, `docker`, `dotenv`, `drugbank_downloader`, `email`, `esm`, `ete3`, `fake_domain_lib`, `fitz`
-*...and 89 more*
+`Bio`, `PIL`, `PyPDF2`, `__future__`, `alembic`, `anndata`, `arboreto`, `arviz`, `arxiv`, `ase`, `atexit`, `bibtexparser`, `bioservices`, `cProfile`, `chembl_webresource_client`, `chromadb`, `claude_agent_sdk`, `contextvars`, `cryptography`, `csv`, `datamol`, `deepchem`, `defusedxml`, `difflib`, `docker`, `dotenv`, `drugbank_downloader`, `email`, `esm`, `ete3`
+*...and 91 more*
 
 ## Cross-Module Calls
 
@@ -1193,16 +1208,16 @@ python -m kosmos --help
 
 | Function | Call Sites | Modules |
 |----------|------------|---------|
-| `fda_query.FDACache.set` | 267 | 76 |
-| `main` | 203 | 132 |
-| `get_config` | 85 | 39 |
+| `fda_query.FDACache.set` | 277 | 79 |
+| `main` | 206 | 135 |
+| `get_config` | 90 | 41 |
 | `reset_config` | 82 | 7 |
-| `get_world_model` | 58 | 13 |
-| `reset_world_model` | 41 | 9 |
+| `get_world_model` | 59 | 14 |
+| `reset_world_model` | 42 | 10 |
 | `get_icon` | 36 | 10 |
-| `model_to_dict` | 33 | 15 |
-| `print_error` | 32 | 9 |
-| `get_bounding_box_messages` | 30 | 1 |
+| `print_error` | 33 | 9 |
+| `model_to_dict` | 32 | 14 |
+| `get_session` | 31 | 13 |
 
 ## Git History Analysis
 
@@ -1216,28 +1231,33 @@ python -m kosmos --help
 
 | Risk | File | Factors |
 |------|------|---------|
-| 0.96 | `config.py` | churn:23 hotfix:14 authors:4 |
-| 0.82 | `research_director.py` | churn:17 hotfix:13 authors:3 |
-| 0.71 | `llm.py` | churn:11 hotfix:5 authors:3 |
-| 0.68 | `executor.py` | churn:9 hotfix:5 authors:3 |
-| 0.67 | `run.py` | churn:11 hotfix:9 authors:2 |
+| 0.96 | `config.py` | churn:27 hotfix:18 authors:4 |
+| 0.83 | `research_director.py` | churn:21 hotfix:17 authors:3 |
+| 0.70 | `llm.py` | churn:12 hotfix:6 authors:3 |
+| 0.70 | `executor.py` | churn:12 hotfix:8 authors:3 |
+| 0.67 | `code_generator.py` | churn:10 hotfix:8 authors:3 |
 
 ### Freshness
 
-- **Active** (< 30 days): 672 files
-- **Aging** (30-90 days): 132 files
-- **Stale** (90-180 days): 0 files
+- **Active** (< 30 days): 142 files
+- **Aging** (30-90 days): 57 files
+- **Stale** (90-180 days): 602 files
 - **Dormant** (> 180 days): 0 files
 
 **Notable aging files:**
 
 | File | Status | Age | Commits |
 |------|--------|-----|---------|
-| `env.py` | aging | 38d | - |
-| `2ec489a3eb6b_initial_schema.py` | aging | 32d | - |
-| `dc24ead48293_add_profiling_tables.py` | aging | 32d | - |
-| `fb9e61f33cbf_add_performance_indexes.py` | aging | 32d | - |
-| `conf.py` | aging | 32d | - |
+| `__init__.py` | stale | 127d | 2 |
+| `config_manager.py` | stale | 126d | - |
+| `provider_detector.py` | stale | 126d | - |
+| `report_generator.py` | stale | 126d | - |
+| `test_runner.py` | stale | 126d | - |
+| `compare_runs.py` | aging | 53d | 1 |
+| `run_persona_eval.py` | aging | 52d | 3 |
+| `run_phase2_tests.py` | aging | 52d | 3 |
+| `scientific_evaluation.py` | aging | 52d | 4 |
+| `__init__.py` | aging | 48d | 2 |
 
 ### Hidden Coupling
 
@@ -1246,14 +1266,58 @@ python -m kosmos --help
 | File A | File B | Co-changes |
 |--------|--------|------------|
 | `config.py` | `anthropic.py` | 5 |
+| `experiment_designer.py` | `research_director.py` | 4 |
+| `research_director.py` | `code_generator.py` | 4 |
+| `research_director.py` | `run.py` | 4 |
 | `anthropic.py` | `openai.py` | 4 |
 | `config.py` | `litellm_provider.py` | 4 |
-| `__init__.py` | `artifacts.py` | 3 |
-| `research_director.py` | `run.py` | 3 |
-| `config.py` | `openai.py` | 3 |
-| `anthropic.py` | `litellm_provider.py` | 3 |
-| `config.py` | `config.py` | 3 |
-| `config.py` | `factory.py` | 3 |
+| `experiment_designer.py` | `code_generator.py` | 3 |
+| `experiment_designer.py` | `config.py` | 3 |
+| `hypothesis_generator.py` | `config.py` | 3 |
+| `research_director.py` | `config.py` | 3 |
+
+### Function-Level Hotspots
+
+*Most volatile functions (by commit frequency):*
+
+| Risk | Function | File | Commits | Hotfixes |
+|------|----------|------|---------|----------|
+| 0.88 | `ResearchDirectorAgent` | research_director.py | 15 | 46 |
+| 0.83 | `KosmosConfig` | config.py | 13 | 13 |
+| 0.75 | `ClaudeClient` | llm.py | 10 | 12 |
+| 0.73 | `AnthropicProvider` | anthropic.py | 8 | 11 |
+| 0.67 | `TTestComparisonCodeTemplate` | code_generator.py | 7 | 10 |
+| 0.67 | `run_with_progress` | run.py | 7 | 14 |
+| 0.67 | `OpenAIProvider` | openai.py | 7 | 9 |
+| 0.65 | `ExperimentDesignerAgent` | experiment_designer.py | 8 | 12 |
+| 0.64 | `DockerSandbox` | sandbox.py | 6 | 4 |
+| 0.64 | `CorrelationAnalysisCodeTemplate` | code_generator.py | 6 | 9 |
+
+### Change Clusters
+
+*Files that form change groups (modify one → check all):*
+
+| Cluster | Files | Co-changes |
+|---------|-------|------------|
+| 1 | `experiment_designer.py`, `hypothesis_generator.py`, `research_director.py`, `config.py`, `run.py`, `config.py`, `anthropic.py`, `factory.py`, `litellm_provider.py`, `openai.py`, `code_generator.py`, `executor.py` | 52 |
+| 2 | `__init__.py`, `artifacts.py` | 3 |
+
+### Velocity Trends
+
+*Files with accelerating or decelerating churn:*
+
+| File | Trend | Monthly |
+|------|-------|---------|
+| `config.py` | decelerating | [22, 1, 0, 4, 0, 0] |
+| `research_director.py` | decelerating | [12, 5, 1, 3, 0, 0] |
+| `llm.py` | decelerating | [9, 2, 0, 1, 0, 0] |
+| `executor.py` | decelerating | [4, 5, 1, 2, 0, 0] |
+| `run.py` | decelerating | [9, 2, 0, 1, 0, 0] |
+| `experiment_designer.py` | decelerating | [7, 0, 0, 4, 0, 0] |
+| `main.py` | decelerating | [9, 1, 0, 0, 0, 0] |
+| `anthropic.py` | decelerating | [6, 2, 0, 1, 0, 0] |
+| `artifacts.py` | decelerating | [2, 7, 0, 0, 0, 0] |
+| `convergence.py` | decelerating | [5, 0, 0, 3, 0, 0] |
 
 ## Side Effects
 
@@ -1271,21 +1335,21 @@ python -m kosmos --help
 - `subprocess.run` in provider_detector.py:59
 - `subprocess.run` in test_runner.py:120
 - `subprocess.run` in test_runner.py:186
-- `subprocess.run` in setup_environment.py:47
+- `subprocess.run` in run_persona_eval.py:196
 
 ### FILE
 - `json.dumps` in report_generator.py:105
-- `json.dumps` in biorxiv_search.py:432
-- `json.dumps` in query_clinicaltrials.py:215
-- `json.dump` in query_clinpgx.py:106
-- `xml_file.write_bytes` in unpack.py:24
+- `json.dump` in compare_runs.py:282
+- `json.dumps` in run_persona_eval.py:101
+- `json.dump` in run_persona_eval.py:143
+- `json.dump` in run_phase2_tests.py:569
 
 ### DB
 - `cursor.execute` in smoke-test.py:138
-- `session.commit` in experiment_designer.py:783
-- `session.commit` in hypothesis_generator.py:469
-- `cursor.execute` in experiment_cache.py:247
-- `cursor.execute` in experiment_cache.py:264
+- `molecule.filter` in example_queries.py:41
+- `molecule.filter` in example_queries.py:68
+- `target.filter` in example_queries.py:97
+- `activity.filter` in example_queries.py:117
 
 ### API
 - `requests.Session` in biorxiv_search.py:40
@@ -1293,6 +1357,35 @@ python -m kosmos --help
 - `requests.get` in query_clinicaltrials.py:110
 - `requests.get` in query_clinpgx.py:36
 - `requests.get` in query_clinpgx.py:55
+
+## Security Concerns
+
+*Code injection vectors detected (exec/eval/compile):*
+
+- **exec()** in `profiling.py:272`
+- **exec()** in `executor.py:617`
+- **compile()** in `test_req_daa_generation.py:152`
+- **exec()** in `test_req_daa_generation.py:157`
+
+## Database Queries (String Literals)
+
+| Query | Location |
+|-------|----------|
+| `SELECT name FROM sqlite_master WHERE type='table'` | smoke-test.py:138 |
+| `Get a DOM element by tag and identifier.          Finds an e` | utilities.py:83 |
+| `Search drugs by name          Args:             name: Drug n` | drugbank_helper.py:278 |
+| `Search for entries by keywords or molecular properties.     ` | kegg_api.py:72 |
+| `Filter molecules based on substructure patterns.      Args: ` | substructure_filter.py:113 |
+| `Search for files matching a pattern.      Parameters     ---` | file_ops.py:509 |
+| `Get a DOM element by tag and identifier.          Finds an e` | utilities.py:83 |
+| `Examples:   # Convert all PDFs in a directory   python conve` | convert_literature.py:184 |
+| `Get a DOM element by tag and identifier.          Finds an e` | utilities.py:83 |
+| `Examples:   # Convert all PDFs in a directory   python conve` | convert_literature.py:184 |
+| `Path or pattern to match documents. Examples: 'scripts/examp` | mcp_handlers.py:202 |
+| `Path or pattern to match documents. Examples: 'scripts/examp` | mcp_proxy.py:78 |
+| `Update version in a file using regex pattern.      Parameter` | sync-version.py:41 |
+| `Delete from both caches.` | cache.py:658 |
+| `Invalidate cache entries matching a pattern.          Args:` | claude_cache.py:337 |
 
 ## Environment Variables
 
@@ -1303,7 +1396,7 @@ python -m kosmos --help
 | `AGENT_MODEL` | - | **Yes** | agent.py:13 |
 | `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` | - | **Yes** | batch_convert.py:300 |
 | `AZURE_DOCUMENT_INTELLIGENCE_KEY` | - | **Yes** | batch_convert.py:301 |
-| `CLAUDE_BASE_URL` | - | **Yes** | anthropic.py:106 |
+| `CLAUDE_BASE_URL` | - | **Yes** | anthropic.py:107 |
 | `DEEPSEEK_API_KEY` | - | **Yes** | test_litellm_provider.py:62 |
 | `FDA_API_KEY` | - | **Yes** | fda_examples.py:299 |
 | `KOSMOS_SKILLS_DIR` | - | **Yes** | skill_loader.py:149 |
@@ -1323,11 +1416,11 @@ python -m kosmos --help
 
 ## Test Coverage
 
-**205** test files, **~3693** test functions
+**207** test files, **~3721** test functions
 
 | Type | Files |
 |------|-------|
-| `unit/` | 98 |
+| `unit/` | 100 |
 | `requirements/` | 58 |
 | `integration/` | 32 |
 | `e2e/` | 12 |
@@ -1343,84 +1436,114 @@ python -m kosmos --help
 - **BUG**: 5
 - **OPTIMIZE**: 3
 
+## Silent Failures
+
+*Exception handlers that may hide errors:*
+
+| Pattern | Exception Type | Location |
+|---------|---------------|----------|
+| - | broad | `provider_detector.py:25` |
+| - | broad | `provider_detector.py:39` |
+| - | broad | `provider_detector.py:52` |
+| - | broad | `provider_detector.py:65` |
+| - | broad | `provider_detector.py:100` |
+| - | broad | `provider_detector.py:127` |
+| - | broad | `benchmark.py:93` |
+| - | broad | `e2e-runner.py:65` |
+| - | broad | `e2e-runner.py:111` |
+| - | broad | `e2e-runner.py:152` |
+| - | broad | `e2e-runner.py:201` |
+| - | broad | `e2e-runner.py:241` |
+| - | broad | `e2e-runner.py:279` |
+| - | broad | `e2e-runner.py:310` |
+| log_and_swallow | broad | `e2e-runner.py:332` |
+| - | broad | `sanity-test.py:60` |
+| - | broad | `sanity-test.py:98` |
+| - | broad | `smoke-test.py:26` |
+| - | broad | `smoke-test.py:44` |
+| except_pass | - | `smoke-test.py:57` |
+
+## Deprecated APIs
+
+*Functions, classes, or code marked as deprecated:*
+
+- # DEPRECATED: Use review_confirmation agents instead (comment) — utils.py:98
+
 ## Decorator Usage
 
-- `@patch`: 506
-- `@fixture`: 386
+- `@patch`: 509
+- `@fixture`: 389
 - `@requirement`: 335
 - `@priority`: 330
-- `@asyncio`: 202
-- `@unit`: 155
-- `@dataclass`: 111
-- `@staticmethod`: 94
-- `@integration`: 42
-- `@property`: 40
+- `@asyncio`: 209
+- `@unit`: 159
+- `@dataclass`: 115
+- `@staticmethod`: 95
+- `@classmethod`: 44
+- `@property`: 42
 
 ## Async Patterns
 
-- Async functions: 423
-- Sync functions: 8821
+- Async functions: 440
+- Sync functions: 8944
 - Async for loops: 22
 - Async context managers: 21
+
+### Async/Sync Violations
+
+*Blocking calls detected inside async functions:*
+
+- **blocking_sleep**: `time.sleep` in `main` — cli.py:227
 
 ## Testing Idioms
 
 > **How to use:** Use this test as a template for writing new tests.
 > It demonstrates the mocking and assertion patterns used in this codebase.
 
-**Patterns used:** `pytest.fixture`, `unittest.mock.patch`, `pytest.mark`, `unittest.mock`, `Mock`
+**Patterns used:** `pytest.fixture`, `unittest.mock`, `pytest.mark`
 
-**Example:** `tests/unit/hypothesis/test_novelty_checker.py` (49 lines)
+**Example:** `tests/unit/hypothesis/test_testability.py` (40 lines)
 
 ```python
-"""Tests for novelty_checker module."""
+"""Tests for testability analyzer."""
 
 import pytest
 from unittest.mock import Mock, patch
-from kosmos.hypothesis.novelty_checker import NoveltyChecker
-from kosmos.models.hypothesis import Hypothesis
+from kosmos.hypothesis.testability import TestabilityAnalyzer
+from kosmos.models.hypothesis import Hypothesis, ExperimentType
 
 @pytest.fixture
-def novelty_checker():
-    return NoveltyChecker(similarity_threshold=0.75, use_vector_db=False)
+def testability_analyzer():
+    return TestabilityAnalyzer(testability_threshold=0.3, use_llm_for_assessment=False)
 
 @pytest.fixture
-def sample_hypothesis():
+def testable_hypothesis():
     return Hypothesis(
-        research_question="Test question",
-        statement="Attention mechanism improves transformer performance",
-        rationale="Prior work shows attention captures dependencies",
+        research_question="How does X affect Y?",
+        statement="Increasing parameter X will improve metric Y by 20%",
+        rationale="Prior work shows X affects Y through mechanism Z with measurable effects",
         domain="machine_learning"
     )
 
 @pytest.mark.unit
-class TestNoveltyChecker:
-    def test_init(self, novelty_checker):
-        assert novelty_checker.similarity_threshold == 0.75
+class TestTestabilityAnalyzer:
+    def test_init(self, testability_analyzer):
+        assert testability_analyzer.testability_threshold == 0.3
 
-    @patch('kosmos.hypothesis.novelty_checker.UnifiedLiteratureSearch')
-    @patch('kosmos.hypothesis.novelty_checker.get_session')
-    def test_check_novelty_high(self, mock_session, mock_search, novelty_checker, sample_hypothesis):
-        mock_search_inst = Mock()
-        mock_search_inst.search.return_value = []
-        mock_search.return_value = mock_search_inst
+    def test_analyze_testable_hypothesis(self, testability_analyzer, testable_hypothesis):
+        report = testability_analyzer.analyze_testability(testable_hypothesis)
 
-        mock_sess = Mock()
-        mock_sess.query.return_value.filter.return_value.all.return_value = []
-        mock_session.return_value = mock_sess
+        assert report.testability_score > 0.3
+        assert report.is_testable is True
+        assert len(report.suggested_experiments) > 0
+        assert report.primary_experiment_type in [ExperimentType.COMPUTATIONAL, ExperimentType.DATA_ANALYSIS]
 
-        report = novelty_checker.check_novelty(sample_hypothesis)
+    def test_suggest_experiment_types(self, testability_analyzer, testable_hypothesis):
+        experiments = testability_analyzer._suggest_experiment_types(testable_hypothesis)
 
-        assert report.novelty_score >= 0.8
-        assert report.is_novel is True
-        assert len(report.similar_papers) == 0
-
-    def test_keyword_similarity(self, novelty_checker):
-        text1 = "attention mechanism transformer neural network"
-        text2 = "transformer attention model deep learning"
-        similarity = novelty_checker._keyword_similarity(text1, text2)
-        assert 0.0 <= similarity <= 1.0
-        assert similarity > 0  # Some overlap exists
+        assert len(experiments) == 3  # All 3 types scored
+        assert all("score" in exp for exp in experiments)
+        assert experiments[0]["score"] >= experiments[1]["score"]  # Sorted by score
 
 ```
 

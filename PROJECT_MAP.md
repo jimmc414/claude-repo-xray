@@ -323,8 +323,8 @@ The R14 output contains:
 
 | File | Content |
 |------|---------|
-| `examples/kosmos_xray_output_v31.md` | X-Ray markdown output for Kosmos (802 files) |
-| `examples/KOSMOS_DEEP_ONBOARD.md` | Deep crawl onboarding document for Kosmos (~60K words) |
+| `examples/KOSMOS_XRAY.md` | X-Ray markdown output for Kosmos (802 files) |
+| `examples/KOSMOS_DEEP_ONBOARD.md` | Deep crawl R14 onboarding document for Kosmos (~58K words) |
 | `examples/KOSMOS_DEEP_ONBOARD_VALIDATION.md` | Validation report for the Kosmos deep crawl |
 | `examples/KOSMOS_ONBOARD.md` | Earlier repo_xray agent output for Kosmos |
 | `examples/KOSMOS_ONBOARD_v2.md` | Second iteration repo_xray agent output |

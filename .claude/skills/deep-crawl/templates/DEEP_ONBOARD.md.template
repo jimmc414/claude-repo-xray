@@ -4,7 +4,33 @@
 > This document: ~{DOC_TOKENS} tokens
 > Generated: {TIMESTAMP} from commit `{GIT_HASH}`
 > Crawl: {TASKS_COMPLETED}/{TASKS_PLANNED} tasks, {MODULES_READ} modules read
-> For complete class skeletons and import graphs: `/tmp/xray/xray.md`
+> For complete class skeletons and import graphs: see companion file `xray.md`
+
+---
+
+## How to Use This Document
+
+This is a **reference document**, not a linear read. It loads into your context
+via CLAUDE.md and is consulted as needed — you do not need to read it end-to-end.
+
+**Why it's large:** Every `[FACT]` claim includes a `file:line` citation so you
+can act on findings without opening source files. Condensing the document would
+remove these citations and force you to re-discover information through file reads.
+The document's size is the cost of not needing to open files. With prompt caching,
+subsequent sessions load it at ~10% of the initial token cost.
+
+**How to navigate:**
+- **Fixing a bug?** → Gotchas (severity-tagged by subsystem), then Module Index for the affected module
+- **Adding a feature?** → Extension Points, then the relevant Change Playbook
+- **Understanding a flow?** → Critical Paths (end-to-end traces with every hop)
+- **Changing a hub module?** → Change Impact Index (blast radius per module)
+- **Setting up the environment?** → Environment Bootstrap
+- **What not to read?** → Hazards
+
+**X-Ray reference data:** The companion file `xray.md` (provided alongside this
+document) contains raw structural data: full import graphs, all class skeletons,
+dependency distances, and investigation targets. If you were not given `xray.md`,
+ask the user to provide it or regenerate with: `python xray.py . --output both --out /tmp/xray`.
 
 ---
 
@@ -33,13 +59,13 @@
 global architecture) → Critical Path 1 (understand main flow) → Gotchas
 (Critical + High severity) → remaining sections as needed for specific tasks.
 
-**Also available in X-Ray output** (`/tmp/xray/xray.json` and `/tmp/xray/xray.md`):
-full import graph with layers and hub detection, dependency distances, circular
-dependency detection, dead code / orphan files, cyclomatic complexity per
-function, side effect categorization (DB/API/file/subprocess), git risk scores,
-co-modification coupling, author expertise, type hint coverage, environment
-variable extraction with defaults, CLI argument parsing, Pydantic validator
-constraints, TODO/FIXME markers, test file mapping, investigation targets.
+**Also available in companion `xray.md`:** full import graph with layers and hub
+detection, dependency distances, circular dependency detection, dead code / orphan
+files, cyclomatic complexity per function, side effect categorization
+(DB/API/file/subprocess), git risk scores, co-modification coupling, author
+expertise, type hint coverage, environment variable extraction with defaults, CLI
+argument parsing, Pydantic validator constraints, TODO/FIXME markers, test file
+mapping, investigation targets.
 
 These signals informed this document's investigation but are not repeated here.
 

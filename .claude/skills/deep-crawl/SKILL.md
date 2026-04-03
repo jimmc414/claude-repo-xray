@@ -972,11 +972,17 @@ Log: `Step 5c: {total} tasks traced, {TRACE_FAILS} gaps, {recovered} recovered`
 
 The orchestrator writes these directly (no sub-agent needed — they are small, <500 words total):
 
-- **Identity** — from xray.md (already in context from Phase 1)
+- **Identity** — from xray.md and investigation findings. 1-3 sentences: what it is, what it does, what the stack is. Verify framework claims against investigation findings — only list a framework as part of the stack if the investigation confirmed it is actively used (mounted routes, configured endpoints), not merely imported. If a framework is imported but not wired up, note it as "library dependency, not deployed as service."
 - **Gaps** — from Phase 2 coverage check results
 - **Header metadata** — file count, token count, timestamp, git hash
 - **Footer metadata** — task counts, coverage scope, evidence counts, hub module count, playbook count
-- **Environment Bootstrap** — read assembled `config_surface.md` + cross-cutting findings for external systems. Produce short bootstrap checklist: required services, minimum env vars, setup commands, verify command. Write to `sections/environment_bootstrap.md`.
+- **Environment Bootstrap** — read assembled `config_surface.md` + cross-cutting findings for external systems. Produce bootstrap checklist with:
+  - **Required services** — only list services that block core functionality. Services with graceful degradation (e.g., caches, optional databases) should be listed as "Optional (degrades gracefully to X)."
+  - **Minimum env vars** — distinguish required vs optional with defaults.
+  - **Setup commands** — include install, db init, and a basic run command.
+  - **Verify command** — a command that proves the environment works (e.g., `pytest`, `make test`, or the project's health check).
+  - **How to run** — the actual command to start the application (not just setup).
+  Write to `sections/environment_bootstrap.md`.
 
 Write to `/tmp/deep_crawl/sections/header.md`, `/tmp/deep_crawl/sections/identity.md`, `/tmp/deep_crawl/sections/gaps.md`, `/tmp/deep_crawl/sections/environment_bootstrap.md`, `/tmp/deep_crawl/sections/footer.md`.
 
@@ -1425,6 +1431,12 @@ Write each check to VALIDATION_REPORT.md:
 **Action:** {none / corrected in document / noted as gap}
 ```
 
+**Identity verification (mandatory, not counted toward 10 spot checks):**
+Read the Identity section. For each technology/framework mentioned in the stack description,
+verify it is actively used (not just imported) by checking for: mounted routes (web frameworks),
+registered commands (CLI frameworks), configured connections (databases), active service
+endpoints. If a framework is mentioned but not actively used, flag as INACCURATE.
+
 #### 5c. Redundancy Check
 
 For each section: "Is this content literally duplicated from another section in this document?" If yes, cut the duplicate. Do NOT cut synthesized information just because the raw data is grepable — the synthesis (cross-module patterns, behavioral descriptions, contextual annotations) is the value.
@@ -1480,6 +1492,7 @@ Write validation results to `/tmp/deep_crawl/VALIDATION_REPORT.md`.
 ```bash
 mkdir -p docs
 cp /tmp/deep_crawl/DEEP_ONBOARD.md docs/DEEP_ONBOARD.md
+cp /tmp/xray/xray.md docs/xray.md
 ```
 
 **Step 2:** Configure CLAUDE.md for automatic delivery:
