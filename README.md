@@ -20,6 +20,31 @@ Most users only need Phase 1. Phase 2 pays for itself on codebases where multipl
 - **Phase 1 output**: [X-Ray scan](examples/KOSMOS_XRAY.md) — deterministic map in ~15K tokens. Skeletons, dependency graph, complexity hotspots, git risk, side effects, security concerns, silent failures. Produced in seconds.
 - **Phase 2 output**: [Deep Crawl onboarding document](examples/KOSMOS_DEEP_ONBOARD.md) — ~58K words of verified behavioral documentation with 444 `[FACT]` citations. Critical paths, module analysis, gotchas, change playbooks, error handling — everything a fresh AI session needs to work confidently in the codebase. Validation: 12/12 standard questions, 10/10 spot checks, adversarial PASS.
 
+### Using the Output
+
+Once generated, attach the output files to your AI session prompt. For Kosmos, that would be [KOSMOS_XRAY.md](examples/KOSMOS_XRAY.md) and [KOSMOS_DEEP_ONBOARD.md](examples/KOSMOS_DEEP_ONBOARD.md). Here's what that looks like:
+
+```
+I'm providing two reference documents for the Kosmos codebase:
+
+1. KOSMOS_XRAY.md — A deterministic structural scan (architecture, dependencies,
+   complexity hotspots, risk signals)
+2. KOSMOS_DEEP_ONBOARD.md — A comprehensive onboarding document with verified
+   code citations covering critical paths, module behavior, error handling,
+   gotchas, and change playbooks
+
+Use these documents to orient yourself before reading or modifying any code.
+When the documents reference specific files and line numbers, trust those as
+your starting points but verify current state since code may have changed
+since generation.
+
+The codebase is located at: /path/to/Kosmos
+
+My task: [describe what you want the AI to do]
+```
+
+If you only ran Phase 1, the X-Ray scan alone is enough for most targeted tasks. Phase 2 adds the most value for open-ended work, complex modifications, or when multiple AI sessions will work on the same codebase over time. A reusable [sample prompt](examples/sample_prompt.md) is included in the examples folder.
+
 ## The Problem
 
 When a fresh AI agent lands in an unfamiliar codebase, it does one of two things: reads files at random and wastes context on implementation details, or reads nothing and guesses. Both produce confident, plausible, wrong suggestions.
@@ -429,38 +454,6 @@ To install the deep crawl skill globally in Claude Code:
 ```
 
 This creates a symlink so `/deep-crawl full` is available in any project directory.
-
-## Using the Output to Onboard an AI
-
-After running Phase 1 (and optionally Phase 2), you'll have one or two files to provide to the AI:
-
-| File | Source | Purpose |
-|------|--------|---------|
-| `xray.md` | Phase 1 scanner | Deterministic codebase map — structure, dependencies, complexity, risk |
-| `DEEP_ONBOARD.md` | Phase 2 deep crawl | Comprehensive behavioral documentation with code citations |
-
-Attach these files to your prompt when starting a new AI session. Here's a sample prompt:
-
-```
-I'm providing two reference documents for the codebase we'll be working in:
-
-1. **xray.md** — A deterministic structural scan of the codebase (architecture,
-   dependencies, complexity hotspots, risk signals)
-2. **DEEP_ONBOARD.md** — A comprehensive onboarding document with verified code
-   citations covering critical paths, module behavior, error handling, gotchas,
-   and change playbooks
-
-Use these documents to orient yourself before reading or modifying any code.
-When the documents reference specific files and line numbers, trust those as
-your starting points but verify current state since code may have changed
-since generation.
-
-The codebase is located at: /path/to/project
-
-My task: [describe what you want the AI to do]
-```
-
-If you only ran Phase 1, omit the `DEEP_ONBOARD.md` reference — the X-Ray scan alone is enough for most targeted tasks. The deep crawl document adds the most value for open-ended work, complex modifications, or when multiple AI sessions will work on the same codebase over time.
 
 ## License
 
