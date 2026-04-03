@@ -4,7 +4,70 @@
 > This document: ~{DOC_TOKENS} tokens
 > Generated: {TIMESTAMP} from commit `{GIT_HASH}`
 > Crawl: {TASKS_COMPLETED}/{TASKS_PLANNED} tasks, {MODULES_READ} modules read
-> For complete class skeletons and import graphs: `/tmp/xray/xray.md`
+> For complete class skeletons and import graphs: see companion file `xray.md`
+
+---
+
+## How to Use This Document
+
+This is a **reference document**, not a linear read. It loads into your context
+via CLAUDE.md and is consulted as needed — you do not need to read it end-to-end.
+
+**Why it's large:** Every `[FACT]` claim includes a `file:line` citation so you
+can act on findings without opening source files. Condensing the document would
+remove these citations and force you to re-discover information through file reads.
+The document's size is the cost of not needing to open files. With prompt caching,
+subsequent sessions load it at ~10% of the initial token cost.
+
+**How to navigate:**
+- **Fixing a bug?** → Gotchas (severity-tagged by subsystem), then Module Index for the affected module
+- **Adding a feature?** → Extension Points, then the relevant Change Playbook
+- **Understanding a flow?** → Critical Paths (end-to-end traces with every hop)
+- **Changing a hub module?** → Change Impact Index (blast radius per module)
+- **Setting up the environment?** → Environment Bootstrap
+- **What not to read?** → Hazards
+
+**X-Ray reference data:** The companion file `xray.md` (provided alongside this
+document) contains raw structural data: full import graphs, all class skeletons,
+dependency distances, and investigation targets. If you were not given `xray.md`,
+ask the user to provide it or regenerate with: `python xray.py . --output both --out /tmp/xray`.
+
+---
+
+## Document Map
+
+| Section | What It Covers |
+|---------|---------------|
+| Critical Paths | Entry-to-side-effect call chains with every hop cited |
+| Module Behavioral Index | Per-module behavioral summary, runtime deps, danger flags |
+| Change Impact Index | Hub modules, blast radii, safe vs dangerous changes |
+| Key Interfaces | Most important class/function signatures |
+| Data Contracts | Cross-boundary Pydantic models, schema evolution risks |
+| Error Handling Strategy | Dominant patterns, retries, deviations, exception taxonomy |
+| Shared State | Module-level mutables, singletons, caches, thread safety |
+| Domain Glossary | Codebase-specific terminology |
+| Configuration Surface | Env vars, config files, feature flags |
+| Conventions | Implicit rules with evidence counts |
+| Gotchas | Counterintuitive behaviors, severity-tagged, clustered by subsystem |
+| Hazards | Files that waste context (large, generated, migrations) |
+| Extension Points | Common modification tasks with starting files |
+| Change Playbooks | Step-by-step modification checklists with validation |
+| Reading Order | Suggested file sequence by architectural layer |
+| Environment Bootstrap | Setup instructions and minimum env vars |
+
+**Recommended reading order for new AI sessions:** Shared State (understand
+global architecture) → Critical Path 1 (understand main flow) → Gotchas
+(Critical + High severity) → remaining sections as needed for specific tasks.
+
+**Also available in companion `xray.md`:** full import graph with layers and hub
+detection, dependency distances, circular dependency detection, dead code / orphan
+files, cyclomatic complexity per function, side effect categorization
+(DB/API/file/subprocess), git risk scores, co-modification coupling, author
+expertise, type hint coverage, environment variable extraction with defaults, CLI
+argument parsing, Pydantic validator constraints, TODO/FIXME markers, test file
+mapping, investigation targets.
+
+These signals informed this document's investigation but are not repeated here.
 
 ---
 

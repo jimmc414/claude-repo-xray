@@ -22,6 +22,13 @@ TODO_PATTERNS = [
     r'#\s*(TODO|FIXME|HACK|XXX|BUG|OPTIMIZE)\b[:\s]*(.*)$',
 ]
 
+# Patterns for deprecation markers (comments and warnings)
+DEPRECATION_PATTERNS = [
+    (r'#\s*(deprecated|deprecate)\b[:\s]*(.*)', 'comment'),
+    (r'warnings\.warn\s*\(.*(deprecat)', 'warning'),
+    (r'DeprecationWarning', 'warning'),
+]
+
 
 def analyze_tech_debt(
     files: List[str],
@@ -65,6 +72,7 @@ def analyze_tech_debt(
     }
 
     by_file = {}
+    deprecations = []
 
     for filepath in files:
         try:
@@ -92,6 +100,19 @@ def analyze_tech_debt(
                                     'text': text
                                 })
 
+                    # Deprecation detection
+                    for dep_pattern, source_type in DEPRECATION_PATTERNS:
+                        dep_match = re.search(dep_pattern, line, re.IGNORECASE)
+                        if dep_match:
+                            text = dep_match.group(0).strip()[:80]
+                            deprecations.append({
+                                'file': filepath,
+                                'line': line_num,
+                                'text': text,
+                                'source': source_type,
+                            })
+                            break  # one deprecation match per line
+
                 if file_markers:
                     by_file[filepath] = file_markers
 
@@ -108,6 +129,7 @@ def analyze_tech_debt(
     return {
         "markers": markers,
         "by_file": by_file,
+        "deprecations": deprecations,
         "summary": {
             "total_count": total_count,
             "by_type": by_type

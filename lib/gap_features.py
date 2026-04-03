@@ -2270,6 +2270,7 @@ def _extract_env_vars_from_file_ast(filepath: str) -> List[Dict[str, Any]]:
     - Line number
     """
     env_vars = []
+    seen_lines = set()  # Deduplicate BoolOp + nested Call double-counting
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             source = f.read()
@@ -2277,25 +2278,56 @@ def _extract_env_vars_from_file_ast(filepath: str) -> List[Dict[str, Any]]:
         tree = ast.parse(source)
 
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and _is_getenv_call(node):
+            # Detect `os.getenv('X') or 'default'` patterns (BoolOp with Or)
+            if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+                if len(node.values) >= 2 and isinstance(node.values[0], ast.Call):
+                    call_node = node.values[0]
+                    if _is_getenv_call(call_node) and call_node.args:
+                        var_name = _get_string_value(call_node.args[0])
+                        if var_name and (var_name, node.lineno) not in seen_lines:
+                            seen_lines.add((var_name, node.lineno))
+                            # Also check if getenv itself has a default
+                            default = None
+                            if len(call_node.args) > 1:
+                                default = _get_env_default_value(call_node.args[1])
+                            else:
+                                for kw in call_node.keywords:
+                                    if kw.arg == "default":
+                                        default = _get_env_default_value(kw.value)
+                                        break
+                            env_vars.append({
+                                "variable": var_name,
+                                "default": default,
+                                "fallback_type": "or_fallback",
+                                "required": False,
+                                "file": filepath,
+                                "line": node.lineno
+                            })
+
+            elif isinstance(node, ast.Call) and _is_getenv_call(node):
                 if node.args:
                     var_name = _get_string_value(node.args[0])
-                    if var_name:
+                    if var_name and (var_name, node.lineno) not in seen_lines:
+                        seen_lines.add((var_name, node.lineno))
                         default = None
+                        fallback_type = "none"
                         # Check for second positional argument (default value)
                         if len(node.args) > 1:
                             default = _get_env_default_value(node.args[1])
+                            fallback_type = "explicit_default"
                         # Check for 'default' keyword argument
                         else:
                             for kw in node.keywords:
                                 if kw.arg == "default":
                                     default = _get_env_default_value(kw.value)
+                                    fallback_type = "explicit_default"
                                     break
 
                         env_vars.append({
                             "variable": var_name,
                             "default": default,
-                            "required": default is None,
+                            "fallback_type": fallback_type,
+                            "required": default is None and fallback_type == "none",
                             "file": filepath,
                             "line": node.lineno
                         })
@@ -2305,10 +2337,12 @@ def _extract_env_vars_from_file_ast(filepath: str) -> List[Dict[str, Any]]:
                 if isinstance(node.value, ast.Attribute):
                     if node.value.attr == "environ":
                         var_name = _get_string_value(node.slice)
-                        if var_name:
+                        if var_name and (var_name, node.lineno) not in seen_lines:
+                            seen_lines.add((var_name, node.lineno))
                             env_vars.append({
                                 "variable": var_name,
                                 "default": None,
+                                "fallback_type": "none",
                                 "required": True,  # Direct access is always required
                                 "file": filepath,
                                 "line": node.lineno

@@ -440,6 +440,15 @@ Sub-agents receive these protocol instructions verbatim:
      - Preconditions
      - Side effects
      - Error behavior
+2b. Check for corresponding test files:
+    - Look for tests/test_{module_name}.py, tests/unit/**/test_{module_name}.py,
+      tests/{module_name}_test.py, and any test file importing from this module
+    - If found, scan test function names and docstrings
+    - Note which public functions have test coverage and which don't
+    - Add to findings:
+      Test coverage: {tested_count}/{total_public} public functions tested.
+      Tested: {list}. Untested: {list}.
+      Test file: {path} ({N} test functions)
 3. Record any gotchas
 ```
 
@@ -474,7 +483,25 @@ grep -rn "global " --include="*.py"
 # Async/sync boundaries
 grep -rn "asyncio\.run\|loop\.run_until_complete\|run_coroutine_threadsafe" --include="*.py"
 grep -rn "async def " --include="*.py" | wc -l
+
+# Exception taxonomy (for exception_taxonomy investigations)
+grep -rn "class.*Exception\|class.*Error" --include="*.py"  # custom exception classes
+grep -rn "except.*pass\|except:$" --include="*.py"  # silent failures
+grep -rn "except.*:\s*$\|except Exception" --include="*.py" | head -30  # bare/broad catches
+grep -rn "raise " --include="*.py" | head -40  # raise sites
 ```
+
+**Exception taxonomy investigations (Protocol C):**
+
+When the crawl plan includes an exception taxonomy task, Protocol C agents should:
+1. Find all classes inheriting from Exception or BaseException
+2. Build inheritance tree (which exceptions derive from which)
+3. For each custom exception: where it's raised, where it's caught, whether
+   it crosses module boundaries
+4. Identify uncaught exception paths (raise without corresponding catch in callers)
+5. Identify silent failure patterns: `except: pass`, `except Exception: log`,
+   bare except — these are high-value gotcha candidates
+6. Write to findings/cross_cutting/exception_taxonomy.md
 
 #### Protocol D: Convention Documentation
 
@@ -713,7 +740,7 @@ Launch 5 assembly sub-agents simultaneously (all with `run_in_background: true`)
 | **S1** | Critical Paths | `findings/traces/*.md` | ~11K words |
 | **S2** | Module Behavioral Index, Domain Glossary | `findings/modules/*.md` | ~25K words |
 | **S3a** | Key Interfaces | `findings/modules/*.md` (public API extraction) + `findings/cross_cutting/agent_communication.md` | ~12K words |
-| **S3b** | Error Handling, Shared State | `findings/cross_cutting/{error_handling,initialization,shared_state,database_storage,async_boundaries}.md` + `findings/modules/*.md` (grep for error/exception/retry patterns) | ~14K words |
+| **S3b** | Error Handling, Shared State | `findings/cross_cutting/{error_handling,initialization,shared_state,database_storage,async_boundaries,exception_taxonomy}.md` + `findings/modules/*.md` (grep for error/exception/retry patterns) | ~16K words |
 | **S4** | Configuration Surface, Conventions | `findings/cross_cutting/{configuration,env_dependencies,llm_providers}.md` + `findings/modules/config.md` + `findings/conventions/*.md` | ~16K words |
 
 **Note:** The file lists above are illustrative examples. Adjust filenames to match actual findings on disk. Use `ls /tmp/deep_crawl/findings/{category}/` to discover actual filenames before constructing prompts.
@@ -746,7 +773,7 @@ Your output MUST use exactly one `## ` header per template section assigned to y
 If you are S2 (Module Behavioral Index): for each module ### being assembled, check if it appears in `git.risk`, `git.function_churn`, or `git.velocity` from `/tmp/xray/xray.json`. If it does, append a brief **Historical Risk** note at the end of that module's subsection with: risk score, most-volatile functions, and trend direction. Format: `> **Git risk:** 0.88 — volatile functions: load_config (8 commits, 2 hotfixes). Trend: stable.`
 
 ## S3b Depth Directive
-If you are S3b (Error Handling, Shared State): the Error Handling Strategy section must document the dominant error pattern, per-subsystem deviations, retry strategies, exception hierarchies, and recovery paths. Target: >= 3,500 words for Error Handling alone. Read module findings for error/exception/retry patterns in addition to cross-cutting findings — every module's error handling deviations contribute to this section.
+If you are S3b (Error Handling, Shared State): the Error Handling Strategy section must document the dominant error pattern, per-subsystem deviations, retry strategies, exception hierarchies, and recovery paths. Target: >= 3,500 words for Error Handling alone. Read module findings for error/exception/retry patterns in addition to cross-cutting findings — every module's error handling deviations contribute to this section. If `findings/cross_cutting/exception_taxonomy.md` exists, include it as a subsection under Error Handling: inheritance tree of custom exceptions, raise/catch mapping, uncaught paths, and silent failure patterns (`except: pass`, bare except, log-and-swallow). Silent failures are high-value gotcha candidates — flag them in your gotchas output file.
 
 ## Rules
 - INCLUDE EVERY FINDING. The output context window is 1M tokens. Your section will consume less than 5% of available context. There is no reason to drop, summarize, or condense any finding.
@@ -945,11 +972,17 @@ Log: `Step 5c: {total} tasks traced, {TRACE_FAILS} gaps, {recovered} recovered`
 
 The orchestrator writes these directly (no sub-agent needed — they are small, <500 words total):
 
-- **Identity** — from xray.md (already in context from Phase 1)
+- **Identity** — from xray.md and investigation findings. 1-3 sentences: what it is, what it does, what the stack is. Verify framework claims against investigation findings — only list a framework as part of the stack if the investigation confirmed it is actively used (mounted routes, configured endpoints), not merely imported. If a framework is imported but not wired up, note it as "library dependency, not deployed as service."
 - **Gaps** — from Phase 2 coverage check results
 - **Header metadata** — file count, token count, timestamp, git hash
 - **Footer metadata** — task counts, coverage scope, evidence counts, hub module count, playbook count
-- **Environment Bootstrap** — read assembled `config_surface.md` + cross-cutting findings for external systems. Produce short bootstrap checklist: required services, minimum env vars, setup commands, verify command. Write to `sections/environment_bootstrap.md`.
+- **Environment Bootstrap** — read assembled `config_surface.md` + cross-cutting findings for external systems. Produce bootstrap checklist with:
+  - **Required services** — only list services that block core functionality. Services with graceful degradation (e.g., caches, optional databases) should be listed as "Optional (degrades gracefully to X)."
+  - **Minimum env vars** — distinguish required vs optional with defaults.
+  - **Setup commands** — include install, db init, and a basic run command.
+  - **Verify command** — a command that proves the environment works (e.g., `pytest`, `make test`, or the project's health check).
+  - **How to run** — the actual command to start the application (not just setup).
+  Write to `sections/environment_bootstrap.md`.
 
 Write to `/tmp/deep_crawl/sections/header.md`, `/tmp/deep_crawl/sections/identity.md`, `/tmp/deep_crawl/sections/gaps.md`, `/tmp/deep_crawl/sections/environment_bootstrap.md`, `/tmp/deep_crawl/sections/footer.md`.
 
@@ -1296,8 +1329,13 @@ Step 1: PASS — draft is ~{N} tokens (floor: {min_tokens})
 7. Data Contracts in Critical Paths get `(see Data Contracts)` links.
 8. Environment Bootstrap services get `(see Configuration Surface)` links.
 9. Do NOT rewrite, merge, or remove any content. Only add parenthetical cross-references.
+10. Gotchas sharing a root cause get cross-linked:
+    - Identify gotchas that reference the same file, same function, or same pattern
+    - Add "(related: Gotcha #N — same root cause)" to each member of a cluster
+    - Group criteria: same file within 50 lines, or same function name, or
+      description mentions the same concept (e.g., "exec()" security model)
 
-Log: `Step 2: Added {N} cross-references`
+Log: `Step 2: Added {N} cross-references ({M} gotcha clusters linked)`
 
 **Step 3: Verify completeness.** Two checks:
 - **3a. Standard Questions:** Attempt to answer all 12 standard questions. If any is unanswerable, note in Gaps section (do NOT fabricate content — the assembly agents produced what the investigation found).
@@ -1393,6 +1431,12 @@ Write each check to VALIDATION_REPORT.md:
 **Action:** {none / corrected in document / noted as gap}
 ```
 
+**Identity verification (mandatory, not counted toward 10 spot checks):**
+Read the Identity section. For each technology/framework mentioned in the stack description,
+verify it is actively used (not just imported) by checking for: mounted routes (web frameworks),
+registered commands (CLI frameworks), configured connections (databases), active service
+endpoints. If a framework is mentioned but not actively used, flag as INACCURATE.
+
 #### 5c. Redundancy Check
 
 For each section: "Is this content literally duplicated from another section in this document?" If yes, cut the duplicate. Do NOT cut synthesized information just because the raw data is grepable — the synthesis (cross-module patterns, behavioral descriptions, contextual annotations) is the value.
@@ -1448,6 +1492,7 @@ Write validation results to `/tmp/deep_crawl/VALIDATION_REPORT.md`.
 ```bash
 mkdir -p docs
 cp /tmp/deep_crawl/DEEP_ONBOARD.md docs/DEEP_ONBOARD.md
+cp /tmp/xray/xray.md docs/xray.md
 ```
 
 **Step 2:** Configure CLAUDE.md for automatic delivery:

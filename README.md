@@ -17,8 +17,8 @@ Most users only need Phase 1. Phase 2 pays for itself on codebases where multipl
 
 [Kosmos](https://github.com/jimmc414/Kosmos) is an AI Scientist platform — 802 Python files totaling over 2.4 million tokens. Far too large for any AI context window. Here's what each phase produces:
 
-- **Phase 1 output**: [X-Ray scan](examples/kosmos_xray_output_v31.md) — deterministic map in ~15K tokens. Skeletons, dependency graph, complexity hotspots, git risk, side effects. Produced in seconds.
-- **Phase 2 output**: [Deep Crawl onboarding document](docs/DEEP_ONBOARD.md) — ~60K words of verified behavioral documentation with `file:line` citations throughout. Critical paths, module analysis, gotchas, change playbooks, error handling — everything a fresh AI session needs to work confidently in the codebase.
+- **Phase 1 output**: [X-Ray scan](examples/KOSMOS_XRAY.md) — deterministic map in ~15K tokens. Skeletons, dependency graph, complexity hotspots, git risk, side effects, security concerns, silent failures. Produced in seconds.
+- **Phase 2 output**: [Deep Crawl onboarding document](examples/KOSMOS_DEEP_ONBOARD.md) — ~58K words of verified behavioral documentation with 444 `[FACT]` citations. Critical paths, module analysis, gotchas, change playbooks, error handling — everything a fresh AI session needs to work confidently in the codebase. Validation: 12/12 standard questions, 10/10 spot checks, adversarial PASS.
 
 ## The Problem
 
@@ -38,7 +38,7 @@ A codebase might span 2 million tokens. A context window holds 200K. The agent c
 | Output | ~15K tokens (configurable: 2K-15K) |
 | Dependencies | None. Python 3.8+ stdlib only. |
 | Determinism | Same input produces identical output every time |
-| What it extracts | 37+ signals: AST skeletons, import layers, complexity, git risk, side effects, call graph, hub modules |
+| What it extracts | 42+ signals: AST skeletons, import layers, complexity, git risk, side effects, call graph, hub modules, security concerns, silent failures, async violations, SQL patterns, deprecation markers |
 | What it can't do | Read code semantically. It knows a function has CC=25 and 8 callers. It doesn't know why. |
 
 **Phase 2: Deep Crawl** (LLM-powered investigation, optional)
@@ -89,7 +89,8 @@ Requirements: Python 3.8+. No `pip install`. Layer 2 requires [Claude Code](http
 | **Behavior** | Side effects (DB, API, file, subprocess), cross-module call graph |
 | **History** | Risk scores, co-modification coupling, freshness, author expertise |
 | **Context** | CLI arguments, environment variables, Pydantic validators, linter rules |
-| **Safety** | Hazard files (generated, large, migrations), exclusion patterns |
+| **Safety** | Security concerns (exec/eval/compile), silent failures (bare except, except-pass), hazard files |
+| **Quality** | Async/sync violations, SQL string literals, deprecation markers, env var fallbacks |
 
 A 10K-token source file typically produces a 500-token skeleton. That's a 95% reduction while preserving every public interface and type annotation.
 
@@ -99,7 +100,7 @@ A 10K-token source file typically produces a 500-token skeleton. That's a 95% re
 |--------|--------|---------|----------|
 | `minimal` | ~2K | Skeleton + imports | Quick reconnaissance |
 | `standard` | ~8K | 8 analysis passes | Balanced coverage |
-| (default) | ~15K | All 12 passes | Comprehensive map |
+| (default) | ~15K | All 17 passes | Comprehensive map |
 
 ### Configuration
 
@@ -355,7 +356,7 @@ Calibration runs before the main crawl: three exemplar investigations (one trace
 
 - **Python only.** The scanner uses Python's AST parser. The agent layer and document format are language-agnostic -- a future scanner for TypeScript or Rust could feed into the same pipeline.
 - **Git history required** for risk, coupling, and freshness signals. Works without git, just with fewer signals.
-- **Side effect detection is heuristic.** Pattern matching on function names (`session.commit`, `requests.post`). Has a whitelist to reduce false positives, but won't catch novel patterns.
+- **Side effect detection is heuristic.** Pattern matching on function names (`session.commit`, `requests.post`). Has a whitelist to reduce false positives, but won't catch novel patterns. SQL string detection may flag docstrings containing SQL-like keywords.
 - **Documents go stale.** Code changes but the document stays the same until refresh. A slightly stale onboarding document is better than none.
 - **Deep crawl output is non-deterministic.** Two runs on the same codebase produce different documents. The value comes from investigation and synthesis, not reproducibility. The scanner provides the reproducible foundation.
 
@@ -387,7 +388,8 @@ repo-xray/
 │   └── enrich_onboard.py           Inject git signals into DEEP_ONBOARD.md
 ├── tests/
 │   ├── test_gap_features.py         Gap analysis tests
-│   └── test_investigation_targets.py Signal computation tests
+│   ├── test_investigation_targets.py Signal computation tests
+│   └── test_scanner_enhancements.py v3.2 detection category tests
 ├── docs/
 │   └── PLAN_INCREMENTAL_CRAWL.md    Incremental refresh design
 └── .claude/

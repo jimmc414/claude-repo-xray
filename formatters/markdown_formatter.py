@@ -1018,6 +1018,39 @@ def format_markdown(
                         lines.append(f"- `{e.get('call', '')}` in {Path(e.get('file', '')).name}:{e.get('line', 0)}")
                     lines.append("")
 
+    # Security Concerns
+    security_concerns = results.get("security_concerns", {})
+    if security_concerns and gap.get("security_concerns", True):
+        all_concerns = []
+        for filepath, concerns in security_concerns.items():
+            for c in concerns:
+                all_concerns.append({**c, "file": filepath})
+        if all_concerns:
+            lines.append("## Security Concerns")
+            lines.append("")
+            lines.append("*Code injection vectors detected (exec/eval/compile):*")
+            lines.append("")
+            for c in all_concerns:
+                lines.append(f"- **{c.get('call', '')}()** in `{Path(c.get('file', '')).name}:{c.get('line', 0)}`")
+            lines.append("")
+
+    # SQL String Literals
+    sql_strings = results.get("sql_strings", {})
+    if sql_strings and gap.get("db_query_patterns", True):
+        all_sql = []
+        for filepath, queries in sql_strings.items():
+            for q in queries:
+                all_sql.append({**q, "file": filepath})
+        if all_sql:
+            lines.append("## Database Queries (String Literals)")
+            lines.append("")
+            lines.append("| Query | Location |")
+            lines.append("|-------|----------|")
+            for q in all_sql[:15]:
+                query_text = q.get("query", "")[:60]
+                lines.append(f"| `{query_text}` | {Path(q.get('file', '')).name}:{q.get('line', 0)} |")
+            lines.append("")
+
     # Environment Variables
     try:
         from gap_features import get_environment_variables
@@ -1034,7 +1067,13 @@ def format_markdown(
                 lines.append("|----------|---------|----------|----------|")
                 for ev in env_vars[:20]:
                     default = ev.get("default", "-") or "-"
-                    required = "**Yes**" if ev.get("required") else "No"
+                    fallback = ev.get("fallback_type", "none")
+                    if ev.get("required"):
+                        required = "**Yes**"
+                    elif fallback == "or_fallback":
+                        required = "No (or fallback)"
+                    else:
+                        required = "No"
                     location = f"{Path(ev.get('file', '')).name}:{ev.get('line', 0)}"
                     lines.append(f"| `{ev.get('variable', '')}` | {default} | {required} | {location} |")
             else:
@@ -1088,6 +1127,43 @@ def format_markdown(
                 lines.append(f"- **{marker_type}**: {count}")
             lines.append("")
 
+    # Silent Failures
+    silent_failures = results.get("silent_failures", {})
+    if silent_failures and gap.get("silent_failures", True):
+        all_failures = []
+        for filepath, failures in silent_failures.items():
+            for f in failures:
+                all_failures.append({**f, "file": filepath})
+        if all_failures:
+            lines.append("## Silent Failures")
+            lines.append("")
+            lines.append("*Exception handlers that may hide errors:*")
+            lines.append("")
+            lines.append("| Pattern | Exception Type | Location |")
+            lines.append("|---------|---------------|----------|")
+            for sf in all_failures[:20]:
+                pattern = sf.get("pattern", "-")
+                except_type = sf.get("except_type", "-")
+                lines.append(f"| {pattern} | {except_type} | `{Path(sf.get('file', '')).name}:{sf.get('line', 0)}` |")
+            lines.append("")
+
+    # Deprecated APIs
+    deprecation_markers = results.get("deprecation_markers", [])
+    if deprecation_markers and gap.get("deprecation_markers", True):
+        lines.append("## Deprecated APIs")
+        lines.append("")
+        lines.append("*Functions, classes, or code marked as deprecated:*")
+        lines.append("")
+        for dm in deprecation_markers[:20]:
+            source = dm.get("source", dm.get("kind", "decorator"))
+            name = dm.get("name", "")
+            if name:
+                lines.append(f"- `{name}` ({source}) — {Path(dm.get('file', '')).name}:{dm.get('line', 0)}")
+            else:
+                text = dm.get("text", "")
+                lines.append(f"- {text} ({source}) — {Path(dm.get('file', '')).name}:{dm.get('line', 0)}")
+        lines.append("")
+
     # Decorators
     decorators = results.get("decorators", {})
     if decorators:
@@ -1110,6 +1186,17 @@ def format_markdown(
         lines.append(f"- Async for loops: {async_patterns.get('async_for_loops', 0)}")
         lines.append(f"- Async context managers: {async_patterns.get('async_context_managers', 0)}")
         lines.append("")
+
+        # Async Violations subsection
+        violations = async_patterns.get("violations", [])
+        if violations and gap.get("async_violations", True):
+            lines.append("### Async/Sync Violations")
+            lines.append("")
+            lines.append("*Blocking calls detected inside async functions:*")
+            lines.append("")
+            for v in violations[:15]:
+                lines.append(f"- **{v.get('violation_type', '')}**: `{v.get('call', '')}` in `{v.get('function', '')}` — {Path(v.get('file', '')).name}:{v.get('line', 0)}")
+            lines.append("")
 
     # Test Example (Rosetta Stone)
     if gap.get("test_example"):
