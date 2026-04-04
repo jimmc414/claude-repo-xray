@@ -31,6 +31,30 @@ downstream agent from opening files.
 | `@deep_crawl validate` | Sequential | QA an existing DEEP_ONBOARD.md |
 | `@deep_crawl refresh` | Sequential | Update for code changes |
 | `@deep_crawl focus ./path` | Sequential | Deep crawl a specific subsystem |
+| `/deep-crawl full <github-url>` | **Orchestrated** | Clone remote repo, auto-run xray, then full crawl pipeline |
+
+## Remote Repository Support
+
+When a GitHub URL (or `gh:owner/repo` shorthand) is passed as an argument to `/deep-crawl full`,
+the skill clones the repository to a local temp directory and runs the full pipeline against it.
+
+**Supported URL formats:**
+- `https://github.com/owner/repo`
+- `https://github.com/owner/repo.git`
+- `gh:owner/repo`
+- `git@github.com:owner/repo.git`
+
+**Key differences from local crawl:**
+- Repository is cloned with full history (for git log/blame) to `/tmp/deep_crawl/repo/`
+- Xray is run automatically — no manual prerequisite step
+- `DEEP_CRAWL_ROOT` points to the clone directory instead of `$(pwd)`
+- Sub-agent `{ROOT_PATH}` is set to the clone directory
+- Phase 6 delivers output to `/tmp/deep_crawl/output/` instead of the project's `docs/`
+- CLAUDE.md in the clone is not modified (read-only analysis of external repo)
+- Cleanup is manual: `rm -rf /tmp/deep_crawl/repo/` when done
+
+**What stays the same:** All six phases, quality gates, investigation protocols,
+evidence standards, and validation — the entire pipeline is identical.
 
 ## Evidence Standards
 
@@ -72,6 +96,59 @@ Before starting, verify:
 All intermediate state lives on disk, not in conversation context.
 
 ```bash
+# === REMOTE REPOSITORY DETECTION ===
+# If the user passed a GitHub URL, clone it and set DEEP_CRAWL_ROOT.
+# Otherwise, DEEP_CRAWL_ROOT defaults to the current working directory.
+DEEP_CRAWL_REMOTE="${1:-}"  # first argument, if any
+DEEP_CRAWL_ROOT="$(pwd)"
+
+if [[ "$DEEP_CRAWL_REMOTE" =~ ^(https://github\.com/|git@github\.com:|gh:) ]]; then
+    REPO_DIR="/tmp/deep_crawl/repo"
+
+    # Clean previous clone
+    [ -d "$REPO_DIR" ] && rm -rf "$REPO_DIR"
+
+    # Normalize gh:owner/repo shorthand to full URL
+    if [[ "$DEEP_CRAWL_REMOTE" == gh:* ]]; then
+        DEEP_CRAWL_REMOTE="https://github.com/${DEEP_CRAWL_REMOTE#gh:}"
+    fi
+
+    echo "Cloning remote repository: $DEEP_CRAWL_REMOTE"
+    gh repo clone "$DEEP_CRAWL_REMOTE" "$REPO_DIR" 2>/dev/null \
+        || git clone "$DEEP_CRAWL_REMOTE" "$REPO_DIR"
+
+    if [ ! -d "$REPO_DIR/.git" ]; then
+        echo "HALT: Clone failed. Check the URL and your access permissions."
+        exit 1
+    fi
+
+    DEEP_CRAWL_ROOT="$REPO_DIR"
+    echo "Remote repo cloned to: $DEEP_CRAWL_ROOT"
+    echo "DEEP_CRAWL_MODE=remote"
+
+    # Auto-run xray on cloned repo
+    # Locate xray.py: check skill source directory, then cwd, then PATH
+    XRAY_PY=""
+    SKILL_SOURCE=$(readlink -f ~/.claude/skills/deep-crawl 2>/dev/null || echo "")
+    if [ -n "$SKILL_SOURCE" ] && [ -f "$(dirname "$SKILL_SOURCE")/../../xray.py" ]; then
+        XRAY_PY="$(dirname "$SKILL_SOURCE")/../../xray.py"
+    elif [ -f "xray.py" ]; then
+        XRAY_PY="./xray.py"
+    elif command -v xray.py >/dev/null 2>&1; then
+        XRAY_PY="xray.py"
+    fi
+
+    if [ -n "$XRAY_PY" ]; then
+        echo "Running xray: python $XRAY_PY $DEEP_CRAWL_ROOT --output both --out /tmp/xray"
+        python "$XRAY_PY" "$DEEP_CRAWL_ROOT" --output both --out /tmp/xray
+    else
+        echo "HALT: Cannot find xray.py. Provide its path or run manually:"
+        echo "  python /path/to/xray.py $DEEP_CRAWL_ROOT --output both --out /tmp/xray"
+    fi
+else
+    echo "DEEP_CRAWL_MODE=local"
+fi
+
 # Create working directory structure
 mkdir -p /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks,calibration} \
          /tmp/deep_crawl/batch_status \
@@ -84,11 +161,16 @@ test -f /tmp/xray/xray.json && echo "READY" || echo "Run: python xray.py . --out
 if [ -f /tmp/deep_crawl/CRAWL_PLAN.md ]; then
     echo "PREVIOUS CRAWL FOUND"
     head -5 /tmp/deep_crawl/CRAWL_PLAN.md
-    git log --oneline -1
+    git -C "$DEEP_CRAWL_ROOT" log --oneline -1
     echo "If hashes match, run @deep_crawl resume"
     echo "If not, this is a stale crawl — starting fresh"
 fi
 ```
+
+**DEEP_CRAWL_ROOT usage:** All subsequent phases use `$DEEP_CRAWL_ROOT` wherever the codebase
+root is referenced. For local crawls this equals `$(pwd)` (backward compatible). For remote
+crawls it points to `/tmp/deep_crawl/repo/`. Sub-agent prompts must set `{ROOT_PATH}` to
+the value of `$DEEP_CRAWL_ROOT`.
 
 **Context management rules:**
 1. Write findings to disk immediately after each investigation task
@@ -117,7 +199,7 @@ import json
 d = json.load(open('/tmp/xray/xray.json'))
 print(d.get('git_commit', d.get('commit_hash', '?')))
 " 2>/dev/null)
-HEAD=$(git rev-parse HEAD 2>/dev/null || echo "no-git")
+HEAD=$(git -C "$DEEP_CRAWL_ROOT" rev-parse HEAD 2>/dev/null || echo "no-git")
 
 if [ "$XRAY_HASH" != "?" ] && [ "$HEAD" != "no-git" ]; then
     # Prefix match handles short-vs-full hash
@@ -131,15 +213,15 @@ else
 fi
 
 # Repo characteristics
-FILE_COUNT=$(find . -name "*.py" -not -path "./.git/*" | wc -l)
-TEST_COUNT=$(find . -name "test_*.py" -o -name "*_test.py" | wc -l)
+FILE_COUNT=$(find "$DEEP_CRAWL_ROOT" -name "*.py" -not -path "*/.git/*" | wc -l)
+TEST_COUNT=$(find "$DEEP_CRAWL_ROOT" -name "test_*.py" -o -name "*_test.py" | wc -l)
 echo "Python files: $FILE_COUNT | Test files: $TEST_COUNT"
 [ "$FILE_COUNT" -gt 5000 ] && echo "WARNING: Very large repo. Consider focused crawl."
 [ "$TEST_COUNT" -eq 0 ] && echo "WARNING: No test files. Testing section will be thin."
 
 # Framework detection
 for fw in fastapi flask django click typer torch tensorflow airflow dagster numpy scipy asyncio aiohttp paramiko boto3 pluggy stevedore; do
-    grep -rl "$fw" --include="*.py" . 2>/dev/null | head -1 >/dev/null 2>&1 && echo "Framework: $fw"
+    grep -rl "$fw" --include="*.py" "$DEEP_CRAWL_ROOT" 2>/dev/null | head -1 >/dev/null 2>&1 && echo "Framework: $fw"
 done
 ```
 
@@ -660,7 +742,7 @@ Sub-agents spawn with fresh context and read CLAUDE.md files automatically. If t
 
 ```bash
 # Rename project CLAUDE.md (and parent directory's if it exists)
-ROOT_PATH=$(pwd)
+ROOT_PATH="${DEEP_CRAWL_ROOT:-$(pwd)}"
 [ -f "$ROOT_PATH/CLAUDE.md" ] && mv "$ROOT_PATH/CLAUDE.md" "$ROOT_PATH/CLAUDE.md.assembly_save"
 PARENT_PATH=$(dirname "$ROOT_PATH")
 [ -f "$PARENT_PATH/CLAUDE.md" ] && mv "$PARENT_PATH/CLAUDE.md" "$PARENT_PATH/CLAUDE.md.assembly_save"
@@ -1282,7 +1364,7 @@ standards apply. The orchestrator MUST NOT assemble or validate manually.
 After all sub-agents (S1-S6, cross-referencer, validator) have completed:
 
 ```bash
-ROOT_PATH=$(pwd)
+ROOT_PATH="${DEEP_CRAWL_ROOT:-$(pwd)}"
 [ -f "$ROOT_PATH/CLAUDE.md.assembly_save" ] && mv "$ROOT_PATH/CLAUDE.md.assembly_save" "$ROOT_PATH/CLAUDE.md"
 PARENT_PATH=$(dirname "$ROOT_PATH")
 [ -f "$PARENT_PATH/CLAUDE.md.assembly_save" ] && mv "$PARENT_PATH/CLAUDE.md.assembly_save" "$PARENT_PATH/CLAUDE.md"
@@ -1488,17 +1570,34 @@ Write validation results to `/tmp/deep_crawl/VALIDATION_REPORT.md`.
 
 ### Phase 6: DELIVER (Package and Configure)
 
-**Step 1:** Copy to project:
+**Step 1:** Copy to output location (differs for local vs remote):
 ```bash
-mkdir -p docs
-cp /tmp/deep_crawl/DEEP_ONBOARD.md docs/DEEP_ONBOARD.md
-cp /tmp/xray/xray.md docs/xray.md
+if [ "${DEEP_CRAWL_MODE:-local}" = "remote" ]; then
+    # Remote repo: deliver to temp output directory (not inside the clone)
+    OUTPUT_DIR="/tmp/deep_crawl/output"
+    mkdir -p "$OUTPUT_DIR"
+    cp /tmp/deep_crawl/DEEP_ONBOARD.md "$OUTPUT_DIR/DEEP_ONBOARD.md"
+    cp /tmp/xray/xray.md "$OUTPUT_DIR/xray.md"
+    cp /tmp/deep_crawl/VALIDATION_REPORT.md "$OUTPUT_DIR/DEEP_ONBOARD_VALIDATION.md"
+    echo "Remote crawl output delivered to: $OUTPUT_DIR/"
+    echo "  - DEEP_ONBOARD.md"
+    echo "  - xray.md"
+    echo "  - DEEP_ONBOARD_VALIDATION.md"
+else
+    # Local repo: deliver to project docs/
+    mkdir -p docs
+    cp /tmp/deep_crawl/DEEP_ONBOARD.md docs/DEEP_ONBOARD.md
+    cp /tmp/xray/xray.md docs/xray.md
+fi
 ```
 
-**Step 2:** Configure CLAUDE.md for automatic delivery:
+**Step 2:** Configure CLAUDE.md for automatic delivery (**local repos only** — skip for remote):
 ```bash
-if [ -f CLAUDE.md ]; then
-    grep -q "DEEP_ONBOARD" CLAUDE.md || cat >> CLAUDE.md << 'ONBOARD_EOF'
+if [ "${DEEP_CRAWL_MODE:-local}" = "remote" ]; then
+    echo "Skipping CLAUDE.md update (remote repo — read-only analysis)"
+else
+    if [ -f CLAUDE.md ]; then
+        grep -q "DEEP_ONBOARD" CLAUDE.md || cat >> CLAUDE.md << 'ONBOARD_EOF'
 
 # Codebase Onboarding
 Read docs/DEEP_ONBOARD.md before starting any task. It contains verified behavioral documentation, critical paths, gotchas, and conventions for this codebase.
@@ -1512,8 +1611,8 @@ If you modify code that may affect claims in docs/DEEP_ONBOARD.md, append to doc
 Section path uses document headings: `{## Section}` or `{## Section} / {### Subsection}`.
 Do not manually edit DEEP_ONBOARD.md — it is a generated artifact.
 ONBOARD_EOF
-else
-    cat > CLAUDE.md << 'CLEOF'
+    else
+        cat > CLAUDE.md << 'CLEOF'
 # Project Instructions
 
 ## Codebase Onboarding
@@ -1528,12 +1627,15 @@ If you modify code that may affect claims in docs/DEEP_ONBOARD.md, append to doc
 Section path uses document headings: `{## Section}` or `{## Section} / {### Subsection}`.
 Do not manually edit DEEP_ONBOARD.md — it is a generated artifact.
 CLEOF
+    fi
 fi
 ```
 
-**Step 3:** Copy validation report:
+**Step 3:** Copy validation report (**local repos only** — remote already copied in Step 1):
 ```bash
-cp /tmp/deep_crawl/VALIDATION_REPORT.md docs/DEEP_ONBOARD_VALIDATION.md
+if [ "${DEEP_CRAWL_MODE:-local}" != "remote" ]; then
+    cp /tmp/deep_crawl/VALIDATION_REPORT.md docs/DEEP_ONBOARD_VALIDATION.md
+fi
 ```
 
 **Step 4:** Report to user:
@@ -1549,9 +1651,10 @@ Adversarial test: {PASS/PARTIAL/FAIL}
 Gotchas documented: {count}
 Request traces: {count}
 
-Delivered to: docs/DEEP_ONBOARD.md
-CLAUDE.md: {UPDATED/CREATED} — document will auto-load in all sessions
+Delivered to: {local: docs/DEEP_ONBOARD.md | remote: /tmp/deep_crawl/output/}
+CLAUDE.md: {UPDATED/CREATED/SKIPPED (remote)} — document will auto-load in all sessions
 Prompt caching: Active — subsequent sessions read at ~90% reduced cost
+Clone: {remote only: /tmp/deep_crawl/repo/ — rm -rf when done}
 ```
 
 ---
@@ -1582,6 +1685,16 @@ Not all claims have the same epistemological status. Use these tags:
 **No git history:**
 - Skip git-dependent investigation targets (coupling anomalies, maintenance hotspots)
 - Note in Gaps: "No git history available — coupling and churn data missing"
+
+**Remote repository:**
+- `DEEP_CRAWL_ROOT` points to `/tmp/deep_crawl/repo/` (the clone directory)
+- All file reads, greps, and investigation happen against the clone
+- Phase 6 delivers to `/tmp/deep_crawl/output/` instead of project `docs/`
+- CLAUDE.md update is skipped (read-only analysis of external repo)
+- The clone is a full clone with git history — git log/blame work normally
+- Private repos: `gh repo clone` handles auth via the user's `gh` credentials
+- Cleanup: user should `rm -rf /tmp/deep_crawl/repo/` when done
+- If the clone is very large (>2000 files), the monorepo edge case applies
 
 **Monorepo (>2000 files):**
 - Identify 3-5 subsystems from architectural layers
