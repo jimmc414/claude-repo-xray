@@ -155,7 +155,7 @@ mkdir -p /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impa
          /tmp/deep_crawl/sections
 
 # Verify xray output exists
-test -f /tmp/xray/xray.json && echo "READY" || echo "Run: python xray.py . --output both --out /tmp/xray"
+test -f /tmp/xray/xray.json && echo "READY" || echo "Run: python xray.py $DEEP_CRAWL_ROOT --output both --out /tmp/xray"
 
 # Check for existing crawl state (resumability)
 if [ -f /tmp/deep_crawl/CRAWL_PLAN.md ]; then
