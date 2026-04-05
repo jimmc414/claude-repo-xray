@@ -115,8 +115,15 @@ describe("integration", () => {
   });
 
   it("handles empty directory gracefully", () => {
-    const output = execSync(`node ${SCANNER_PATH} /tmp`, { encoding: "utf-8" });
-    const result = JSON.parse(output);
-    expect(result.summary.total_files).toBe(0);
+    const emptyDir = path.join(FIXTURE_PATH, "..", "empty-test-dir");
+    const fs = require("fs");
+    fs.mkdirSync(emptyDir, { recursive: true });
+    try {
+      const output = execSync(`node ${SCANNER_PATH} ${emptyDir}`, { encoding: "utf-8" });
+      const result = JSON.parse(output);
+      expect(result.summary.total_files).toBe(0);
+    } finally {
+      fs.rmSync(emptyDir, { recursive: true, force: true });
+    }
   });
 });

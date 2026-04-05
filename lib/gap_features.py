@@ -105,7 +105,7 @@ def get_github_about(target_dir: str) -> Dict[str, Any]:
             topics = []
             # repositoryTopics is a list of {"name": "topic"} objects
             if "repositoryTopics" in data:
-                for topic in data.get("repositoryTopics", []):
+                for topic in (data.get("repositoryTopics") or []):
                     if isinstance(topic, dict) and "name" in topic:
                         topics.append(topic["name"])
                     elif isinstance(topic, str):
@@ -170,6 +170,39 @@ def normalize_values(values: Dict[str, float]) -> Dict[str, float]:
     return {k: (v - min_val) / (max_val - min_val) for k, v in values.items()}
 
 
+def _short_name(mod_name: str) -> str:
+    """Extract short display name from module identifier.
+    Handles both Python dotted names and TS file paths."""
+    if "/" in mod_name or "\\" in mod_name:
+        return Path(mod_name).stem
+    return mod_name.split(".")[-1] if "." in mod_name else mod_name
+
+
+def _safe_mermaid_id(name: str) -> str:
+    """Create a mermaid-safe node ID from a module name."""
+    return re.sub(r'[^a-zA-Z0-9_]', '_', name)
+
+
+_TS_LAYER_MAP = {
+    "api": "orchestration", "components": "orchestration", "pages": "orchestration", "hooks": "orchestration",
+    "services": "core", "middleware": "core", "state": "core", "models": "core",
+    "types": "foundation", "utils": "foundation", "config": "foundation", "other": "foundation",
+    "tests": None,
+}
+
+
+def _normalize_layers(layers):
+    """Map TS-style layer names to Python-style orchestration/core/foundation."""
+    if any(k in ("foundation", "core", "orchestration") for k in layers):
+        return layers  # Already Python-style
+    normalized = defaultdict(list)
+    for layer_name, modules in layers.items():
+        target = _TS_LAYER_MAP.get(layer_name)
+        if target:
+            normalized[target].extend(modules)
+    return dict(normalized)
+
+
 def get_architectural_pillars(results: Dict[str, Any], n: int = 10) -> List[Dict[str, Any]]:
     """
     Get top N files ranked by architectural importance (import weight).
@@ -200,7 +233,7 @@ def get_architectural_pillars(results: Dict[str, Any], n: int = 10) -> List[Dict
             continue
 
         # Get short name for deduplication
-        short_name = mod_name.split(".")[-1] if "." in mod_name else mod_name
+        short_name = _short_name(mod_name)
         if short_name in seen_names:
             continue
         seen_names.add(short_name)
@@ -485,8 +518,7 @@ def _infer_data_flow(call_data: Dict[str, Any], layers: Dict[str, List]) -> str:
                 mod = mod.get("module", mod.get("name", str(mod)))
             result.add(mod)
             # Also add short name
-            if "." in mod:
-                result.add(mod.split(".")[-1])
+            result.add(_short_name(mod))
         return result
 
     orch_mods = get_layer_modules("orchestration")
@@ -502,11 +534,11 @@ def _infer_data_flow(call_data: Dict[str, Any], layers: Dict[str, List]) -> str:
     found_to_core = 0
 
     for caller, callees in cross_module.items():
-        caller_short = caller.split(".")[-1] if "." in caller else caller
+        caller_short = _short_name(caller)
 
         for callee_info in callees:
             callee = callee_info.get("callee", "") if isinstance(callee_info, dict) else str(callee_info)
-            callee_short = callee.split(".")[-1] if "." in callee else callee
+            callee_short = _short_name(callee)
 
             # Orchestration → Core
             if (caller in orch_mods or caller_short in orch_mods) and \
@@ -551,7 +583,7 @@ def generate_mermaid_diagram(
     Creates subgraphs for ORCHESTRATION, CORE, and FOUNDATION layers.
     Optionally includes data flow annotations based on call analysis.
     """
-    layers = import_data.get("layers", {})
+    layers = _normalize_layers(import_data.get("layers", {}))
     graph = import_data.get("graph", {})
 
     lines = ["```mermaid", "graph TD"]
@@ -573,8 +605,8 @@ def generate_mermaid_diagram(
             # Shorten module name for display
             if isinstance(mod, dict):
                 mod = mod.get("module", mod.get("name", str(mod)))
-            short_name = mod.split(".")[-1] if "." in mod else mod
-            safe_id = mod.replace(".", "_").replace("-", "_")
+            short_name = _short_name(mod)
+            safe_id = _safe_mermaid_id(mod)
             lines.append(f"        {safe_id}[{short_name}]")
             added_nodes.add(mod)
         lines.append("    end")
@@ -586,7 +618,7 @@ def generate_mermaid_diagram(
     for mod in orch_modules:
         if isinstance(mod, dict):
             mod = mod.get("module", mod.get("name", str(mod)))
-        mod_id = mod.replace(".", "_").replace("-", "_")
+        mod_id = _safe_mermaid_id(mod)
 
         # Get imports for this module from graph
         # Handle both formats: list of imports or dict with 'imports' key
@@ -598,7 +630,7 @@ def generate_mermaid_diagram(
 
         for imp in imports[:3]:  # Limit edges per module
             if imp in added_nodes:
-                imp_id = imp.replace(".", "_").replace("-", "_")
+                imp_id = _safe_mermaid_id(imp)
                 edge = (mod_id, imp_id)
                 if edge not in edges_added:
                     lines.append(f"    {mod_id} --> {imp_id}")
@@ -609,8 +641,8 @@ def generate_mermaid_diagram(
     for pair in circular[:5]:
         if len(pair) >= 2:
             a, b = pair[0], pair[1]
-            a_id = a.replace(".", "_").replace("-", "_")
-            b_id = b.replace(".", "_").replace("-", "_")
+            a_id = _safe_mermaid_id(a)
+            b_id = _safe_mermaid_id(b)
             lines.append(f"    {a_id} <-.-> {b_id}")
 
     lines.append("```")
@@ -934,8 +966,9 @@ def extract_data_models(results: Dict[str, Any]) -> List[Dict[str, Any]]:
 # Entry Point Detection
 # =============================================================================
 
-ENTRY_POINT_FILES = {"main.py", "cli.py", "__main__.py", "app.py", "run.py", "server.py"}
-ENTRY_POINT_FUNCTIONS = {"main", "cli", "run", "app", "serve"}
+ENTRY_POINT_FILES_PY = {"main.py", "cli.py", "__main__.py", "app.py", "run.py", "server.py"}
+ENTRY_POINT_FILES_TS = {"index.ts", "main.ts", "cli.ts", "app.ts", "run.ts", "server.ts", "index.js", "main.js", "cli.js", "app.js", "server.js"}
+ENTRY_POINT_FUNCTIONS = {"main", "cli", "run", "app", "serve", "bootstrap"}
 
 
 def detect_entry_points(results: Dict[str, Any], target_dir: str = ".") -> List[Dict[str, Any]]:
@@ -943,34 +976,41 @@ def detect_entry_points(results: Dict[str, Any], target_dir: str = ".") -> List[
     Detect entry points in the codebase.
 
     Looks for:
-    - Files named main.py, cli.py, __main__.py, etc.
-    - Functions named main(), cli(), run()
-    - if __name__ == "__main__" blocks
+    - Files named main.py, cli.py, index.ts, etc.
+    - Functions named main(), cli(), run(), bootstrap()
+    - if __name__ == "__main__" blocks (Python)
     """
     entry_points = []
     seen_files = set()
 
     structure = results.get("structure", {})
     files = structure.get("files", {})
+    lang = results.get("metadata", {}).get("language", "python")
+    is_ts = lang in ("typescript", "mixed")
+
+    entry_point_files = ENTRY_POINT_FILES_TS if is_ts else ENTRY_POINT_FILES_PY
 
     # Get project name from target directory
     project_name = Path(target_dir).name
+
+    def make_usage(filepath, filename):
+        if is_ts:
+            return f"npx tsx {filepath}"
+        if filename == "__main__.py":
+            return f"python -m {project_name}"
+        if filename == "cli.py":
+            return f"python -m {project_name}" if "__main__.py" in [Path(f).name for f in files] else f"python {filepath}"
+        return f"python {filepath}"
 
     for filepath, data in files.items():
         filename = Path(filepath).name
 
         # Check if file is an entry point by name
-        if filename in ENTRY_POINT_FILES:
-            usage = f"python {filepath}"
-            if filename == "__main__.py":
-                usage = f"python -m {project_name}"
-            elif filename == "cli.py":
-                usage = f"python -m {project_name}" if "__main__.py" in [Path(f).name for f in files] else f"python {filepath}"
-
+        if filename in entry_point_files:
             entry_points.append({
                 "entry_point": filename,
                 "file": filepath,
-                "usage": usage,
+                "usage": make_usage(filepath, filename),
                 "type": "file"
             })
             seen_files.add(filepath)
@@ -983,7 +1023,7 @@ def detect_entry_points(results: Dict[str, Any], target_dir: str = ".") -> List[
                 entry_points.append({
                     "entry_point": f"{func_name}()",
                     "file": filepath,
-                    "usage": f"python {filepath}",
+                    "usage": make_usage(filepath, filename),
                     "type": "function"
                 })
 
@@ -1693,12 +1733,16 @@ def generate_prose(results: Dict[str, Any], project_name: str = "Project") -> st
 
     layer_counts = {name: len(mods) for name, mods in layers.items()}
 
-    prose_parts = [f"**{project_name}** is a Python application"]
+    lang = results.get("metadata", {}).get("language", "python")
+    lang_label = {"typescript": "TypeScript", "mixed": "multi-language"}.get(lang, "Python")
+    file_label = "source" if lang != "python" else "Python"
+
+    prose_parts = [f"**{project_name}** is a {lang_label} application"]
 
     if patterns:
         prose_parts.append(f" with {', '.join(patterns[:3])}")
 
-    prose_parts.append(f". The codebase contains **{total_files}** Python files")
+    prose_parts.append(f". The codebase contains **{total_files}** {file_label} files")
     prose_parts.append(f" with **{total_functions}** functions and **{total_classes}** classes")
 
     if layer_counts:
@@ -1781,24 +1825,35 @@ def generate_verify_commands(results: Dict[str, Any], project_name: str = "proje
     Template-based generation based on detected features.
     """
     commands = []
+    lang = results.get("metadata", {}).get("language", "python")
+    is_ts = lang in ("typescript", "mixed")
 
     # Import check
     commands.append(f"# Check import health")
-    commands.append(f"python -c \"import {project_name}; print('OK')\"")
+    if is_ts:
+        commands.append(f"npx tsx -e 'console.log(\"OK\")'")
+    else:
+        commands.append(f"python -c \"import {project_name}; print('OK')\"")
     commands.append("")
 
     # Test command
     tests = results.get("tests", {})
     if tests.get("test_file_count", 0) > 0:
         commands.append("# Run tests")
-        commands.append("pytest tests/ -x -q")
+        commands.append("npm test" if is_ts else "pytest tests/ -x -q")
         commands.append("")
 
     # CLI help
     entry_points = detect_entry_points(results)
-    if any(ep.get("entry_point") in ("cli.py", "__main__.py") for ep in entry_points):
+    ts_entry_names = {"cli.ts", "index.ts", "cli.js"}
+    py_entry_names = {"cli.py", "__main__.py"}
+    check_names = ts_entry_names if is_ts else py_entry_names
+    if any(ep.get("entry_point") in check_names for ep in entry_points):
         commands.append("# CLI help")
-        commands.append(f"python -m {project_name} --help")
+        if is_ts:
+            commands.append(f"npx tsx src/index.ts --help")
+        else:
+            commands.append(f"python -m {project_name} --help")
 
     return commands
 

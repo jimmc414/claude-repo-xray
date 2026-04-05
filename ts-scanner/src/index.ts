@@ -12,9 +12,11 @@
 import * as path from "path";
 import { discoverFiles } from "./file-discovery.js";
 import { analyzeFile } from "./ast-analysis.js";
+import { analyzeImports } from "./import-analysis.js";
 import type {
   XRayResults, Structure, Summary, Complexity, TypeCoverage,
   DecoratorInventory, AsyncPatterns, Hotspot, FileAnalysis, ClassInfo, FunctionInfo,
+  ImportAnalysis,
 } from "./types.js";
 
 const VERSION = "0.1.0";
@@ -73,11 +75,15 @@ function main(): void {
     }
   }
 
-  // Step 3: Aggregate results
-  if (verbose) process.stderr.write("Aggregating results...\n");
-  const results = aggregateResults(targetDir, fileResults, discovery.tsconfigPath);
+  // Step 3: Import analysis
+  if (verbose) process.stderr.write("Running import analysis...\n");
+  const importResults = analyzeImports(discovery.files, targetDir);
 
-  // Step 4: Output JSON
+  // Step 4: Aggregate results
+  if (verbose) process.stderr.write("Aggregating results...\n");
+  const results = aggregateResults(targetDir, fileResults, discovery.tsconfigPath, importResults);
+
+  // Step 5: Output JSON
   process.stdout.write(JSON.stringify(results, null, 2));
   process.stdout.write("\n");
 
@@ -92,6 +98,7 @@ function aggregateResults(
   targetDir: string,
   fileResults: Record<string, FileAnalysis>,
   tsconfigPath: string | null,
+  importResults: ImportAnalysis,
 ): XRayResults {
   const files = Object.values(fileResults);
 
@@ -200,6 +207,7 @@ function aggregateResults(
     complexity,
     types,
     decorators,
+    imports: importResults,
     async_patterns: globalAsync,
     hotspots: topHotspots,
     // Phase 1 stubs

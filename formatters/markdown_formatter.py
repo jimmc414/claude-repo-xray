@@ -15,6 +15,29 @@ LIB_DIR = FORMATTER_DIR.parent / "lib"
 sys.path.insert(0, str(LIB_DIR))
 
 
+def _class_header(name, bases, line, code_lang):
+    if code_lang == "typescript":
+        ext = f" extends {', '.join(bases)}" if bases else ""
+        return f"class {name}{ext} {{ // L{line}"
+    bases_str = f"({', '.join(bases)})" if bases else ""
+    return f"class {name}{bases_str}:  # L{line}"
+
+
+def _method_sig(name, is_async, code_lang):
+    prefix = "async " if is_async else ""
+    if code_lang == "typescript":
+        return f"    {prefix}{name}(...)"
+    return f"    {prefix}def {name}(...)"
+
+
+def _comment(text, code_lang):
+    return f"    // {text}" if code_lang == "typescript" else f"    # {text}"
+
+
+def _self_prefix(code_lang):
+    return "this." if code_lang == "typescript" else "self."
+
+
 def format_markdown(
     results: Dict[str, Any],
     project_name: Optional[str] = None,
@@ -35,6 +58,11 @@ def format_markdown(
     metadata = results.get("metadata", {})
     summary = results.get("summary", {})
     gap = gap_features or {}
+
+    # Language-aware code fence and file label
+    lang = metadata.get("language", "python")
+    code_lang = "typescript" if lang in ("typescript", "mixed") else "python"
+    file_label = {"python": "Python files", "typescript": "Source files", "mixed": "Source files"}.get(lang, "Source files")
 
     # Header
     name = project_name or Path(metadata.get("target_directory", ".")).name
@@ -70,7 +98,7 @@ def format_markdown(
 
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
-    lines.append(f"| Python files | {summary.get('total_files', 0)} |")
+    lines.append(f"| {file_label} | {summary.get('total_files', 0)} |")
     lines.append(f"| Total lines | {summary.get('total_lines', 0):,} |")
     lines.append(f"| Functions | {summary.get('total_functions', 0)} |")
     lines.append(f"| Classes | {summary.get('total_classes', 0)} |")
@@ -236,9 +264,9 @@ def format_markdown(
                     if cls.get("docstring"):
                         lines.append(f"> {cls['docstring']}")
                         lines.append("")
-                    lines.append("```python")
-                    lines.append(f"class {cls['name']}{bases}:  # L{cls.get('line', 0)}")
-                    # Show __init__ signature first if available
+                    lines.append(f"```{code_lang}")
+                    lines.append(_class_header(cls['name'], cls.get('bases', []), cls.get('line', 0), code_lang))
+                    # Show __init__/constructor signature first if available
                     if cls.get("init_signature"):
                         lines.append(f"    {cls['init_signature']}")
                         lines.append("")
@@ -246,13 +274,14 @@ def format_markdown(
                     # Show instance variables from __init__ (if enabled)
                     instance_vars = cls.get("instance_vars", [])
                     if instance_vars and gap.get("instance_vars"):
-                        lines.append("    # Instance variables:")
+                        lines.append(_comment("Instance variables:", code_lang))
+                        sp = _self_prefix(code_lang)
                         for iv in instance_vars[:8]:
                             iv_name = iv.get("name", "")
                             iv_value = iv.get("value", "...")
-                            lines.append(f"    self.{iv_name} = {iv_value}")
+                            lines.append(f"    {sp}{iv_name} = {iv_value}")
                         if len(instance_vars) > 8:
-                            lines.append(f"    # ... and {len(instance_vars) - 8} more")
+                            lines.append(_comment(f"... and {len(instance_vars) - 8} more", code_lang))
                         lines.append("")
 
                     for field in cls.get("fields", [])[:5]:
@@ -262,20 +291,20 @@ def format_markdown(
                             lines.append(f"    {field_name}: {field_type}")
                         else:
                             lines.append(f"    {field_name}")
-                    # Show methods (skip __init__ since we showed it above)
+                    # Show methods (skip __init__/constructor since we showed it above)
+                    init_names = {"__init__", "constructor"}
                     methods_shown = 0
                     for method in cls.get("methods", []):
                         method_name = method.get("name", "")
-                        if method_name == "__init__":
+                        if method_name in init_names:
                             continue  # Already shown
                         if methods_shown >= 10:
                             break
-                        is_async = "async " if method.get("is_async") else ""
-                        lines.append(f"    {is_async}def {method_name}(...)")
+                        lines.append(_method_sig(method_name, method.get("is_async"), code_lang))
                         methods_shown += 1
                     remaining = cls.get("method_count", 0) - methods_shown - (1 if cls.get("init_signature") else 0)
                     if remaining > 0:
-                        lines.append(f"    # ... and {remaining} more methods")
+                        lines.append(_comment(f"... and {remaining} more methods", code_lang))
                     lines.append("```")
                     lines.append("")
         except Exception:
@@ -338,8 +367,8 @@ def format_markdown(
                                 lines.append(f"| `{field_name}` | {field_type} | {constraint_text} |")
                             lines.append("")
                         else:
-                            lines.append("```python")
-                            lines.append(f"class {model['name']}{bases}:  # L{model.get('line', 0)}")
+                            lines.append(f"```{code_lang}")
+                            lines.append(_class_header(model['name'], model.get('bases', []), model.get('line', 0), code_lang))
                             for field in model.get("fields", [])[:8]:
                                 field_name = field.get("name", "")
                                 field_type = field.get("type", "")
@@ -486,8 +515,11 @@ def format_markdown(
                         args_list.append(arg_str)
                     args_str = ", ".join(args_list)
                     ret = f" -> {sig['returns']}" if sig.get("returns") else ""
-                    lines.append("```python")
-                    lines.append(f"{async_prefix}def {sig['name']}({args_str}){ret}")
+                    lines.append(f"```{code_lang}")
+                    if code_lang == "typescript":
+                        lines.append(f"{async_prefix}function {sig['name']}({args_str}){ret}")
+                    else:
+                        lines.append(f"{async_prefix}def {sig['name']}({args_str}){ret}")
                     lines.append("```")
                     if sig.get("docstring"):
                         lines.append(f"> {sig['docstring'][:200]}")
@@ -817,14 +849,23 @@ def format_markdown(
             lines.append("")
             lines.append("*Files with no importers (may be entry points or dead code):*")
             lines.append("")
-            for orphan in orphans[:5]:
-                orphan_path = orphan.get('file', orphan.get('module', ''))
+            seen_orphan_names = set()
+            for orphan in orphans[:10]:
+                if isinstance(orphan, dict):
+                    orphan_path = orphan.get('file', orphan.get('module', ''))
+                else:
+                    orphan_path = str(orphan)
                 # Show relative path or module name for portability
                 if "/" in orphan_path or "\\" in orphan_path:
                     orphan_display = Path(orphan_path).name
                 else:
                     orphan_display = orphan_path
+                if orphan_display in seen_orphan_names:
+                    continue
+                seen_orphan_names.add(orphan_display)
                 lines.append(f"- `{orphan_display}`")
+                if len(seen_orphan_names) >= 5:
+                    break
             lines.append("")
 
         # External Dependencies
@@ -1217,7 +1258,7 @@ def format_markdown(
                     lines.append("")
                 lines.append(f"**Example:** `{example.get('file', '')}` ({example.get('line_count', 0)} lines)")
                 lines.append("")
-                lines.append("```python")
+                lines.append(f"```{code_lang}")
                 lines.append(example.get("content", ""))
                 lines.append("```")
                 lines.append("")
