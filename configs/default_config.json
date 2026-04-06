@@ -71,7 +71,13 @@
     "silent_failures": true,
     "async_violations": true,
     "db_query_patterns": true,
-    "deprecation_markers": true
+    "deprecation_markers": true,
+
+    "_comment_v33": "v3.3 codesight-inspired features",
+    "blast_radius": true,
+    "route_detection": true,
+    "resource_leaks": true,
+    "magic_methods": true
   },
 
   "output": {

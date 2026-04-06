@@ -759,6 +759,70 @@ def _extract_type_ref(
 
 
 # =============================================================================
+# Import-Time Side Effects
+# =============================================================================
+
+# Side effect categories that are dangerous at import time
+_IMPORT_TIME_DANGEROUS_CATEGORIES = {"db", "api", "file", "subprocess", "env", "deserialization"}
+
+def compute_import_time_side_effects(
+    ast_results: Dict[str, Any],
+    call_results: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """
+    Find module-level function calls that produce side effects.
+
+    These are calls at the top level of a module (not inside any function or
+    class) that perform I/O, DB operations, network calls, etc. They execute
+    when the module is imported, causing action-at-a-distance.
+
+    Cross-references:
+    - call_analysis module-level calls (caller == "(module level)")
+    - ast_analysis side effect detection
+    """
+    files = ast_results.get("files", {})
+    results = []
+
+    for filepath, file_data in files.items():
+        side_effects = file_data.get("side_effects", [])
+        if not side_effects:
+            continue
+
+        # Get the line ranges of all functions and classes to exclude them
+        excluded_ranges = []
+        for func in file_data.get("functions", []):
+            excluded_ranges.append((func.get("start_line", 0), func.get("end_line", 0)))
+        for cls in file_data.get("classes", []):
+            excluded_ranges.append((cls.get("start_line", 0), cls.get("end_line", 0)))
+
+        # Find side effects at module level (not inside any function/class)
+        for se in side_effects:
+            line = se.get("line", 0)
+            category = se.get("category", "")
+            if category not in _IMPORT_TIME_DANGEROUS_CATEGORIES:
+                continue
+
+            # Check if this line is inside a function or class
+            inside_scope = False
+            for start, end in excluded_ranges:
+                if start <= line <= end:
+                    inside_scope = True
+                    break
+
+            if not inside_scope:
+                results.append({
+                    "file": filepath,
+                    "line": line,
+                    "call": se.get("call", ""),
+                    "category": category,
+                    "risk": "Executes on import — may cause action-at-a-distance",
+                })
+
+    results.sort(key=lambda x: (x["file"], x["line"]))
+    return results[:20]
+
+
+# =============================================================================
 # Master Function
 # =============================================================================
 
@@ -835,6 +899,11 @@ def compute_investigation_targets(
         lambda: compute_domain_entities(ast_results, gap_results)
     )
 
+    targets["import_time_side_effects"] = _run(
+        "Import-time side effects",
+        lambda: compute_import_time_side_effects(ast_results, call_results)
+    )
+
     # Summary stats
     targets["summary"] = {
         "ambiguous_interfaces": len(targets["ambiguous_interfaces"]),
@@ -847,6 +916,7 @@ def compute_investigation_targets(
         "shared_mutable_state": len(targets["shared_mutable_state"]),
         "high_uncertainty_modules": len(targets["high_uncertainty_modules"]),
         "domain_entities": len(targets["domain_entities"]),
+        "import_time_side_effects": len(targets["import_time_side_effects"]),
     }
 
     if verbose:

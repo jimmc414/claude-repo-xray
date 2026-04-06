@@ -175,6 +175,8 @@ Examples:
     disable.add_argument("--no-explain", action="store_true", dest="no_explain", help="Disable explanatory text")
     disable.add_argument("--no-persona-map", action="store_true", dest="no_persona_map", help="Disable persona map")
     disable.add_argument("--no-investigation-targets", action="store_true", dest="no_investigation_targets", help="Disable investigation targets section")
+    disable.add_argument("--no-blast-radius", action="store_true", dest="no_blast_radius", help="Disable blast radius analysis")
+    disable.add_argument("--no-route-detection", action="store_true", dest="no_route_detection", help="Disable HTTP route detection")
 
     # Legacy analysis switches (for backwards compatibility)
     switches = parser.add_argument_group("Analysis Switches (legacy, for backwards compatibility)")
@@ -355,6 +357,7 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
         result["silent_failures"] = ast_results.get("silent_failures", {})
         result["sql_strings"] = ast_results.get("sql_strings", {})
         result["deprecation_markers"] = ast_results.get("deprecation_markers", [])
+        result["resource_leaks"] = ast_results.get("resource_leaks", {})
 
     # Async patterns (always included with skeleton/complexity)
     if ast_results:
@@ -373,6 +376,19 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
             print("Running call analysis...", file=sys.stderr)
         call_results = analyze_calls(files, ast_results, target, verbose=verbose)
         result["calls"] = call_results
+
+    # Route analysis (requires AST results with decorator_details)
+    if ast_results:
+        try:
+            from route_analysis import analyze_routes
+            if verbose:
+                print("Running route analysis...", file=sys.stderr)
+            route_results = analyze_routes(ast_results, verbose=verbose)
+            if route_results.get("routes"):
+                result["routes"] = route_results
+        except Exception as e:
+            if verbose:
+                print(f"  Route analysis failed: {e}", file=sys.stderr)
 
     # Git analysis
     if "git" in analyses:
@@ -438,6 +454,24 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
         # Merge comment-based deprecations into deprecation_markers
         for dep in debt_results.get("deprecations", []):
             result.setdefault("deprecation_markers", []).append(dep)
+
+    # Blast radius analysis (requires import + call results, benefits from git coupling)
+    if result.get("imports"):
+        try:
+            from blast_analysis import analyze_blast_radius
+            if verbose:
+                print("Running blast radius analysis...", file=sys.stderr)
+            blast_results = analyze_blast_radius(
+                result.get("imports", {}),
+                result.get("calls", {}),
+                result.get("git", {}),
+                verbose=verbose,
+            )
+            if blast_results.get("files"):
+                result["blast_radius"] = blast_results
+        except Exception as e:
+            if verbose:
+                print(f"  Blast radius analysis failed: {e}", file=sys.stderr)
 
     # Investigation targets (deep crawl signals from combined analysis results)
     # NOTE: This must run AFTER all other analyses because it reads their results.
@@ -572,6 +606,11 @@ def config_to_gap_features(config: Dict[str, Any], target_dir: str) -> Dict[str,
         "async_violations": is_enabled("async_violations"),
         "db_query_patterns": is_enabled("db_query_patterns"),
         "deprecation_markers": is_enabled("deprecation_markers"),
+        # v3.3 codesight-inspired features
+        "blast_radius": is_enabled("blast_radius"),
+        "route_detection": is_enabled("route_detection"),
+        "resource_leaks": is_enabled("resource_leaks"),
+        "magic_methods": is_enabled("magic_methods"),
     }
 
 
@@ -600,6 +639,8 @@ def apply_disable_flags(config: Dict[str, Any], args) -> Dict[str, Any]:
         "no_explain": "explain",
         "no_persona_map": "persona_map",
         "no_investigation_targets": "investigation_targets",
+        "no_blast_radius": "blast_radius",
+        "no_route_detection": "route_detection",
     }
 
     for flag, section_keys in disable_map.items():

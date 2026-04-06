@@ -370,6 +370,7 @@ class TestComputeInvestigationTargets:
             "shared_mutable_state",
             "high_uncertainty_modules",
             "domain_entities",
+            "import_time_side_effects",
             "summary",
         }
         assert set(result.keys()) == expected_keys

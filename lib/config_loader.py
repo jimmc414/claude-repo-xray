@@ -82,6 +82,11 @@ DEFAULT_CONFIG = {
         "async_violations": True,
         "db_query_patterns": True,
         "deprecation_markers": True,
+        # v3.3 codesight-inspired features
+        "blast_radius": True,
+        "route_detection": True,
+        "resource_leaks": True,
+        "magic_methods": True,
     },
 
     "output": {

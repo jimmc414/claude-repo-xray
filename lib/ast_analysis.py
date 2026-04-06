@@ -38,6 +38,8 @@ SIDE_EFFECT_PATTERNS = {
     'api': ['requests.', 'httpx.', 'aiohttp.', '.post(', '.put(', '.patch(',
            'fetch(', 'api.send'],
     'file': ['file.write', '.write(', 'json.dump', 'pickle.dump', 'export('],
+    'deserialization': ['pickle.loads', 'pickle.load', 'marshal.loads', 'marshal.load',
+                        'shelve.open', 'yaml.load', 'yaml.unsafe_load'],
     'env': ['os.environ', 'setenv', 'putenv'],
     'subprocess': ['subprocess.', 'os.system', 'os.exec', 'Popen('],
 }
@@ -55,6 +57,12 @@ SAFE_PATTERNS = [
 
 # Security-sensitive builtins (code injection vectors)
 SECURITY_PATTERNS = ['exec', 'eval', 'compile']
+
+# Unsafe deserialization patterns (arbitrary code execution risk)
+UNSAFE_DESERIALIZATION_PATTERNS = {
+    'pickle.loads', 'pickle.load', 'marshal.loads', 'marshal.load',
+    'shelve.open', 'yaml.load', 'yaml.unsafe_load',
+}
 
 # Blocking calls that should not appear inside async functions
 BLOCKING_CALL_PATTERNS = {
@@ -121,6 +129,9 @@ class FileAnalysis:
         # Deprecation markers from decorators
         self.deprecation_markers: List[Dict] = []
 
+        # Resource leaks (open() without with)
+        self.resource_leaks: List[Dict] = []
+
         # Calls (internal)
         self.internal_calls: List[Dict] = []
 
@@ -161,6 +172,7 @@ class FileAnalysis:
             "async_violations": self.async_violations,
             "sql_strings": self.sql_strings,
             "deprecation_markers": self.deprecation_markers,
+            "resource_leaks": self.resource_leaks,
             "internal_calls": self.internal_calls,
             "tokens": {
                 "original": self.original_tokens,
@@ -270,6 +282,39 @@ def _extract_decorator_name(dec) -> str:
     return "unknown"
 
 
+def _extract_decorator_detail(dec) -> Dict[str, Any]:
+    """Extract decorator name, full dotted name, and arguments from AST node.
+
+    Returns a dict with 'name' (short), 'full_name' (dotted), and optional
+    'args' (positional arg values) and 'kwargs' (keyword arg values).
+    """
+    detail = {"name": _extract_decorator_name(dec), "full_name": "", "args": [], "kwargs": {}}
+
+    if isinstance(dec, ast.Name):
+        detail["full_name"] = dec.id
+    elif isinstance(dec, ast.Attribute):
+        detail["full_name"] = _get_name(dec)
+    elif isinstance(dec, ast.Call):
+        if isinstance(dec.func, ast.Name):
+            detail["full_name"] = dec.func.id
+        elif isinstance(dec.func, ast.Attribute):
+            detail["full_name"] = _get_name(dec.func)
+        # Extract positional args
+        for arg in dec.args:
+            if isinstance(arg, ast.Constant):
+                detail["args"].append(arg.value)
+            else:
+                detail["args"].append(_get_name(arg) if isinstance(arg, (ast.Name, ast.Attribute)) else "...")
+        # Extract keyword args
+        for kw in dec.keywords:
+            if kw.arg and isinstance(kw.value, ast.Constant):
+                detail["kwargs"][kw.arg] = kw.value.value
+            elif kw.arg:
+                detail["kwargs"][kw.arg] = _get_name(kw.value) if isinstance(kw.value, (ast.Name, ast.Attribute)) else "..."
+
+    return detail
+
+
 def _get_call_text(node: ast.Call) -> str:
     """Get text representation of a function call."""
     if isinstance(node.func, ast.Name):
@@ -298,12 +343,18 @@ def _detect_side_effect(call_text: str) -> Optional[Dict]:
 
 
 def _detect_security_concern(node: ast.Call) -> Optional[Dict]:
-    """Detect exec/eval/compile builtins (code injection vectors).
+    """Detect security-sensitive calls: exec/eval/compile and unsafe deserialization.
 
-    Only flags bare builtins — cursor.execute() etc. are NOT flagged.
+    Flags bare builtins (exec, eval, compile) and dotted unsafe deserialization
+    calls (pickle.loads, yaml.load, etc.). cursor.execute() etc. are NOT flagged.
     """
     if isinstance(node.func, ast.Name) and node.func.id in SECURITY_PATTERNS:
         return {"category": "code_execution", "call": node.func.id, "line": node.lineno}
+    # Check dotted calls for unsafe deserialization
+    if isinstance(node.func, ast.Attribute):
+        full_name = _get_name(node.func)
+        if full_name in UNSAFE_DESERIALIZATION_PATTERNS:
+            return {"category": "unsafe_deserialization", "call": full_name, "line": node.lineno}
     return None
 
 
@@ -393,6 +444,31 @@ def _detect_sql_strings(tree) -> List[Dict]:
     return results
 
 
+def _detect_resource_leaks(tree) -> List[Dict]:
+    """Detect open() calls not inside a with statement (resource leak risk).
+
+    Walks the AST looking for calls to the open() builtin that are not
+    the context expression of a With/AsyncWith node.
+    """
+    # First, collect all open() call nodes that ARE inside with statements
+    safe_open_ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                ctx = item.context_expr
+                if isinstance(ctx, ast.Call) and isinstance(ctx.func, ast.Name) and ctx.func.id == 'open':
+                    safe_open_ids.add(id(ctx))
+
+    # Now find all open() calls that are NOT safe
+    leaks = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'open':
+            if id(node) not in safe_open_ids:
+                leaks.append({"call": "open", "line": node.lineno})
+
+    return leaks
+
+
 # =============================================================================
 # Complexity Analysis
 # =============================================================================
@@ -470,6 +546,7 @@ def _extract_function_info(
 
     # Decorators
     decorators = [_extract_decorator_name(d) for d in node.decorator_list]
+    decorator_details = [_extract_decorator_detail(d) for d in node.decorator_list]
 
     # Complexity
     cc = _calculate_function_cc(node)
@@ -488,8 +565,10 @@ def _extract_function_info(
         "returns": returns,
         "docstring": docstring_summary,
         "decorators": decorators,
+        "decorator_details": decorator_details,
         "complexity": cc,
         "has_type_hints": has_type_hints,
+        "is_dunder": node.name.startswith("__") and node.name.endswith("__"),
         "start_line": node.lineno,
         "end_line": getattr(node, 'end_lineno', node.lineno)  # Python 3.8+
     }
@@ -517,6 +596,7 @@ def _extract_class_info(
 
     # Decorators
     decorators = [_extract_decorator_name(d) for d in node.decorator_list]
+    decorator_details = [_extract_decorator_detail(d) for d in node.decorator_list]
 
     # Fields (class attributes and annotated assignments)
     fields = []
@@ -556,6 +636,7 @@ def _extract_class_info(
         "bases": bases,
         "docstring": docstring_summary,
         "decorators": decorators,
+        "decorator_details": decorator_details,
         "fields": fields,
         "methods": methods,
         "nested_classes": nested_classes,
@@ -875,6 +956,9 @@ def _analyze_tree(tree, source, result, include_private, include_line_numbers):
     # Detect SQL string literals (after main walk, before return)
     result.sql_strings = _detect_sql_strings(tree)
 
+    # Detect resource leaks (open() without with)
+    result.resource_leaks = _detect_resource_leaks(tree)
+
     # Calculate type coverage percentage
     if result.total_functions > 0:
         result.type_coverage = round(
@@ -933,6 +1017,7 @@ def analyze_codebase(
         "silent_failures": {},
         "sql_strings": {},
         "deprecation_markers": [],
+        "resource_leaks": {},
     }
 
     function_count_for_avg = 0
@@ -1015,6 +1100,10 @@ def analyze_codebase(
         for dm in analysis.deprecation_markers:
             dm["file"] = filepath
             results["deprecation_markers"].append(dm)
+
+        # Aggregate resource leaks
+        if analysis.resource_leaks:
+            results["resource_leaks"][filepath] = analysis.resource_leaks
 
     # Calculate averages
     if function_count_for_avg > 0:

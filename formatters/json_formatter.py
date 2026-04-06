@@ -38,7 +38,8 @@ def format_json(
         "decorators", "author_expertise", "commit_sizes",
         "priority_files", "investigation_targets",
         "security_concerns", "silent_failures", "async_violations",
-        "sql_strings", "deprecation_markers"
+        "sql_strings", "deprecation_markers",
+        "blast_radius", "routes", "resource_leaks",
     ]
 
     for section in sections:

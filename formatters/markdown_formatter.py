@@ -604,6 +604,114 @@ def format_markdown(
         except Exception:
             pass
 
+    # Blast Radius
+    if gap.get("blast_radius"):
+        blast = results.get("blast_radius", {})
+        blast_files = blast.get("files", [])
+        # Only show files with moderate+ risk
+        notable = [f for f in blast_files if f.get("risk") in ("moderate", "high", "critical")]
+        if notable:
+            lines.append("## Blast Radius")
+            lines.append("")
+            if gap.get("explain"):
+                lines.append("> **How to use:** Shows what breaks if you change a file. Higher affected count")
+                lines.append("> means more downstream modules depend on it (via imports or calls).")
+                lines.append("")
+            lines.append("*Impact analysis — files ranked by how many modules they affect:*")
+            lines.append("")
+            lines.append("| Module | Affected | Risk | Max Hops | Key Dependents |")
+            lines.append("|--------|----------|------|----------|----------------|")
+            for f in notable[:15]:
+                dependents = ", ".join(
+                    m["module"] for m in f.get("affected_modules", [])[:3]
+                )
+                if len(f.get("affected_modules", [])) > 3:
+                    dependents += "..."
+                lines.append(
+                    f"| `{f['module']}` | {f['affected_count']} | "
+                    f"{f['risk']} | {f['max_hops']} | {dependents} |"
+                )
+            lines.append("")
+            summary = blast.get("summary", {})
+            if summary.get("critical_count"):
+                lines.append(f"*{summary['critical_count']} critical, {summary.get('high_count', 0)} high-impact files. "
+                             f"Average affected: {summary.get('average_affected', 0)} modules.*")
+                lines.append("")
+
+    # HTTP API Surface (Route Detection)
+    if gap.get("route_detection"):
+        route_data = results.get("routes", {})
+        route_list = route_data.get("routes", [])
+        if route_list:
+            lines.append("## HTTP API Surface")
+            lines.append("")
+            if gap.get("explain"):
+                lines.append("> **How to use:** HTTP endpoints detected from decorator patterns. Side effects")
+                lines.append("> column shows what I/O each handler performs (DB, API, file, etc.).")
+                lines.append("")
+            lines.append("| Method | Path | Handler | Side Effects |")
+            lines.append("|--------|------|---------|-------------|")
+            for r in route_list[:20]:
+                effects = ", ".join(r.get("side_effects", [])) if r.get("side_effects") else "-"
+                handler = r.get("handler", "")
+                path = r.get("path", "")
+                lines.append(f"| {r.get('method', '?')} | `{path}` | `{handler}` | {effects} |")
+            lines.append("")
+            summary = route_data.get("summary", {})
+            frameworks = summary.get("frameworks_detected", [])
+            if frameworks:
+                lines.append(f"*Frameworks: {', '.join(frameworks)}*")
+                lines.append("")
+
+    # Resource Leaks
+    if gap.get("resource_leaks"):
+        leaks = results.get("resource_leaks", {})
+        if leaks:
+            lines.append("## Resource Leaks")
+            lines.append("")
+            if gap.get("explain"):
+                lines.append("> **How to use:** `open()` calls without a `with` statement risk file handle leaks.")
+                lines.append("> Wrap in `with open(...) as f:` to ensure cleanup on exceptions.")
+                lines.append("")
+            total = sum(len(v) for v in leaks.values())
+            lines.append(f"*{total} `open()` call(s) without `with` statement:*")
+            lines.append("")
+            count = 0
+            for filepath, file_leaks in leaks.items():
+                for leak in file_leaks:
+                    if count >= 15:
+                        break
+                    lines.append(f"- `{Path(filepath).name}:{leak.get('line', '?')}` — `{leak.get('call', 'open')}()`")
+                    count += 1
+                if count >= 15:
+                    break
+            lines.append("")
+
+    # Magic Methods (shown as part of critical classes if enabled)
+    if gap.get("magic_methods"):
+        all_classes = results.get("structure", {}).get("classes", results.get("all_classes", []))
+        # Find classes with notable dunder methods (beyond __init__)
+        classes_with_dunders = []
+        for cls in all_classes:
+            dunders = [m for m in cls.get("methods", []) if m.get("is_dunder") and m.get("name") != "__init__"]
+            if dunders:
+                classes_with_dunders.append((cls, dunders))
+        if classes_with_dunders:
+            lines.append("## Magic Methods")
+            lines.append("")
+            if gap.get("explain"):
+                lines.append("> **How to use:** Classes with dunder methods have special behavior (attribute access,")
+                lines.append("> iteration, context management, etc.). These affect how instances behave in")
+                lines.append("> surprising ways that aren't obvious from the public API.")
+                lines.append("")
+            for cls, dunders in classes_with_dunders[:10]:
+                dunder_names = ", ".join(f"`{m['name']}`" for m in dunders[:8])
+                cls_name = cls.get("name", "?")
+                file_name = Path(cls.get("file", "")).name if cls.get("file") else ""
+                location = f" ({file_name})" if file_name else ""
+                lines.append(f"- **{cls_name}**{location}: {dunder_names}")
+            lines.append("")
+
     # ==========================================================================
     # END GAP ANALYSIS FEATURES
     # ==========================================================================
@@ -615,6 +723,7 @@ def format_markdown(
             "high_uncertainty_modules", "ambiguous_interfaces",
             "entry_to_side_effect_paths", "coupling_anomalies",
             "shared_mutable_state", "convention_deviations", "domain_entities",
+            "import_time_side_effects",
         )):
             lines.append("## Investigation Targets (for Deep Crawl)")
             lines.append("")
@@ -694,6 +803,17 @@ def format_markdown(
             if de:
                 items = ", ".join(e["name"] for e in de[:8])
                 lines.append(f"**Domain entities ({len(de)}):** {items}")
+                lines.append("")
+
+            # Import-time side effects
+            itse = inv.get("import_time_side_effects", [])
+            if itse:
+                items = ", ".join(
+                    f"{Path(e['file']).name}:{e['line']} ({e['category']})"
+                    for e in itse[:5]
+                )
+                lines.append(f"**Import-time side effects ({len(itse)}):** {items}")
+                lines.append("  *(Code that runs on import — may cause action-at-a-distance)*")
                 lines.append("")
 
     # Priority Files (if available) - only show if not using gap priority_scores
