@@ -42,6 +42,12 @@
     "max_template_h2_sections": 20,
     "min_error_handling_h3": 5,
     "min_skeleton_h3": 25,
+    "header_levels": {
+      "h1_max_per_section_file": 0,
+      "h2_per_section_file": 1,
+      "enforcement": "normalize_then_warn",
+      "note": "Section files must start at h2. h1 triggers normalization in Step 6b. h2 count > 1 means subsections were over-promoted."
+    },
     "gotcha_clusters": {
       "method": "distinct_subsystems_minus_1",
       "absolute_floor": 3,

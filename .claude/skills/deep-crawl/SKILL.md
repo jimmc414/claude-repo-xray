@@ -940,8 +940,31 @@ Read /tmp/deep_crawl/sections/_skeleton.md for your section's prescribed ### hea
 - For other sections: no skeleton constraint — derive structure from content.
 - You MAY add additional ### subsections beyond the skeleton's prescriptions.
 
-## Section Hierarchy Rule
-Your output MUST use exactly one `## ` header per template section assigned to you (e.g., `## Error Handling Strategy`, `## Module Behavioral Index`). All subdivisions within a section MUST use `### ` or deeper. Never promote subsection content to `## ` level — a flat document with many `## ` headers destroys navigability. If your template section has subsections, they are `### `. If those subsections have further divisions, they are `#### `.
+## Section Hierarchy Rule — CRITICAL (violations are auto-corrected and logged)
+
+**YOUR OUTPUT HEADERS MUST FOLLOW THIS EXACT PATTERN:**
+
+| Level | Prefix | Usage | Example |
+|-------|--------|-------|---------|
+| `## `  | Two hashes | Section title (exactly ONE per assigned section) | `## Error Handling Strategy` |
+| `### ` | Three hashes | Subsections within your section | `### Retry Patterns` |
+| `#### ` | Four hashes | Sub-subsections | `#### Exponential Backoff` |
+
+**NEVER USE `# ` (single hash).** The `# ` level is reserved for the document title only. It does not appear in section files.
+
+**WRONG:**
+
+    # Error Handling Strategy        <-- WRONG: # is document title only
+    ## Retry Patterns                <-- WRONG: ## is for section titles only
+    ### Exponential Backoff
+
+**CORRECT:**
+
+    ## Error Handling Strategy       <-- section title: exactly one ## per section
+    ### Retry Patterns               <-- subsection: ###
+    #### Exponential Backoff         <-- sub-subsection: ####
+
+Header levels are mechanically validated and normalized after your output. If any `# ` header is found or `## ` count exceeds the number of template sections assigned to you, it will be logged as a violation.
 
 ## S2 Historical Risk Annotation
 If you are S2 (Module Behavioral Index): for each module ### being assembled, check if it appears in `git.risk`, `git.function_churn`, or `git.velocity` from `/tmp/xray/xray.json`. If it does, append a brief **Historical Risk** note at the end of that module's subsection with: risk score, most-volatile functions, and trend direction. Format: `> **Git risk:** 0.88 — volatile functions: load_config (8 commits, 2 hotfixes). Trend: stable.`
@@ -1178,6 +1201,25 @@ fi
 
 Playbook thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json` under `playbooks`.
 
+#### Step 5b-hdr: HEADER LEVEL GATE (diagnostic)
+
+Check for header level violations in section files. This gate is diagnostic — it does NOT block the pipeline because Step 6b normalizes headers mechanically. Its value is tracking whether assembly agents are following the Section Hierarchy Rule.
+
+```bash
+# === HEADER LEVEL GATE (diagnostic — Step 6b fixes violations) ===
+for f in /tmp/deep_crawl/sections/*.md; do
+    [ -f "$f" ] || continue
+    FNAME=$(basename "$f")
+    case "$FNAME" in _skeleton.md|*.done) continue ;; esac
+
+    # Count h1 headers outside code blocks
+    H1_COUNT=$(awk '/^```/{c=!c;next} !c && /^# [^#]/{n++} END{print n+0}' "$f")
+    [ "$H1_COUNT" -gt 0 ] && echo "HDR WARN: $FNAME has $H1_COUNT h1 headers (will be auto-fixed in Step 6b)"
+done
+```
+
+Header level thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json` under `structural_navigability.header_levels`.
+
 #### Step 5c: TRACEABILITY GATE (mandatory before orchestrator sections)
 
 Mechanically verify every completed investigation task has content in at least one assembled section file:
@@ -1226,6 +1268,46 @@ The orchestrator writes these directly (no sub-agent needed — they are small, 
 
 Write to `/tmp/deep_crawl/sections/header.md`, `/tmp/deep_crawl/sections/identity.md`, `/tmp/deep_crawl/sections/gaps.md`, `/tmp/deep_crawl/sections/environment_bootstrap.md`, `/tmp/deep_crawl/sections/footer.md`.
 
+#### Step 6b: Normalize header levels in section files
+
+Mechanically fix header levels before concatenation. This corrects any agent that used `# ` instead of `## ` or `## ` instead of `### `. Assembly agents sometimes produce section files with `# SectionName` (h1) and `## Subsection` (h2) instead of the correct `## SectionName` (h2) and `### Subsection` (h3). This step detects and corrects that by shifting all headers in a file by a constant offset.
+
+```bash
+# === HEADER LEVEL NORMALIZATION ===
+NORM_COUNT=0
+for f in /tmp/deep_crawl/sections/*.md; do
+    [ -f "$f" ] || continue
+    FNAME=$(basename "$f")
+    case "$FNAME" in header.md|footer.md|_skeleton.md|*.done) continue ;; esac
+
+    # Find level of first markdown header outside code blocks
+    FIRST_LEVEL=$(awk '/^```/{c=!c;next} !c && /^#{1,6} /{match($0,/^#+/); print RLENGTH; exit}' "$f")
+    [ -z "$FIRST_LEVEL" ] && continue  # no headers in file
+    [ "$FIRST_LEVEL" -eq 2 ] && continue  # already correct
+
+    # Shift all headers so first header becomes ## (h2)
+    OFFSET=$((2 - FIRST_LEVEL))
+    awk -v offset="$OFFSET" '
+        /^```/ { c=!c; print; next }
+        !c && /^#{1,6} / {
+            match($0, /^#+/)
+            new = RLENGTH + offset
+            if (new < 2) new = 2
+            if (new > 6) new = 6
+            pfx = ""; for (i=1; i<=new; i++) pfx = pfx "#"
+            sub(/^#+/, pfx)
+        }
+        { print }
+    ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+
+    echo "NORMALIZED: $FNAME (shifted headers by ${OFFSET})"
+    NORM_COUNT=$((NORM_COUNT + 1))
+done
+echo "Step 6b: Normalized $NORM_COUNT section files"
+```
+
+Log: `Step 6b: Normalized {N} section files`
+
 #### Step 7: Assemble DRAFT_ONBOARD.md
 
 Concatenate all section files in template order:
@@ -1252,6 +1334,12 @@ cat /tmp/deep_crawl/sections/header.md \
     /tmp/deep_crawl/sections/gaps.md \
     /tmp/deep_crawl/sections/footer.md \
     > /tmp/deep_crawl/DRAFT_ONBOARD.md
+
+# Fill {DOC_TOKENS} placeholder with actual token estimate
+DOC_WORDS=$(wc -w < /tmp/deep_crawl/DRAFT_ONBOARD.md)
+DOC_TOKENS=$((DOC_WORDS * 13 / 10))
+sed -i "s/{DOC_TOKENS}/~${DOC_TOKENS}/g" /tmp/deep_crawl/DRAFT_ONBOARD.md
+echo "Step 7: {DOC_TOKENS} filled — ~${DOC_TOKENS} tokens (${DOC_WORDS} words)"
 ```
 
 #### Step 8: Verify retention
@@ -1354,6 +1442,11 @@ test -f /tmp/deep_crawl/DEEP_ONBOARD.md && test -f /tmp/deep_crawl/REFINE_LOG.md
 # Cross-referencing is strictly additive — final must be >= draft
 wc -w /tmp/deep_crawl/DRAFT_ONBOARD.md /tmp/deep_crawl/DEEP_ONBOARD.md
 # If DEEP_ONBOARD word count < DRAFT_ONBOARD, re-spawn with: "Your output lost words. Cross-referencing is additive only — you may NOT delete content. Re-execute all 4 steps."
+
+# Re-fill {DOC_TOKENS} in final document (cross-referencing may have changed word count)
+FINAL_WORDS=$(wc -w < /tmp/deep_crawl/DEEP_ONBOARD.md)
+FINAL_TOKENS=$((FINAL_WORDS * 13 / 10))
+sed -i "s/~[0-9,]*\( tokens\)/~${FINAL_TOKENS}\1/g" /tmp/deep_crawl/DEEP_ONBOARD.md
 ```
 
 **Sub-agent 2: Validator**
