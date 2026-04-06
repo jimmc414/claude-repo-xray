@@ -32,6 +32,8 @@ ROUTE_DECORATOR_PATTERNS = {
     "patch": "PATCH",
     "head": "HEAD",
     "options": "OPTIONS",
+    # FastAPI: @app.websocket("/path"), @router.websocket("/path")
+    "websocket": "WEBSOCKET",
     # Flask: @app.route("/path", methods=["GET"])
     "route": None,  # Method extracted from kwargs
     # FastAPI: @app.api_route("/path", methods=["GET"])
@@ -82,8 +84,13 @@ def _extract_route_from_decorator(
     else:
         return None
 
-    # Must have a recognizable prefix or be a known pattern
-    if prefix and prefix not in ROUTER_PREFIXES and method_part not in DJANGO_PATTERNS:
+    # Must have a recognizable prefix or be a known pattern.
+    # Bare decorators like @patch() or @get() without a router/app prefix
+    # are not HTTP routes (e.g., unittest.mock.patch is not PATCH).
+    if not prefix:
+        if method_part not in DJANGO_PATTERNS:
+            return None
+    elif prefix not in ROUTER_PREFIXES and method_part not in DJANGO_PATTERNS:
         return None
 
     # Check against known HTTP method decorators

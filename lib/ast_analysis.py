@@ -843,10 +843,33 @@ def _analyze_tree(tree, source, result, include_private, include_line_numbers):
     # Track all function names in this file for internal call detection
     all_function_names = set()
 
+    # Pre-compute line numbers of functions/classes in module-level conditional
+    # blocks (e.g., "if HAS_FASTAPI: @router.get(...) def stream(): ...").
+    # These are logically module-level even though col_offset > 0.
+    _module_cond_lines = set()
+    for _stmt in tree.body:
+        if isinstance(_stmt, ast.If):
+            _branches = [_stmt.body, _stmt.orelse]
+        elif isinstance(_stmt, ast.Try):
+            _branches = [_stmt.body, _stmt.orelse]
+            if hasattr(_stmt, 'finalbody'):
+                _branches.append(_stmt.finalbody)
+            for _handler in _stmt.handlers:
+                _branches.append(_handler.body)
+        else:
+            _branches = []
+        for _branch in _branches:
+            for _child in _branch:
+                if isinstance(_child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    _module_cond_lines.add(_child.lineno)
+
+    def _is_module_level(node):
+        return node.col_offset == 0 or node.lineno in _module_cond_lines
+
     # Process all nodes in a single walk
     for node in ast.walk(tree):
         # Classes
-        if isinstance(node, ast.ClassDef) and node.col_offset == 0:
+        if isinstance(node, ast.ClassDef) and _is_module_level(node):
             class_info = _extract_class_info(node, include_line_numbers)
             result.classes.append(class_info)
 
@@ -867,9 +890,9 @@ def _analyze_tree(tree, source, result, include_private, include_line_numbers):
                 for dec_name in method["decorators"]:
                     result.decorators[dec_name] += 1
 
-        # Module-level functions
+        # Module-level functions (including those in module-level if/try blocks)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.col_offset == 0:  # Top-level only
+            if _is_module_level(node):
                 func_info = _extract_function_info(node, include_line_numbers)
                 result.functions.append(func_info)
                 all_function_names.add(node.name)
