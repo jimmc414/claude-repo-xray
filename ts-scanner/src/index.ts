@@ -18,12 +18,15 @@ import { analyzeTests } from "./test-analysis.js";
 import { generateLogicMaps } from "./logic-maps.js";
 import { analyzeConfig } from "./config-analysis.js";
 import { analyzeCli } from "./cli-analysis.js";
+import { analyzeRoutes } from "./route-analysis.js";
+import { analyzeBlastRadius } from "./blast-analysis.js";
+import { computeImportTimeSideEffects } from "./import-time-effects.js";
 import type {
   XRayResults, Structure, Summary, Complexity, TypeCoverage,
   DecoratorInventory, AsyncPatterns, Hotspot, FileAnalysis, ClassInfo, FunctionInfo,
   ImportAnalysis, CallAnalysis, SideEffects, SideEffectEntry, SecurityConcern, SilentFailure,
   SqlString, DeprecationMarker, AsyncViolation, EnvVar, TestAnalysis, LogicMap,
-  CliAnalysis, ConfigRules,
+  CliAnalysis, ConfigRules, ResourceLeak,
 } from "./types.js";
 
 const VERSION = "0.1.0";
@@ -94,7 +97,18 @@ function main(): void {
   if (verbose) process.stderr.write("Running test analysis...\n");
   const testResults = analyzeTests(discovery.files, targetDir);
 
-  // Step 6: Aggregate results
+  // Step 6: Route analysis
+  if (verbose) process.stderr.write("Detecting routes...\n");
+  const routeResults = analyzeRoutes(fileResults, targetDir);
+
+  // Step 6b: Blast radius analysis
+  if (verbose) process.stderr.write("Computing blast radius...\n");
+
+  // Step 6c: Import-time side effects
+  if (verbose) process.stderr.write("Detecting import-time side effects...\n");
+  const importTimeEffects = computeImportTimeSideEffects(fileResults, targetDir);
+
+  // Step 7: Aggregate results
   if (verbose) process.stderr.write("Aggregating results...\n");
   const results = aggregateResults(targetDir, fileResults, discovery.tsconfigPath, importResults, callResults, testResults);
 
@@ -116,6 +130,28 @@ function main(): void {
   if (verbose) process.stderr.write("Detecting CLI framework...\n");
   const cliResult = analyzeCli(discovery.files);
   if (cliResult) results.cli = cliResult;
+
+  // Step 10: Extended signals
+  if (routeResults) results.routes = routeResults;
+
+  if (results.imports && results.calls) {
+    const blastResults = analyzeBlastRadius(results.imports, results.calls);
+    if (blastResults.files.length > 0) results.blast_radius = blastResults;
+  }
+
+  if (importTimeEffects.length > 0) {
+    results.investigation_targets = { import_time_side_effects: importTimeEffects };
+  }
+
+  // Aggregate resource leaks
+  const resourceLeaks: Record<string, ResourceLeak[]> = {};
+  for (const [fp, fa] of Object.entries(fileResults)) {
+    if (fa.resource_leaks && fa.resource_leaks.length > 0) {
+      const rel = path.relative(targetDir, fp).replace(/\\/g, "/");
+      resourceLeaks[rel] = fa.resource_leaks;
+    }
+  }
+  if (Object.keys(resourceLeaks).length > 0) results.resource_leaks = resourceLeaks;
 
   // Output JSON
   process.stdout.write(JSON.stringify(results, null, 2));

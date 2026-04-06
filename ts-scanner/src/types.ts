@@ -32,6 +32,11 @@ export interface XRayResults {
   logic_maps?: LogicMap[];
   cli?: CliAnalysis;
   config_rules?: ConfigRules;
+  // Extended signals (Phase 3)
+  routes?: RouteAnalysis;
+  blast_radius?: BlastRadius;
+  investigation_targets?: InvestigationTargets;
+  resource_leaks?: Record<string, ResourceLeak[]>;
   // TS-specific
   ts_specific?: TsSpecific;
 }
@@ -113,6 +118,8 @@ export interface FileAnalysis {
     original: number;
     skeleton: number;
   };
+  resource_leaks?: ResourceLeak[];
+  route_registrations?: RouteRegistration[];
   parse_error: string | null;
   shared_mutable_state?: SharedMutableState[];
   // TS-specific optional fields
@@ -125,11 +132,19 @@ export interface FileAnalysis {
 // Skeleton sub-types
 // =============================================================================
 
+export interface DecoratorDetail {
+  name: string;
+  full_name: string;
+  args: (string | number | boolean | null)[];
+  kwargs: Record<string, string | number | boolean | null>;
+}
+
 export interface ClassInfo {
   name: string;
   bases: string[];
   methods: MethodInfo[];
   decorators: string[];
+  decorator_details?: DecoratorDetail[];
   line: number;
   docstring: string | null;
   file?: string;
@@ -143,7 +158,9 @@ export interface MethodInfo {
   args: ArgInfo[];
   returns: string | null;
   decorators: string[];
+  decorator_details?: DecoratorDetail[];
   is_async: boolean;
+  is_dunder?: boolean;
   line: number;
   complexity: number;
 }
@@ -153,6 +170,7 @@ export interface FunctionInfo {
   args: ArgInfo[];
   returns: string | null;
   decorators: string[];
+  decorator_details?: DecoratorDetail[];
   is_async: boolean;
   line: number;
   complexity: number;
@@ -441,4 +459,70 @@ export interface ConfigRules {
   } | null;
   eslint: { config_file: string; framework: string | null } | null;
   prettier: { config_file: string } | null;
+}
+
+// =============================================================================
+// Extended Signals (Phase 3)
+// =============================================================================
+
+export interface ResourceLeak {
+  call: string;
+  line: number;
+}
+
+export interface RouteRegistration {
+  method: string;
+  path: string;
+  handler: string;
+  line: number;
+  is_async: boolean;
+  framework_hint: string;
+}
+
+export interface Route {
+  method: string;
+  path: string;
+  handler: string;
+  file: string;
+  line: number;
+  is_async: boolean;
+  framework_hint: string;
+  side_effects: string[];
+}
+
+export interface RouteAnalysis {
+  routes: Route[];
+  summary: {
+    total_routes: number;
+    by_method: Record<string, number>;
+    frameworks_detected: string[];
+  };
+}
+
+export interface BlastRadiusEntry {
+  module: string;
+  affected_count: number;
+  risk: "critical" | "high" | "moderate" | "isolated";
+  affected_modules: Array<{ module: string; hops: number }>;
+  max_hops: number;
+}
+
+export interface BlastRadius {
+  files: BlastRadiusEntry[];
+  summary: {
+    critical_count: number;
+    high_count: number;
+    average_affected: number;
+  };
+}
+
+export interface ImportTimeSideEffect {
+  file: string;
+  line: number;
+  call: string;
+  category: string;
+}
+
+export interface InvestigationTargets {
+  import_time_side_effects: ImportTimeSideEffect[];
 }

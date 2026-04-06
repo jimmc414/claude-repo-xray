@@ -8,7 +8,7 @@
 import * as ts from "typescript";
 import type {
   SilentFailure, SecurityConcern, SideEffect, SqlString,
-  AsyncViolation, DeprecationMarker, EnvVar, InstanceVar,
+  AsyncViolation, DeprecationMarker, EnvVar, InstanceVar, ResourceLeak,
 } from "./types.js";
 
 // =============================================================================
@@ -49,6 +49,12 @@ const SECURITY_CALL_PATTERNS: Array<{ pattern: string; type: string; severity: S
   { pattern: "child_process.exec", type: "subprocess", severity: "high" },
   { pattern: "child_process.execSync", type: "subprocess", severity: "high" },
   { pattern: "document.write", type: "dom_injection", severity: "medium" },
+  // Unsafe deserialization
+  { pattern: "vm.runInContext", type: "unsafe_deserialization", severity: "high" },
+  { pattern: "vm.runInNewContext", type: "unsafe_deserialization", severity: "high" },
+  { pattern: "vm.runInThisContext", type: "unsafe_deserialization", severity: "high" },
+  { pattern: "yaml.load", type: "unsafe_deserialization", severity: "medium" },
+  { pattern: "deserialize", type: "unsafe_deserialization", severity: "medium" },
 ];
 
 export function detectSecurityConcern(node: ts.CallExpression, sourceFile: ts.SourceFile): SecurityConcern | null {
@@ -350,4 +356,91 @@ export function extractInstanceVars(node: ts.ClassDeclaration | ts.ClassExpressi
   }
 
   return vars;
+}
+
+// =============================================================================
+// Dynamic require detection (security concern)
+// =============================================================================
+
+export function detectDynamicRequire(node: ts.CallExpression, sourceFile: ts.SourceFile): SecurityConcern | null {
+  const callText = node.expression.getText(sourceFile);
+  if (callText !== "require") return null;
+  // require() with a non-string-literal argument is dynamic
+  if (node.arguments.length > 0 && !ts.isStringLiteral(node.arguments[0])) {
+    const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+    return { type: "unsafe_deserialization", call: "dynamic require()", line, severity: "medium" };
+  }
+  return null;
+}
+
+// =============================================================================
+// Resource leak detection
+// =============================================================================
+
+const RESOURCE_LEAK_PATTERNS = [
+  "fs.openSync", "fs.createReadStream", "fs.createWriteStream",
+  "openSync", "createReadStream", "createWriteStream",
+];
+
+export function detectResourceLeak(node: ts.CallExpression, sourceFile: ts.SourceFile): ResourceLeak | null {
+  const callText = node.expression.getText(sourceFile);
+  for (const pattern of RESOURCE_LEAK_PATTERNS) {
+    if (callText === pattern || callText.endsWith("." + pattern)) {
+      const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+      return { call: callText, line };
+    }
+  }
+  return null;
+}
+
+// =============================================================================
+// Route registration detection (Express/Fastify/Koa/Hono call-based routes)
+// =============================================================================
+
+const HTTP_METHODS = new Set(["get", "post", "put", "delete", "patch", "head", "options", "all"]);
+const ROUTER_OBJECTS = new Set(["app", "router", "server", "api", "route", "fastify", "hono"]);
+
+export function detectRouteRegistration(
+  node: ts.CallExpression, sourceFile: ts.SourceFile,
+): { method: string; path: string; handler: string; line: number; framework_hint: string } | null {
+  // Match: app.get("/path", handler) or router.post("/path", handler)
+  if (!ts.isPropertyAccessExpression(node.expression)) return null;
+  const prop = node.expression;
+  const methodName = prop.name.text.toLowerCase();
+  if (!HTTP_METHODS.has(methodName)) return null;
+
+  // Check the object prefix
+  const objText = prop.expression.getText(sourceFile).toLowerCase();
+  const objName = objText.split(".").pop() ?? objText;
+  if (!ROUTER_OBJECTS.has(objName)) return null;
+
+  // First arg should be a string literal (the path)
+  if (node.arguments.length < 1) return null;
+  const pathArg = node.arguments[0];
+  if (!ts.isStringLiteral(pathArg) && !ts.isNoSubstitutionTemplateLiteral(pathArg)) return null;
+  const routePath = ts.isStringLiteral(pathArg) ? pathArg.text : pathArg.text;
+
+  // Try to get handler name from second arg
+  let handler = "(anonymous)";
+  if (node.arguments.length >= 2) {
+    const handlerArg = node.arguments[node.arguments.length - 1];
+    if (ts.isIdentifier(handlerArg)) {
+      handler = handlerArg.text;
+    } else if (ts.isArrowFunction(handlerArg) || ts.isFunctionExpression(handlerArg)) {
+      handler = "(inline)";
+    }
+  }
+
+  const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+  const framework_hint = objText.includes("fastify") ? "fastify"
+    : objText.includes("hono") ? "hono"
+    : "express";
+
+  return {
+    method: methodName === "all" ? "ALL" : methodName.toUpperCase(),
+    path: routePath,
+    handler,
+    line,
+    framework_hint,
+  };
 }

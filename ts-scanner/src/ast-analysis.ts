@@ -11,7 +11,9 @@ import {
   detectSecurityAssignment, detectDeprecationJSDoc, detectDeprecationDecorator,
   detectSideEffect, detectSqlString, detectSqlTemplate, detectSqlTaggedTemplate,
   detectEnvVar, extractEnvVarDefault, detectAsyncViolation, extractInstanceVars,
+  detectDynamicRequire, detectResourceLeak, detectRouteRegistration,
 } from "./detectors.js";
+import type { DecoratorDetail } from "./types.js";
 
 // =============================================================================
 // Walk Context
@@ -239,12 +241,27 @@ function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis, classM
     if (f) result.silent_failures.push(f);
   }
 
-  // CallExpression → side effects, security, async violations
+  // CallExpression → side effects, security, async violations, resource leaks, routes
   if (ts.isCallExpression(node)) {
     const se = detectSideEffect(node, ctx.sourceFile);
     if (se) result.side_effects.push(se);
     const sc = detectSecurityConcern(node, ctx.sourceFile);
     if (sc) result.security_concerns.push(sc);
+    const dr = detectDynamicRequire(node, ctx.sourceFile);
+    if (dr) result.security_concerns.push(dr);
+    const rl = detectResourceLeak(node, ctx.sourceFile);
+    if (rl) {
+      if (!result.resource_leaks) result.resource_leaks = [];
+      result.resource_leaks.push(rl);
+    }
+    // Route registration detection (Express/Fastify/Koa/Hono call-based routes)
+    if (ctx.depth === 0) {
+      const rr = detectRouteRegistration(node, ctx.sourceFile);
+      if (rr) {
+        if (!result.route_registrations) result.route_registrations = [];
+        result.route_registrations.push({ ...rr, is_async: false });
+      }
+    }
     if (ctx.isAsync) {
       const av = detectAsyncViolation(node, ctx.sourceFile);
       if (av) result.async_violations.push({
@@ -324,10 +341,11 @@ function extractFunctionInfo(node: ts.FunctionDeclaration, ctx: WalkContext): Fu
   const params = extractParameters(node.parameters, ctx);
   const returns = node.type ? node.type.getText(ctx.sourceFile) : null;
   const decorators = extractDecorators(node);
+  const decoratorDetails = extractDecoratorDetails(node);
   const cc = calculateComplexity(node);
   const docstring = getJSDocSummary(node);
 
-  return {
+  const info: FunctionInfo = {
     name,
     args: params,
     returns,
@@ -337,6 +355,8 @@ function extractFunctionInfo(node: ts.FunctionDeclaration, ctx: WalkContext): Fu
     complexity: cc,
     docstring,
   };
+  if (decoratorDetails.length > 0) info.decorator_details = decoratorDetails;
+  return info;
 }
 
 function extractArrowFunctionInfo(
@@ -374,6 +394,7 @@ function extractClassInfo(
   const name = node.name?.text ?? "(anonymous)";
   const bases = extractHeritageClauses(node);
   const decorators = extractDecorators(node);
+  const decoratorDetails = extractDecoratorDetails(node);
   const methods: MethodInfo[] = [];
   const docstring = getJSDocSummary(node);
 
@@ -389,7 +410,7 @@ function extractClassInfo(
     }
   }
 
-  return {
+  const classInfo: ClassInfo = {
     name,
     bases,
     methods,
@@ -398,6 +419,8 @@ function extractClassInfo(
     docstring,
     kind: "class",
   };
+  if (decoratorDetails.length > 0) classInfo.decorator_details = decoratorDetails;
+  return classInfo;
 }
 
 function extractMethodInfo(
@@ -417,9 +440,13 @@ function extractMethodInfo(
   const params = extractParameters(node.parameters, ctx);
   const returns = ("type" in node && node.type) ? node.type.getText(ctx.sourceFile) : null;
   const decorators = extractDecorators(node);
+  const decoratorDetails = extractDecoratorDetails(node);
   const cc = calculateComplexity(node);
 
-  return {
+  // Determine if this is a "dunder" equivalent (Symbol methods, toString, valueOf, etc.)
+  const isDunder = TS_DUNDER_NAMES.has(name) || name.startsWith("[Symbol.");
+
+  const methodInfo: MethodInfo = {
     name,
     args: params,
     returns,
@@ -428,6 +455,9 @@ function extractMethodInfo(
     line: getLineNumber(node, ctx.sourceFile),
     complexity: cc,
   };
+  if (isDunder) methodInfo.is_dunder = true;
+  if (decoratorDetails.length > 0) methodInfo.decorator_details = decoratorDetails;
+  return methodInfo;
 }
 
 // =============================================================================
@@ -604,6 +634,68 @@ function extractDecorators(node: ts.Node): string[] {
   }
   return decorators;
 }
+
+function extractDecoratorDetails(node: ts.Node): DecoratorDetail[] {
+  const details: DecoratorDetail[] = [];
+  const mods = ts.canHaveDecorators(node) ? ts.getDecorators(node) : undefined;
+  if (!mods) return details;
+
+  for (const dec of mods) {
+    const detail: DecoratorDetail = { name: "", full_name: "", args: [], kwargs: {} };
+
+    if (ts.isCallExpression(dec.expression)) {
+      const callExpr = dec.expression;
+      const fullName = callExpr.expression.getText();
+      detail.full_name = fullName;
+      detail.name = fullName.includes(".") ? fullName.split(".").pop()! : fullName;
+
+      // Extract positional args
+      for (const arg of callExpr.arguments) {
+        if (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) {
+          detail.args.push(arg.text);
+        } else if (ts.isNumericLiteral(arg)) {
+          detail.args.push(Number(arg.text));
+        } else if (arg.kind === ts.SyntaxKind.TrueKeyword) {
+          detail.args.push(true);
+        } else if (arg.kind === ts.SyntaxKind.FalseKeyword) {
+          detail.args.push(false);
+        } else if (arg.kind === ts.SyntaxKind.NullKeyword) {
+          detail.args.push(null);
+        } else if (ts.isObjectLiteralExpression(arg)) {
+          // Extract object literal properties as kwargs
+          for (const prop of arg.properties) {
+            if (ts.isPropertyAssignment(prop) && prop.name) {
+              const key = prop.name.getText();
+              const val = prop.initializer;
+              if (ts.isStringLiteral(val)) detail.kwargs[key] = val.text;
+              else if (ts.isNumericLiteral(val)) detail.kwargs[key] = Number(val.text);
+              else if (val.kind === ts.SyntaxKind.TrueKeyword) detail.kwargs[key] = true;
+              else if (val.kind === ts.SyntaxKind.FalseKeyword) detail.kwargs[key] = false;
+              else detail.kwargs[key] = val.getText();
+            }
+          }
+        } else {
+          detail.args.push("...");
+        }
+      }
+    } else {
+      const text = dec.expression.getText();
+      detail.full_name = text;
+      detail.name = text.includes(".") ? text.split(".").pop()! : text;
+    }
+
+    details.push(detail);
+  }
+  return details;
+}
+
+// TS equivalents of Python dunder methods
+const TS_DUNDER_NAMES = new Set([
+  "constructor", "toString", "valueOf", "toJSON", "toPrimitive",
+  "[Symbol.iterator]", "[Symbol.asyncIterator]", "[Symbol.toPrimitive]",
+  "[Symbol.hasInstance]", "[Symbol.dispose]", "[Symbol.asyncDispose]",
+  "[Symbol.toStringTag]",
+]);
 
 function extractHeritageClauses(node: ts.ClassDeclaration | ts.ClassExpression): string[] {
   const bases: string[] = [];
