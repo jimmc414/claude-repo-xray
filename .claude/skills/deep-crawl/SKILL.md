@@ -242,10 +242,13 @@ Save all pre-flight output to `/tmp/deep_crawl/PREFLIGHT.md` for Phase 1 consump
     If non-empty, add a P4 cross-cutting task: "Investigate import-time side effects —
     verify each flagged call, determine if intentional or accidental, document consequences."
     These are high-value gotcha candidates.
-2c. Read `security_concerns` from `/tmp/xray/xray.json`. If any entries have
-    category "unsafe_deserialization", add a P4 cross-cutting task:
+2c. Read `security_concerns` from `/tmp/xray/xray.json`. This is a dict keyed by
+    filepath, where each value is a list of concern objects with a `category` field.
+    Iterate all values: if any concern has `category == "unsafe_deserialization"`,
+    add a P4 cross-cutting task:
     "Investigate unsafe deserialization — trace data source for each pickle.loads/
     yaml.load call. Determine if untrusted data can reach these calls."
+    Example path: `security_concerns["app/serializer.py"][0].category`
 4. Detect all applicable domain facets using indicators from `.claude/skills/deep-crawl/configs/domain_profiles.json`. A repo can match multiple facets (e.g., a Django app with Celery workers and a CLI gets `web_api` + `async_service` + `cli_tool`). Union their `additional_investigation` tasks into the crawl plan. If no facet matches, use `library` as default. Read `/tmp/deep_crawl/PREFLIGHT.md` for framework detection results to guide facet matching.
 4b. If `routes.routes` exists and is non-empty in `/tmp/xray/xray.json`, automatically
     activate the `web_api` facet (even if no other web_api indicators matched). The
@@ -565,23 +568,30 @@ Sub-agents receive these protocol instructions verbatim:
     - What happens if the side effect fails at import time?
     - What modules import this one (from imports.graph) and are affected?
     Note in findings: "⚠ Import-time: {call} at line {N} — {consequence}"
-2d. For classes with magic methods beyond __init__ (check `is_dunder` in method
-    info from xray), document:
-    - What each magic method does (read the actual implementation)
+2d. For classes with magic methods beyond __init__, check xray.json. Magic methods
+    have `is_dunder: true` in the method info at:
+    `structure.<filepath>.classes[].methods[]` — look for methods where `is_dunder`
+    is true and the name is NOT `__init__` or `__repr__`. Document each:
+    - What the magic method does (read the actual implementation)
     - Behavioral implications: __getattr__ = hidden attribute interception,
       __eq__ without __hash__ = unhashable, __call__ = instances are callable,
       __enter__/__exit__ = context manager protocol
     - Whether consumers rely on these behaviors
-3. For each public function, note decorator arguments that affect behavior:
+3. For each public function, note decorator arguments that affect behavior.
+   Decorator args are in xray.json at `structure.<filepath>.functions[].decorators[]`
+   and `structure.<filepath>.classes[].methods[].decorators[]` — each decorator has
+   `name`, `args` (positional list), and `kwargs` (key-value dict). Look for:
    - Retry decorators: max_attempts, backoff strategy, which exceptions are retried
    - Cache decorators: TTL, cache key strategy, invalidation
    - Auth decorators: required role, permission level
    - Rate limit decorators: limits, window, key function
    These are behavioral contracts — downstream agents need to know them.
-3b. If xray flags resource_leaks in this module (check xray.json), verify:
-    is there a close() call elsewhere? Is it inside a finally block? Is it a
-    real leak or does the caller manage the lifecycle? Note confirmed leaks
-    as [MEDIUM] gotchas.
+3b. Check `resource_leaks` in `/tmp/xray/xray.json` — this is a dict keyed by
+    filepath (e.g., `resource_leaks["app/utils.py"]`), where each value is a list
+    of leak objects with `line`, `call`, and context. If this module's filepath
+    has entries, verify each: is there a close() call elsewhere? Is it inside a
+    finally block? Is it a real leak or does the caller manage the lifecycle?
+    Note confirmed leaks as [MEDIUM] gotchas.
 4. Record any gotchas
 ```
 
