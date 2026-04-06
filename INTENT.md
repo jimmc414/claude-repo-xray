@@ -46,7 +46,7 @@ Deterministic. Fast. Zero dependencies. Zero API calls. Produces the same output
 
 We chose determinism over intelligence here on purpose. The scanner runs frequently — on every commit in CI, before every analysis session, as a quick check. It cannot be flaky, slow, or expensive. It sacrifices depth for reliability.
 
-The scanner extracts 42+ signals from the AST, import graph, git history, and code patterns. It doesn't interpret these signals — it just surfaces them. Interpretation is the agent's job.
+The scanner extracts 49+ signals from the AST, import graph, git history, and code patterns. It doesn't interpret these signals — it just surfaces them. Interpretation is the agent's job.
 
 **Layer 2: The Agents (deep_crawl, repo_xray)**
 

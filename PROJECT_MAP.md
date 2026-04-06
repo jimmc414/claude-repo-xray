@@ -61,7 +61,9 @@ Inside `run_analysis()`, 8 stages execute sequentially. Each depends on prior st
 | 5 | `git_analysis.py` | File paths | Risk scores, coupling, freshness, churn, velocity, author expertise | Stage 1 |
 | 6 | `test_analysis.py` | File paths | Test file index, fixture list, coverage estimate | Stage 1 |
 | 7 | `tech_debt_analysis.py` | File paths | TODO/FIXME markers, deprecation markers | Stage 1 |
-| 8 | `investigation_targets.py` | All prior results | Prioritized signals: ambiguous interfaces, coupling anomalies, high-uncertainty modules, domain entities | Stages 1-7 |
+| 8 | `investigation_targets.py` | All prior results | Prioritized signals: ambiguous interfaces, coupling anomalies, high-uncertainty modules, domain entities, import-time side effects | Stages 1-7 |
+| 9 | `blast_analysis.py` | Import graph + call graph | Transitive impact per module via BFS, risk classification, undertested dependents | Stages 3-4 |
+| 10 | `route_analysis.py` | AST data | HTTP route detection: method, path, handler, side effects per route, framework detection | Stage 2 |
 
 After `run_analysis()`, gap features are computed separately (`gap_features.py`) because they need combined results from multiple stages. Then formatters produce output.
 
@@ -75,13 +77,15 @@ After `run_analysis()`, gap features are computed separately (`gap_features.py`)
 |------|-------|------|-------------|
 | `xray.py` | ~700 | Orchestrator, CLI, pipeline | `run_analysis()` is the critical path. `config_to_gap_features()` bridges config flags to formatter. Version string at top. |
 | `lib/file_discovery.py` | ~320 | Find .py files, apply ignores | `discover_python_files()` uses `os.walk` with in-place directory filtering. Token estimate = file_size // 4. |
-| `lib/ast_analysis.py` | ~850 | Single-pass AST extraction | `analyze_file()` parses once, extracts everything: skeletons, complexity (base=1, +1 per branch), types, side effects, security (exec/eval/compile), silent failures (bare except), async violations, SQL strings, deprecations. Per-file error handling — one bad file never crashes the scan. |
+| `lib/ast_analysis.py` | ~950 | Single-pass AST extraction | `analyze_file()` parses once, extracts everything: skeletons, complexity (base=1, +1 per branch), types, side effects, security (exec/eval/compile, unsafe deserialization), silent failures (bare except), async violations, SQL strings, deprecations, decorator args (positional + keyword), resource leaks (open without with), magic methods (is_dunder). Per-file error handling — one bad file never crashes the scan. |
 | `lib/import_analysis.py` | ~450 | Dependency graph | Builds module→imports/imported_by graph. Layer classification (FOUNDATION/CORE/ORCHESTRATION by keyword). Hub ranking by connection count. BFS for dependency distance. Handles relative imports. |
 | `lib/call_analysis.py` | ~250 | Cross-module call graph | `CallVisitor` AST walk tracks caller context. Matches call sites to function definitions. Reverse lookup = "who calls this function?" High-fan-in = most-called functions. |
 | `lib/git_analysis.py` | ~350 | Git history mining | Risk = 40% churn + 40% hotfixes + 20% author entropy. Coupling via frequent itemset mining on commit co-occurrence. Function-level churn. Velocity trend detection. Graceful degradation when no git. |
 | `lib/test_analysis.py` | ~180 | Test detection | Matches test_*.py and *_test.py. Counts `def test_` functions. Extracts @pytest.fixture from conftest.py. |
 | `lib/tech_debt_analysis.py` | ~120 | Debt markers | Finds TODO/FIXME/HACK/XXX/BUG/OPTIMIZE comments. Scans for @deprecated decorators and DeprecationWarning. |
-| `lib/investigation_targets.py` | ~800 | Prioritized crawl signals | Ambiguity score = (caller_count * cc) / type_coverage. 49 hardcoded generic names (process, handle, run...). Entry-to-side-effect path tracing. Coupling anomaly = high co-modification without import relationship. |
+| `lib/investigation_targets.py` | ~870 | Prioritized crawl signals | Ambiguity score = (caller_count * cc) / type_coverage. 49 hardcoded generic names (process, handle, run...). Entry-to-side-effect path tracing. Coupling anomaly = high co-modification without import relationship. Import-time side effect detection. |
+| `lib/blast_analysis.py` | ~220 | Transitive impact analysis | BFS over combined import + call graph. Per-module affected_count, risk classification (critical/high/medium/low), max_hops, undertested_dependents (modules with no git co-modification). |
+| `lib/route_analysis.py` | ~240 | HTTP route detection | Detects Flask/FastAPI/Django route decorators. Extracts method, path, handler function, side effects per handler. Framework auto-detection. |
 | `lib/gap_features.py` | ~2900 | Multi-module synthesis | The largest lib file. Combines results from all stages to produce: priority scores, mermaid diagrams, hazard detection, data model extraction, logic maps, entry points, architecture prose, state mutations, CLI arguments, Pydantic validators, linter rules, security summaries, env var defaults. If you're adding a new combined-results analysis, create a new file — don't add to this one. |
 | `lib/config_loader.py` | ~340 | Configuration | Load order: --config flag > .xray.json in target > defaults. Presets (minimal/standard/full) override sections. CLI --no-{section} flags override everything. `is_section_enabled()` handles both bool and {enabled: true} dict formats. |
 
@@ -388,6 +392,8 @@ xray.py
   ├── lib/git_analysis.py                   │
   ├── lib/test_analysis.py                  │
   ├── lib/tech_debt_analysis.py             │
+  ├── lib/blast_analysis.py ──── needs ──────┤ import + call results
+  ├── lib/route_analysis.py ──── needs ──────┤ ast results
   ├── lib/investigation_targets.py ◄────────┘ needs all above
   ├── lib/gap_features.py ◄── combines all results
   ├── formatters/markdown_formatter.py ◄── uses gap features
@@ -418,5 +424,5 @@ tests/
 - **Version:** 3.2 (signal count updated from 37 to 42)
 - **Tests:** 129/129 passing
 - **Latest validation run (R14):** 12/12 standard questions YES, 10/10 spot checks CONFIRMED, adversarial PASS (5/5)
-- **Scanner signals:** 42+ (original 37 + 5 new v3.2 categories)
+- **Scanner signals:** 49+ (original 37 + 5 v3.2 categories + 7 extended signals: blast radius, routes, decorator details, resource leaks, unsafe deserialization, magic methods, import-time side effects)
 - **Deep crawl pipeline:** 7 phases, 6 investigation protocols, 6 batches, up to 27 parallel sub-agents

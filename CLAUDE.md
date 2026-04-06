@@ -23,9 +23,11 @@ Tests: `python -m pytest tests/ -x -q`
 xray.py                        Entry point + orchestration (run_analysis → format → output)
   ├── lib/
   │   ├── file_discovery.py    Find Python files, apply ignore patterns
-  │   ├── ast_analysis.py      Single-pass AST: skeletons, complexity, types, side effects, security, silent failures, async violations, SQL, deprecations
+  │   ├── ast_analysis.py      Single-pass AST: skeletons, complexity, types, side effects, security, silent failures, async violations, SQL, deprecations, decorator args, resource leaks, unsafe deserialization, magic methods
   │   ├── import_analysis.py   Dependency graph, layers, circular deps, distance
   │   ├── call_analysis.py     Cross-module call sites, reverse lookup, fan-in
+  │   ├── blast_analysis.py    Transitive impact via BFS over import+call graph
+  │   ├── route_analysis.py    HTTP route detection (method, path, handler, side effects)
   │   ├── git_analysis.py      Risk scores, co-modification coupling, freshness
   │   ├── gap_features.py      Logic maps, hazards, data models, entry points, mermaid diagrams
   │   ├── test_analysis.py     Test file detection, pattern extraction
@@ -52,6 +54,8 @@ Inside `run_analysis()`, the pipeline is:
 4. `call_analysis.analyze_calls()` — cross-module call graph (depends on ast_results)
 5. `git_analysis.*` — risk, coupling, freshness from git log
 6. `test_analysis` + `tech_debt_analysis` — supplementary signals
+7. `blast_analysis.analyze_blast_radius()` — transitive impact per module (depends on stages 3-4)
+8. `route_analysis.analyze_routes()` — HTTP route detection (depends on stage 2)
 
 After `run_analysis()`, gap features are computed separately via `config_to_gap_features()` and passed to the markdown formatter. This separation exists because gap features need the combined results from multiple analyses.
 

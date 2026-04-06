@@ -63,7 +63,7 @@ A codebase might span 2 million tokens. A context window holds 200K. The agent c
 | Output | ~15K tokens (configurable: 2K-15K) |
 | Dependencies | None. Python 3.8+ stdlib only. |
 | Determinism | Same input produces identical output every time |
-| What it extracts | 42+ signals: AST skeletons, import layers, complexity, git risk, side effects, call graph, hub modules, security concerns, silent failures, async violations, SQL patterns, deprecation markers |
+| What it extracts | 49+ signals: AST skeletons, import layers, complexity, git risk, side effects, call graph, hub modules, security concerns, silent failures, async violations, SQL patterns, deprecation markers, blast radius, HTTP routes, decorator details, resource leaks, unsafe deserialization, magic methods, import-time side effects |
 | What it can't do | Read code semantically. It knows a function has CC=25 and 8 callers. It doesn't know why. |
 
 **Phase 2: Deep Crawl** (LLM-powered investigation, optional)
@@ -114,8 +114,10 @@ Requirements: Python 3.8+. No `pip install`. Layer 2 requires [Claude Code](http
 | **Behavior** | Side effects (DB, API, file, subprocess), cross-module call graph |
 | **History** | Risk scores, co-modification coupling, freshness, author expertise |
 | **Context** | CLI arguments, environment variables, Pydantic validators, linter rules |
-| **Safety** | Security concerns (exec/eval/compile), silent failures (bare except, except-pass), hazard files |
+| **Safety** | Security concerns (exec/eval/compile), unsafe deserialization (pickle/yaml/marshal), silent failures (bare except, except-pass), resource leaks (open without with), hazard files |
 | **Quality** | Async/sync violations, SQL string literals, deprecation markers, env var fallbacks |
+| **Impact** | Blast radius (transitive dependency impact per module), HTTP route detection (method, path, handler, side effects) |
+| **Detail** | Decorator arguments (positional + keyword), magic methods (is_dunder flag), import-time side effects |
 
 A 10K-token source file typically produces a 500-token skeleton. That's a 95% reduction while preserving every public interface and type annotation.
 
@@ -399,6 +401,8 @@ repo-xray/
 │   ├── git_analysis.py              Risk scores, coupling, freshness
 │   ├── gap_features.py              Logic maps, hazards, data models, mermaid
 │   ├── investigation_targets.py     Prioritized signals for crawl agents
+│   ├── blast_analysis.py            Transitive impact via BFS over import+call graph
+│   ├── route_analysis.py            HTTP route detection (method, path, handler, side effects)
 │   ├── file_discovery.py            Python file discovery, ignore patterns
 │   ├── test_analysis.py             Test file detection, pattern extraction
 │   ├── tech_debt_analysis.py        TODO/FIXME markers

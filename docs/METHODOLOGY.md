@@ -43,7 +43,7 @@ flowchart LR
 - Expensive — amortized across many future agent sessions
 - Unlimited budget — depth over brevity, no token ceilings on output
 
-**Design philosophy:** The scanner exists because a map is not understanding. It extracts 42+ signals from AST, import graph, git history, and code patterns without interpreting them. The deep crawl agent uses those signals as a prioritized investigation roadmap, spending tokens on reading actual code to discover behavioral semantics, implicit assumptions, and counterintuitive gotchas that static analysis cannot see.
+**Design philosophy:** The scanner exists because a map is not understanding. It extracts 49+ signals from AST, import graph, git history, and code patterns without interpreting them. The deep crawl agent uses those signals as a prioritized investigation roadmap, spending tokens on reading actual code to discover behavioral semantics, implicit assumptions, and counterintuitive gotchas that static analysis cannot see.
 
 ---
 

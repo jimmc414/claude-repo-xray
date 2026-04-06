@@ -35,6 +35,13 @@ This document describes every technical metric collected by Repo X-Ray, the tech
 27. [SQL String Detection](#27-sql-string-detection)
 28. [Deprecation Markers](#28-deprecation-markers)
 29. [DB Side Effects (Expanded)](#29-db-side-effects-expanded)
+30. [Blast Radius](#30-blast-radius)
+31. [HTTP Route Detection](#31-http-route-detection)
+32. [Decorator Details](#32-decorator-details)
+33. [Resource Leaks](#33-resource-leaks)
+34. [Unsafe Deserialization](#34-unsafe-deserialization)
+35. [Magic Methods](#35-magic-methods)
+36. [Import-Time Side Effects](#36-import-time-side-effects)
 
 ---
 
@@ -748,6 +755,130 @@ Same format as existing side effects: categorized under `side_effects.by_type.db
 
 ---
 
+## 30. Blast Radius
+
+**Collected by:** `lib/blast_analysis.py` — `analyze_blast_radius()`
+
+**Technology:** BFS traversal over combined import graph + call graph
+
+Computes the transitive impact of changing each module. Starting from a module, BFS follows both import edges (who imports this?) and call edges (who calls functions in this?) to compute the full set of affected modules.
+
+### What is collected
+
+| Metric | Description |
+|--------|-------------|
+| **affected_count** | Number of modules transitively affected by changes to this module |
+| **risk** | Classification: critical (>20 affected), high (>10), medium (>5), low (<=5) |
+| **max_hops** | Maximum BFS depth to reach the farthest affected module |
+| **undertested_dependents** | Modules that depend on this one but have never been co-modified in git history |
+
+### Output
+
+JSON key: `blast_radius.files` — dict keyed by module path. Markdown section: `## Blast Radius`.
+
+---
+
+## 31. HTTP Route Detection
+
+**Collected by:** `lib/route_analysis.py` — `analyze_routes()`
+
+**Technology:** AST decorator inspection for Flask, FastAPI, and Django route patterns
+
+Detects HTTP endpoint definitions by analyzing decorators on functions. Extracts the full route specification including HTTP method, URL path, handler function, and any side effects within the handler body.
+
+### What is collected
+
+| Metric | Description |
+|--------|-------------|
+| **method** | HTTP method (GET, POST, PUT, DELETE, etc.) |
+| **path** | URL path string from the decorator argument |
+| **handler** | Function name and file:line of the handler |
+| **side_effects** | Side effects detected within the handler body |
+| **framework** | Detected framework (flask, fastapi, django) |
+
+### Output
+
+JSON key: `routes.routes` — list of route dicts. Markdown section: `## HTTP Routes`.
+
+---
+
+## 32. Decorator Details
+
+**Collected by:** `lib/ast_analysis.py` — within `_extract_function_info()` and `_extract_class_info()`
+
+**Technology:** Python `ast` module — `ast.Call` node inspection on decorator expressions
+
+Extracts full positional and keyword arguments from every decorator, not just the decorator name. This captures behavioral configuration embedded in decorators.
+
+### What is collected
+
+| Metric | Description |
+|--------|-------------|
+| **decorator_args** | Positional arguments to the decorator call |
+| **decorator_kwargs** | Keyword arguments as key-value pairs |
+
+### Output
+
+JSON key: within each function/method's decorator list. No dedicated markdown section — data appears in skeleton output alongside decorator names.
+
+---
+
+## 33. Resource Leaks
+
+**Collected by:** `lib/ast_analysis.py` — within the single-pass AST walk
+
+**Technology:** Python `ast` module — detects `open()` calls not inside `with` statements
+
+Flags potential file handle leaks where `open()` is called outside a context manager (`with` block).
+
+### Output
+
+JSON key: `resource_leaks` per file. Markdown section: `## Resource Leaks`.
+
+---
+
+## 34. Unsafe Deserialization
+
+**Collected by:** `lib/ast_analysis.py` — within the single-pass AST walk
+
+**Technology:** Python `ast` module — pattern matching on `pickle.loads`, `pickle.load`, `yaml.load`, `marshal.loads`
+
+Flags calls to deserialization functions that can execute arbitrary code if fed untrusted data. `yaml.safe_load` is not flagged.
+
+### Output
+
+JSON key: within `security_concerns` with category `unsafe_deserialization`. Markdown section: appears in `## Security Concerns`.
+
+---
+
+## 35. Magic Methods
+
+**Collected by:** `lib/ast_analysis.py` — within `_extract_class_info()`
+
+**Technology:** Python `ast` module — `is_dunder` flag on method info
+
+Flags methods with dunder names (e.g., `__getattr__`, `__eq__`, `__call__`) with an `is_dunder: true` field. This identifies classes with custom behavior beyond standard `__init__`/`__repr__`.
+
+### Output
+
+JSON key: `is_dunder` boolean on each method in class skeletons. No dedicated markdown section — data appears in skeleton output.
+
+---
+
+## 36. Import-Time Side Effects
+
+**Collected by:** `lib/investigation_targets.py` — within `compute_investigation_targets()`
+
+**Technology:** AST analysis of module-level function calls that match known side effect patterns (DB connections, network calls, subprocess invocations)
+
+Detects function calls at module scope (not inside any function or class) that produce side effects. These execute when the module is imported, which is action-at-a-distance behavior.
+
+### Output
+
+JSON key: `investigation_targets.import_time_side_effects`. No dedicated markdown section — appears in investigation targets output.
+
+---
+
 ## Technology Summary
 
 | Technology | Modules Using It | Purpose |
@@ -755,7 +886,7 @@ Same format as existing side effects: categorized under `side_effects.by_type.db
 | Python `ast` module | ast_analysis, import_analysis, call_analysis, gap_features | Parse source code into ASTs for structural analysis |
 | Regex | tech_debt_analysis, test_analysis | Pattern matching on raw source text |
 | `git log` (subprocess) | git_analysis | Extract historical commit data |
-| BFS graph traversal | import_analysis | Compute dependency distances and detect cycles |
+| BFS graph traversal | import_analysis, blast_analysis | Compute dependency distances, detect cycles, compute transitive impact |
 | `gh` CLI (subprocess) | gap_features | Fetch GitHub repository metadata |
 | `urllib` | gap_features | Fallback GitHub API access |
 | TOML parsing | gap_features | Read linter configuration files |
