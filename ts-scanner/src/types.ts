@@ -25,9 +25,13 @@ export interface XRayResults {
   silent_failures?: Record<string, SilentFailure[]>;
   sql_strings?: Record<string, SqlString[]>;
   deprecation_markers?: DeprecationMarker[];
+  tests?: TestAnalysis;
   hotspots?: Hotspot[];
   imports?: ImportAnalysis;
   calls?: CallAnalysis;
+  logic_maps?: LogicMap[];
+  cli?: CliAnalysis;
+  config_rules?: ConfigRules;
   // TS-specific
   ts_specific?: TsSpecific;
 }
@@ -103,12 +107,14 @@ export interface FileAnalysis {
   async_violations: AsyncViolation[];
   sql_strings: SqlString[];
   deprecation_markers: DeprecationMarker[];
+  env_vars: EnvVar[];
   internal_calls: InternalCall[];
   tokens: {
     original: number;
     skeleton: number;
   };
   parse_error: string | null;
+  shared_mutable_state?: SharedMutableState[];
   // TS-specific optional fields
   ts_interfaces?: TsInterfaceInfo[];
   ts_type_aliases?: TsTypeAliasInfo[];
@@ -128,6 +134,8 @@ export interface ClassInfo {
   docstring: string | null;
   file?: string;
   kind?: "class" | "interface" | "enum";
+  instance_vars?: InstanceVar[];
+  state_mutations?: StateMutation[];
 }
 
 export interface MethodInfo {
@@ -237,6 +245,7 @@ export interface AsyncPatterns {
   sync_functions: number;
   async_for_loops: number;
   async_context_managers: number;
+  violations?: AsyncViolation[];
 }
 
 // =============================================================================
@@ -276,7 +285,8 @@ export interface SilentFailure {
 export interface AsyncViolation {
   file: string;
   function: string;
-  violation: string;
+  violation_type: string;
+  call: string;
   line: number;
 }
 
@@ -303,6 +313,7 @@ export interface InternalCall {
 export interface ImportAnalysis {
   graph: Record<string, { imports: string[]; imported_by: string[] }>;
   layers: Record<string, string[]>;
+  tiers?: Record<string, string[]>;
   aliases: Record<string, string>;
   alias_patterns: string[];
   orphans: string[];
@@ -326,8 +337,8 @@ export interface ImportAnalysis {
 export interface CallAnalysis {
   cross_module: Record<string, { call_count: number; call_sites: Array<{ file: string; line: number; caller: string }> }>;
   reverse_lookup: Record<string, { caller_count: number; impact_rating: "high" | "medium" | "low"; callers: Array<{ file: string; function: string }> }>;
-  most_called: Array<{ function: string; count: number }>;
-  most_callers: Array<{ function: string; callers: number }>;
+  most_called: Array<{ function: string; call_sites: number; modules: number }>;
+  most_callers: Array<{ function: string; calls_made: number }>;
   isolated_functions: string[];
   high_impact: Array<{ function: string; impact: "high"; callers: number }>;
   summary: {
@@ -336,6 +347,29 @@ export interface CallAnalysis {
     high_impact_functions: number;
     isolated_functions: number;
   };
+}
+
+export interface EnvVar {
+  variable: string;
+  default: string | null;
+  fallback_type: "or_fallback" | "nullish_coalesce" | "explicit_default" | "none";
+  required: boolean;
+  line: number;
+}
+
+export interface TestAnalysis {
+  test_file_count: number;
+  test_function_count: number;
+  coverage_by_type: Record<string, number>;
+  test_files: Array<{ path: string; tests: number }>;
+}
+
+export interface InstanceVar {
+  name: string;
+  type: string | null;
+  visibility: "public" | "private" | "protected";
+  has_default: boolean;
+  line: number;
 }
 
 export interface TsSpecific {
@@ -349,4 +383,62 @@ export interface TsSpecific {
   declaration_file_count: number;
   module_augmentations: Array<{ target_module: string; file: string; line: number }>;
   namespaces: Array<{ name: string; file: string; line: number; exported: boolean }>;
+}
+
+// =============================================================================
+// Logic Maps
+// =============================================================================
+
+export interface LogicMap {
+  method: string;
+  file: string;
+  line: number;
+  complexity: number;
+  flow: string[];
+  side_effects: string[];
+  state_mutations: string[];
+  conditions: string[];
+  docstring: string | null;
+  heuristic: string;
+}
+
+// =============================================================================
+// Shared Mutable State
+// =============================================================================
+
+export interface SharedMutableState {
+  name: string;
+  kind: "module_variable" | "static_field";
+  line: number;
+  mutated_by?: string[];
+}
+
+export interface StateMutation {
+  property: string;
+  method: string;
+  line: number;
+}
+
+// =============================================================================
+// CLI Analysis
+// =============================================================================
+
+export interface CliAnalysis {
+  framework: string | null;
+  commands: Array<{ name: string; description: string | null }>;
+  options: Array<{ flag: string; description: string | null; type?: string }>;
+}
+
+// =============================================================================
+// Config Rules
+// =============================================================================
+
+export interface ConfigRules {
+  typescript: {
+    strict: boolean;
+    flags: Record<string, boolean | string>;
+    config_file: string;
+  } | null;
+  eslint: { config_file: string; framework: string | null } | null;
+  prettier: { config_file: string } | null;
 }

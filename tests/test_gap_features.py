@@ -968,6 +968,82 @@ class HelperAgent:
 
 
 # =============================================================================
+# _build_display_names Tests
+# =============================================================================
+
+# Import from formatter
+FORMATTER_DIR = ROOT_DIR / "formatters"
+sys.path.insert(0, str(FORMATTER_DIR))
+from markdown_formatter import _build_display_names
+
+
+class TestBuildDisplayNames:
+    """Tests for monorepo path disambiguation."""
+
+    def test_unique_basenames(self):
+        paths = ["/repo/src/foo.py", "/repo/src/bar.py", "/repo/lib/baz.py"]
+        result = _build_display_names(paths)
+        assert result["/repo/src/foo.py"] == "foo.py"
+        assert result["/repo/src/bar.py"] == "bar.py"
+        assert result["/repo/lib/baz.py"] == "baz.py"
+
+    def test_two_way_collision(self):
+        paths = ["/repo/pkg-a/src/index.ts", "/repo/pkg-b/src/index.ts"]
+        result = _build_display_names(paths)
+        # Should include distinguishing parent
+        assert result["/repo/pkg-a/src/index.ts"] != result["/repo/pkg-b/src/index.ts"]
+        assert "index.ts" in result["/repo/pkg-a/src/index.ts"]
+        assert "index.ts" in result["/repo/pkg-b/src/index.ts"]
+
+    def test_three_way_collision(self):
+        paths = [
+            "/repo/a/src/utils.py",
+            "/repo/b/src/utils.py",
+            "/repo/c/lib/utils.py",
+        ]
+        result = _build_display_names(paths)
+        values = list(result.values())
+        # All three must be distinct
+        assert len(set(values)) == 3
+        for v in values:
+            assert "utils.py" in v
+
+    def test_deep_path_ellipsis(self):
+        paths = [
+            "/repo/a/b/c/d/config.ts",
+            "/repo/x/y/z/w/config.ts",
+        ]
+        result = _build_display_names(paths)
+        # Both must be distinct
+        assert result[paths[0]] != result[paths[1]]
+        for p in paths:
+            assert "config.ts" in result[p]
+
+    def test_single_file(self):
+        result = _build_display_names(["/repo/main.py"])
+        assert result["/repo/main.py"] == "main.py"
+
+    def test_empty_input(self):
+        assert _build_display_names([]) == {}
+
+    def test_mixed_unique_and_colliding(self):
+        paths = [
+            "/repo/src/unique.py",
+            "/repo/pkg-a/src/shared.py",
+            "/repo/pkg-b/src/shared.py",
+        ]
+        result = _build_display_names(paths)
+        assert result["/repo/src/unique.py"] == "unique.py"
+        assert result["/repo/pkg-a/src/shared.py"] != result["/repo/pkg-b/src/shared.py"]
+
+    def test_empty_strings_filtered(self):
+        paths = ["", "/repo/src/foo.py", ""]
+        result = _build_display_names(paths)
+        assert "" not in result
+        assert result["/repo/src/foo.py"] == "foo.py"
+
+
+# =============================================================================
 # Run tests
 # =============================================================================
 

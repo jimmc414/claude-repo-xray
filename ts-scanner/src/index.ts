@@ -13,10 +13,17 @@ import * as path from "path";
 import { discoverFiles } from "./file-discovery.js";
 import { analyzeFile } from "./ast-analysis.js";
 import { analyzeImports } from "./import-analysis.js";
+import { analyzeCallGraph } from "./call-analysis.js";
+import { analyzeTests } from "./test-analysis.js";
+import { generateLogicMaps } from "./logic-maps.js";
+import { analyzeConfig } from "./config-analysis.js";
+import { analyzeCli } from "./cli-analysis.js";
 import type {
   XRayResults, Structure, Summary, Complexity, TypeCoverage,
   DecoratorInventory, AsyncPatterns, Hotspot, FileAnalysis, ClassInfo, FunctionInfo,
-  ImportAnalysis,
+  ImportAnalysis, CallAnalysis, SideEffects, SideEffectEntry, SecurityConcern, SilentFailure,
+  SqlString, DeprecationMarker, AsyncViolation, EnvVar, TestAnalysis, LogicMap,
+  CliAnalysis, ConfigRules,
 } from "./types.js";
 
 const VERSION = "0.1.0";
@@ -79,11 +86,38 @@ function main(): void {
   if (verbose) process.stderr.write("Running import analysis...\n");
   const importResults = analyzeImports(discovery.files, targetDir);
 
-  // Step 4: Aggregate results
-  if (verbose) process.stderr.write("Aggregating results...\n");
-  const results = aggregateResults(targetDir, fileResults, discovery.tsconfigPath, importResults);
+  // Step 4: Call analysis
+  if (verbose) process.stderr.write("Running call analysis...\n");
+  const callResults = analyzeCallGraph(fileResults, discovery.files, targetDir);
 
-  // Step 5: Output JSON
+  // Step 5: Test analysis
+  if (verbose) process.stderr.write("Running test analysis...\n");
+  const testResults = analyzeTests(discovery.files, targetDir);
+
+  // Step 6: Aggregate results
+  if (verbose) process.stderr.write("Aggregating results...\n");
+  const results = aggregateResults(targetDir, fileResults, discovery.tsconfigPath, importResults, callResults, testResults);
+
+  // Step 7: Generate logic maps for hotspot functions
+  if (results.hotspots && results.hotspots.length > 0) {
+    if (verbose) process.stderr.write("Generating logic maps...\n");
+    const logicMaps = generateLogicMaps(results.hotspots, fileResults, 10);
+    if (logicMaps.length > 0) results.logic_maps = logicMaps;
+  }
+
+  // Step 8: Config rule extraction
+  if (verbose) process.stderr.write("Analyzing config rules...\n");
+  const configRules = analyzeConfig(targetDir, discovery.tsconfigPath);
+  if (configRules.typescript || configRules.eslint || configRules.prettier) {
+    results.config_rules = configRules;
+  }
+
+  // Step 9: CLI framework detection
+  if (verbose) process.stderr.write("Detecting CLI framework...\n");
+  const cliResult = analyzeCli(discovery.files);
+  if (cliResult) results.cli = cliResult;
+
+  // Output JSON
   process.stdout.write(JSON.stringify(results, null, 2));
   process.stdout.write("\n");
 
@@ -99,6 +133,8 @@ function aggregateResults(
   fileResults: Record<string, FileAnalysis>,
   tsconfigPath: string | null,
   importResults: ImportAnalysis,
+  callResults: CallAnalysis,
+  testResults: TestAnalysis,
 ): XRayResults {
   const files = Object.values(fileResults);
 
@@ -122,6 +158,15 @@ function aggregateResults(
     async_for_loops: 0,
     async_context_managers: 0,
   };
+
+  // Behavioral signal aggregation
+  const sideEffectsByType: SideEffects["by_type"] = {};
+  const sideEffectsByFile: SideEffects["by_file"] = {};
+  const securityConcerns: Record<string, SecurityConcern[]> = {};
+  const silentFailures: Record<string, SilentFailure[]> = {};
+  const sqlStrings: Record<string, SqlString[]> = {};
+  const deprecationMarkers: DeprecationMarker[] = [];
+  const asyncViolations: AsyncViolation[] = [];
 
   for (const fa of files) {
     totalLines += fa.line_count;
@@ -153,6 +198,25 @@ function aggregateResults(
     globalAsync.sync_functions += fa.async_patterns.sync_functions;
     globalAsync.async_for_loops += fa.async_patterns.async_for_loops;
     globalAsync.async_context_managers += fa.async_patterns.async_context_managers;
+
+    // Side effects
+    if (fa.side_effects.length > 0) {
+      sideEffectsByFile[fa.filepath] = fa.side_effects;
+      for (const se of fa.side_effects) {
+        if (!sideEffectsByType[se.category]) sideEffectsByType[se.category] = [];
+        sideEffectsByType[se.category].push({ file: fa.filepath, call: se.call, line: se.line });
+      }
+    }
+    // Security concerns
+    if (fa.security_concerns.length > 0) securityConcerns[fa.filepath] = fa.security_concerns;
+    // Silent failures
+    if (fa.silent_failures.length > 0) silentFailures[fa.filepath] = fa.silent_failures;
+    // SQL strings
+    if (fa.sql_strings.length > 0) sqlStrings[fa.filepath] = fa.sql_strings;
+    // Deprecation markers
+    for (const dm of fa.deprecation_markers) deprecationMarkers.push({ ...dm, file: fa.filepath });
+    // Async violations
+    for (const v of fa.async_violations) asyncViolations.push(v);
   }
 
   // Sort hotspots by complexity descending, take top 20
@@ -208,14 +272,15 @@ function aggregateResults(
     types,
     decorators,
     imports: importResults,
-    async_patterns: globalAsync,
+    calls: callResults,
+    async_patterns: { ...globalAsync, violations: asyncViolations },
     hotspots: topHotspots,
-    // Phase 1 stubs
-    side_effects: { by_type: {}, by_file: {} },
-    security_concerns: {},
-    silent_failures: {},
-    sql_strings: {},
-    deprecation_markers: [],
+    side_effects: { by_type: sideEffectsByType, by_file: sideEffectsByFile },
+    security_concerns: securityConcerns,
+    silent_failures: silentFailures,
+    sql_strings: sqlStrings,
+    deprecation_markers: deprecationMarkers,
+    tests: testResults,
   };
 }
 

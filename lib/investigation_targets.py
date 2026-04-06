@@ -141,7 +141,7 @@ def _assess_function_ambiguity(
         "function": name,
         "class": class_name,
         "file": filepath,
-        "line": func.get("start_line", 0),
+        "line": func.get("start_line", func.get("line", 0)),
         "reason": "generic_name" if is_generic else "low_type_coverage",
         "type_coverage": round(type_coverage, 2),
         "cc": cc,
@@ -344,7 +344,7 @@ def compute_convention_deviations(
         for cls in file_data.get("classes", []):
             init_method = None
             for method in cls.get("methods", []):
-                if method.get("name") == "__init__":
+                if method.get("name") in ("__init__", "constructor"):
                     init_method = method
                     break
 
@@ -363,7 +363,7 @@ def compute_convention_deviations(
                 init_patterns[pattern].append({
                     "class": cls.get("name", ""),
                     "file": filepath,
-                    "line": cls.get("start_line", 0),
+                    "line": cls.get("start_line", cls.get("line", 0)),
                     "param_count": len(non_self_args),
                 })
 
@@ -406,7 +406,7 @@ def compute_convention_deviations(
                 funcs_no_returns_list.append({
                     "class": None,
                     "file": filepath,
-                    "line": func.get("start_line", 0),
+                    "line": func.get("start_line", func.get("line", 0)),
                     "function": name,
                 })
 
@@ -447,6 +447,23 @@ def compute_shared_mutable_state(
     - Singleton patterns (_instance = None with get_instance)
     """
     files = ast_results.get("files", {})
+
+    # If TS scanner already detected shared mutable state, use it directly
+    ts_state = []
+    for filepath, fdata in files.items():
+        for sms in fdata.get("shared_mutable_state", []):
+            ts_state.append({
+                "variable": sms.get("name", ""),
+                "file": filepath,
+                "line": sms.get("line", 0),
+                "scope": "module",
+                "mutated_by": sms.get("mutated_by", []),
+                "risk": "hidden_state",
+            })
+    if ts_state:
+        ts_state.sort(key=lambda x: len(x.get("mutated_by", [])), reverse=True)
+        return ts_state[:20]
+
     shared_state = []
 
     for filepath in files:
@@ -712,6 +729,13 @@ def compute_domain_entities(
         "Set", "Tuple", "Type", "Callable", "Iterator",
         "Generator", "Coroutine", "Awaitable", "Iterable",
         "Sequence", "Mapping", "MutableMapping",
+        # TypeScript built-in types
+        "string", "number", "boolean", "undefined", "void", "never", "unknown", "object", "symbol", "bigint",
+        "Promise", "Record", "Partial", "Required", "Omit", "Pick", "Readonly",
+        "Array", "Map", "ReadonlyArray", "ReadonlyMap", "ReadonlySet",
+        "Exclude", "Extract", "NonNullable", "ReturnType", "Parameters",
+        "InstanceType", "ConstructorParameters", "Awaited",
+        "HTMLElement", "Event", "Error", "RegExp", "Date", "Buffer",
     }
 
     for filepath, file_data in files.items():

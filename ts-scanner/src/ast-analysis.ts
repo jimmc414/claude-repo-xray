@@ -3,8 +3,15 @@ import * as ts from "typescript";
 import {
   FileAnalysis, ClassInfo, MethodInfo, FunctionInfo, ArgInfo,
   ConstantInfo, TsInterfaceInfo, TsTypeAliasInfo, TsEnumInfo,
+  SharedMutableState, StateMutation,
 } from "./types.js";
 import { estimateTokens, getScriptKind } from "./utils.js";
+import {
+  detectSilentFailure, detectSecurityConcern, detectSecurityNewExpression,
+  detectSecurityAssignment, detectDeprecationJSDoc, detectDeprecationDecorator,
+  detectSideEffect, detectSqlString, detectSqlTemplate, detectSqlTaggedTemplate,
+  detectEnvVar, extractEnvVarDefault, detectAsyncViolation, extractInstanceVars,
+} from "./detectors.js";
 
 // =============================================================================
 // Walk Context
@@ -13,6 +20,7 @@ import { estimateTokens, getScriptKind } from "./utils.js";
 interface WalkContext {
   currentFunction: string | null;
   currentClass: string | null;
+  currentMethod: string | null;
   isAsync: boolean;
   depth: number; // 0 = top-level (module scope)
   sourceFile: ts.SourceFile;
@@ -68,12 +76,16 @@ export function analyzeFile(filePath: string): FileAnalysis {
   const ctx: WalkContext = {
     currentFunction: null,
     currentClass: null,
+    currentMethod: null,
     isAsync: false,
     depth: 0,
     sourceFile,
   };
 
-  walkPass1(sourceFile, ctx, result);
+  // Track this.prop mutations per class during walk
+  const classMutations = new Map<string, StateMutation[]>();
+
+  walkPass1(sourceFile, ctx, result, classMutations);
 
   // Compute type coverage percentage
   if (result.type_coverage.total_functions > 0) {
@@ -92,7 +104,7 @@ export function analyzeFile(filePath: string): FileAnalysis {
 // Pass 1: Structure Collection
 // =============================================================================
 
-function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis): void {
+function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis, classMutations: Map<string, StateMutation[]>): void {
   // --- Function declarations ---
   if (ts.isFunctionDeclaration(node)) {
     const info = extractFunctionInfo(node, ctx);
@@ -100,20 +112,43 @@ function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis): void 
       result.functions.push(info);
       recordFunctionMetrics(info, result);
     }
+    // Deprecation check
+    if (info) {
+      const dep = detectDeprecationJSDoc(node, ctx.sourceFile);
+      if (dep || detectDeprecationDecorator(info.decorators)) {
+        result.deprecation_markers.push({
+          file: "", name: info.name, line: info.line,
+          reason: dep?.reason ?? null, source: dep ? "jsdoc" : "decorator",
+        });
+      }
+    }
     const childCtx = { ...ctx, currentFunction: info?.name ?? null, isAsync: info?.is_async ?? false, depth: ctx.depth + 1 };
-    ts.forEachChild(node, child => walkPass1(child, childCtx, result));
+    ts.forEachChild(node, child => walkPass1(child, childCtx, result, classMutations));
     return;
   }
 
   // --- Variable declarations (arrow functions, const, etc.) ---
   if (ts.isVariableStatement(node) && ctx.depth === 0) {
-    handleVariableStatement(node, ctx, result);
+    handleVariableStatement(node, ctx, result, classMutations);
     return;
   }
 
   // --- Class declarations ---
   if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
     const info = extractClassInfo(node, ctx);
+    if (info) {
+      // Instance vars
+      const instanceVars = extractInstanceVars(node, ctx.sourceFile);
+      if (instanceVars.length > 0) info.instance_vars = instanceVars;
+      // Deprecation check
+      const dep = detectDeprecationJSDoc(node, ctx.sourceFile);
+      if (dep || detectDeprecationDecorator(info.decorators)) {
+        result.deprecation_markers.push({
+          file: "", name: info.name, line: info.line,
+          reason: dep?.reason ?? null, source: dep ? "jsdoc" : "decorator",
+        });
+      }
+    }
     if (info && ctx.depth === 0) {
       result.classes.push(info);
       // Record method metrics
@@ -135,8 +170,21 @@ function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis): void 
         result.decorators[dec] = (result.decorators[dec] || 0) + 1;
       }
     }
-    const childCtx = { ...ctx, currentClass: info?.name ?? null, depth: ctx.depth + 1 };
-    ts.forEachChild(node, child => walkPass1(child, childCtx, result));
+    // Walk class body with class context, tracking method names for mutation detection
+    const className = info?.name ?? null;
+    for (const member of node.members) {
+      const methodName = (ts.isMethodDeclaration(member) || ts.isConstructorDeclaration(member) ||
+        ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member))
+        ? (ts.isConstructorDeclaration(member) ? "constructor" : member.name?.getText(ctx.sourceFile) ?? null)
+        : null;
+      const childCtx = { ...ctx, currentClass: className, currentMethod: methodName, depth: ctx.depth + 1 };
+      ts.forEachChild(member, child => walkPass1(child, childCtx, result, classMutations));
+    }
+    // Attach collected state mutations to class info
+    if (info && className && classMutations.has(className)) {
+      const muts = classMutations.get(className)!;
+      if (muts.length > 0) info.state_mutations = muts;
+    }
     return;
   }
 
@@ -177,12 +225,93 @@ function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis): void 
 
   // --- Export declarations (unwrap and process the declaration inside) ---
   if (ts.isExportAssignment(node) || ts.isExportDeclaration(node)) {
-    ts.forEachChild(node, child => walkPass1(child, ctx, result));
+    ts.forEachChild(node, child => walkPass1(child, ctx, result, classMutations));
     return;
   }
 
+  // ==========================================================================
+  // Behavioral signal detection (Phase 2B)
+  // ==========================================================================
+
+  // CatchClause → silent failures
+  if (ts.isCatchClause(node)) {
+    const f = detectSilentFailure(node, ctx.sourceFile);
+    if (f) result.silent_failures.push(f);
+  }
+
+  // CallExpression → side effects, security, async violations
+  if (ts.isCallExpression(node)) {
+    const se = detectSideEffect(node, ctx.sourceFile);
+    if (se) result.side_effects.push(se);
+    const sc = detectSecurityConcern(node, ctx.sourceFile);
+    if (sc) result.security_concerns.push(sc);
+    if (ctx.isAsync) {
+      const av = detectAsyncViolation(node, ctx.sourceFile);
+      if (av) result.async_violations.push({
+        file: result.filepath, function: ctx.currentFunction ?? "(module)",
+        violation_type: av.violation_type, call: av.call,
+        line: getLineNumber(node, ctx.sourceFile),
+      });
+    }
+  }
+
+  // NewExpression → security (new Function)
+  if (ts.isNewExpression(node)) {
+    const sc = detectSecurityNewExpression(node, ctx.sourceFile);
+    if (sc) result.security_concerns.push(sc);
+  }
+
+  // BinaryExpression (=) → innerHTML security + this.prop state mutations
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    const sc = detectSecurityAssignment(node, ctx.sourceFile);
+    if (sc) result.security_concerns.push(sc);
+    // Detect this.prop = value mutations inside class methods
+    if (ctx.currentClass && ctx.currentMethod &&
+        ts.isPropertyAccessExpression(node.left) &&
+        node.left.expression.kind === ts.SyntaxKind.ThisKeyword) {
+      const propName = node.left.name.text;
+      if (!classMutations.has(ctx.currentClass)) classMutations.set(ctx.currentClass, []);
+      classMutations.get(ctx.currentClass)!.push({
+        property: propName,
+        method: ctx.currentMethod,
+        line: getLineNumber(node, ctx.sourceFile),
+      });
+    }
+  }
+
+  // TaggedTemplate → SQL
+  if (ts.isTaggedTemplateExpression(node)) {
+    const sq = detectSqlTaggedTemplate(node, ctx.sourceFile);
+    if (sq) result.sql_strings.push(sq);
+  }
+
+  // String/template literals → SQL
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    const sq = detectSqlString(node, ctx.sourceFile);
+    if (sq) result.sql_strings.push(sq);
+  }
+  if (ts.isTemplateExpression(node)) {
+    const sq = detectSqlTemplate(node, ctx.sourceFile);
+    if (sq) result.sql_strings.push(sq);
+  }
+
+  // PropertyAccess/ElementAccess → env vars
+  if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+    const ev = detectEnvVar(node, ctx.sourceFile);
+    if (ev) {
+      const defaults = extractEnvVarDefault(node);
+      result.env_vars.push({
+        variable: ev.variable,
+        default: defaults.default,
+        fallback_type: defaults.fallback_type,
+        required: defaults.fallback_type === "none",
+        line: ev.line,
+      });
+    }
+  }
+
   // Default: recurse into children
-  ts.forEachChild(node, child => walkPass1(child, ctx, result));
+  ts.forEachChild(node, child => walkPass1(child, ctx, result, classMutations));
 }
 
 // =============================================================================
@@ -348,7 +477,9 @@ function extractEnumInfo(node: ts.EnumDeclaration, ctx: WalkContext): TsEnumInfo
 // Variable statements (constants + arrow functions)
 // =============================================================================
 
-function handleVariableStatement(node: ts.VariableStatement, ctx: WalkContext, result: FileAnalysis): void {
+function handleVariableStatement(node: ts.VariableStatement, ctx: WalkContext, result: FileAnalysis, classMutations: Map<string, StateMutation[]>): void {
+  const isConst = (node.declarationList.flags & ts.NodeFlags.Const) !== 0;
+
   for (const decl of node.declarationList.declarations) {
     if (!ts.isIdentifier(decl.name)) continue;
     const name = decl.name.text;
@@ -361,12 +492,11 @@ function handleVariableStatement(node: ts.VariableStatement, ctx: WalkContext, r
 
       // Walk the function body for nested structures
       const childCtx = { ...ctx, currentFunction: name, isAsync: info.is_async, depth: ctx.depth + 1 };
-      ts.forEachChild(decl.initializer, child => walkPass1(child, childCtx, result));
+      ts.forEachChild(decl.initializer, child => walkPass1(child, childCtx, result, classMutations));
       continue;
     }
 
     // UPPER_CASE const → constant
-    const isConst = (node.declarationList.flags & ts.NodeFlags.Const) !== 0;
     if (isConst && /^[A-Z][A-Z0-9_]*$/.test(name)) {
       result.constants.push({
         name,
@@ -374,10 +504,20 @@ function handleVariableStatement(node: ts.VariableStatement, ctx: WalkContext, r
         line: getLineNumber(decl, ctx.sourceFile),
       });
     }
+
+    // Module-level let/var → shared mutable state
+    if (!isConst && !name.startsWith("_")) {
+      if (!result.shared_mutable_state) result.shared_mutable_state = [];
+      result.shared_mutable_state.push({
+        name,
+        kind: "module_variable",
+        line: getLineNumber(decl, ctx.sourceFile),
+      });
+    }
   }
 
   // Walk any remaining children (non-function initializers)
-  ts.forEachChild(node, child => walkPass1(child, ctx, result));
+  ts.forEachChild(node, child => walkPass1(child, ctx, result, classMutations));
 }
 
 // =============================================================================
@@ -482,11 +622,11 @@ function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
   return mods?.some(m => m.kind === kind) ?? false;
 }
 
-function getLineNumber(node: ts.Node, sourceFile: ts.SourceFile): number {
+export function getLineNumber(node: ts.Node, sourceFile: ts.SourceFile): number {
   return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
 }
 
-function getJSDocSummary(node: ts.Node): string | null {
+export function getJSDocSummary(node: ts.Node): string | null {
   const jsDocs = ts.getJSDocCommentsAndTags(node);
   for (const doc of jsDocs) {
     if (ts.isJSDoc(doc) && doc.comment) {
@@ -608,6 +748,7 @@ function createEmptyFileAnalysis(filePath: string): FileAnalysis {
     async_violations: [],
     sql_strings: [],
     deprecation_markers: [],
+    env_vars: [],
     internal_calls: [],
     tokens: { original: 0, skeleton: 0 },
     parse_error: null,

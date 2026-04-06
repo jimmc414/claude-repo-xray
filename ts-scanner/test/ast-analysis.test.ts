@@ -197,6 +197,56 @@ describe("analyzeFile", () => {
     });
   });
 
+  describe("mutable-state.ts", () => {
+    const result = analyzeFile(path.join(FIXTURES, "mutable-state.ts"));
+
+    it("parses without error", () => {
+      expect(result.parse_error).toBeNull();
+    });
+
+    it("detects module-level let as shared mutable state", () => {
+      expect(result.shared_mutable_state).toBeDefined();
+      const names = result.shared_mutable_state!.map(s => s.name);
+      expect(names).toContain("requestCount");
+      expect(names).toContain("connectionPool");
+    });
+
+    it("does not flag module-level const", () => {
+      const names = result.shared_mutable_state?.map(s => s.name) ?? [];
+      expect(names).not.toContain("MAX_CONNECTIONS");
+    });
+
+    it("skips underscore-prefixed variables", () => {
+      const names = result.shared_mutable_state?.map(s => s.name) ?? [];
+      expect(names).not.toContain("_internalCache");
+    });
+
+    it("sets kind to module_variable", () => {
+      for (const sms of result.shared_mutable_state ?? []) {
+        expect(sms.kind).toBe("module_variable");
+      }
+    });
+
+    it("detects this.prop mutations as state_mutations on class", () => {
+      const cls = result.classes.find(c => c.name === "StatefulService");
+      expect(cls).toBeDefined();
+      expect(cls!.state_mutations).toBeDefined();
+      expect(cls!.state_mutations!.length).toBeGreaterThan(0);
+
+      const props = cls!.state_mutations!.map(m => m.property);
+      expect(props).toContain("name");
+      expect(props).toContain("count");
+    });
+
+    it("records method name for each state mutation", () => {
+      const cls = result.classes.find(c => c.name === "StatefulService")!;
+      const nameMut = cls.state_mutations!.find(m => m.property === "name" && m.method === "rename");
+      expect(nameMut).toBeDefined();
+      const countMut = cls.state_mutations!.find(m => m.property === "count" && m.method === "increment");
+      expect(countMut).toBeDefined();
+    });
+  });
+
   describe("error handling", () => {
     it("handles non-existent files gracefully", () => {
       const result = analyzeFile("/nonexistent/file.ts");

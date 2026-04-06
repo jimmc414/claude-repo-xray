@@ -232,6 +232,81 @@ describe("analyzeImports — import fixture", () => {
 });
 
 // =============================================================================
+// Topological tiers
+// =============================================================================
+
+describe("analyzeImports — topological tiers", () => {
+  it("classifies utils.ts as foundation (keyword)", () => {
+    const files = [
+      path.join(FIXTURES_DIR, "index.ts"),
+      path.join(FIXTURES_DIR, "user.service.ts"),
+      path.join(FIXTURES_DIR, "utils.ts"),
+    ];
+    const result = analyzeImports(files, path.resolve(FIXTURES_DIR, ".."));
+    expect(result.tiers).toBeDefined();
+    expect(result.tiers!.foundation).toContain("src/utils.ts");
+  });
+
+  it("classifies index.ts as orchestration (keyword)", () => {
+    const files = [
+      path.join(FIXTURES_DIR, "index.ts"),
+      path.join(FIXTURES_DIR, "user.service.ts"),
+      path.join(FIXTURES_DIR, "utils.ts"),
+    ];
+    const result = analyzeImports(files, path.resolve(FIXTURES_DIR, ".."));
+    expect(result.tiers!.orchestration).toContain("src/index.ts");
+  });
+
+  it("has all four tier keys", () => {
+    const files = [
+      path.join(FIXTURES_DIR, "index.ts"),
+      path.join(FIXTURES_DIR, "user.service.ts"),
+      path.join(FIXTURES_DIR, "utils.ts"),
+    ];
+    const result = analyzeImports(files, path.resolve(FIXTURES_DIR, ".."));
+    expect(result.tiers).toHaveProperty("orchestration");
+    expect(result.tiers).toHaveProperty("core");
+    expect(result.tiers).toHaveProperty("foundation");
+    expect(result.tiers).toHaveProperty("leaf");
+  });
+
+  it("classifies hub module (imported by many) as foundation", () => {
+    // In the import fixture, logger is imported by 3 files → ratio > 2 → foundation
+    const fixtureDir = IMPORT_FIXTURES_DIR;
+    const files = [
+      path.join(fixtureDir, "index.ts"),
+      path.join(fixtureDir, "services/user-service.ts"),
+      path.join(fixtureDir, "services/auth-service.ts"),
+      path.join(fixtureDir, "services/index.ts"),
+      path.join(fixtureDir, "models/user.ts"),
+      path.join(fixtureDir, "types/ids.ts"),
+      path.join(fixtureDir, "utils/logger.ts"),
+      path.join(fixtureDir, "utils/unused-helper.ts"),
+    ];
+    const result = analyzeImports(files, fixtureDir);
+    // logger.ts is imported by 3 files, imports 0 → ratio = 3 → foundation
+    expect(result.tiers!.foundation).toContain("utils/logger.ts");
+  });
+
+  it("classifies disconnected file as leaf", () => {
+    const fixtureDir = IMPORT_FIXTURES_DIR;
+    const files = [
+      path.join(fixtureDir, "index.ts"),
+      path.join(fixtureDir, "services/user-service.ts"),
+      path.join(fixtureDir, "services/auth-service.ts"),
+      path.join(fixtureDir, "services/index.ts"),
+      path.join(fixtureDir, "models/user.ts"),
+      path.join(fixtureDir, "types/ids.ts"),
+      path.join(fixtureDir, "utils/logger.ts"),
+      path.join(fixtureDir, "utils/unused-helper.ts"),
+    ];
+    const result = analyzeImports(files, fixtureDir);
+    // unused-helper.ts has no imports and no importers → leaf
+    expect(result.tiers!.leaf).toContain("utils/unused-helper.ts");
+  });
+});
+
+// =============================================================================
 // Edge cases
 // =============================================================================
 

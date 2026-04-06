@@ -406,6 +406,45 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
         if ts_results:
             # Run git analysis on top of TS scanner results (git is language-agnostic)
             ts_results = _augment_with_git(ts_results, target, analyses, verbose)
+
+            # Compute investigation targets for TS results
+            try:
+                from investigation_targets import compute_investigation_targets
+                from gap_features import detect_entry_points, extract_data_models
+
+                ast_results_ts = {"files": ts_results.get("structure", {}).get("files", {})}
+
+                gap_results = {}
+                gap_results["entry_points"] = detect_entry_points(ts_results, target)
+
+                data_models = extract_data_models(ts_results)
+                for filepath, fdata in ast_results_ts.get("files", {}).items():
+                    for iface in fdata.get("ts_interfaces", []):
+                        data_models.append({
+                            "name": iface.get("name", ""),
+                            "type": "interface",
+                            "file": filepath,
+                            "line": iface.get("line", 0),
+                            "fields": [{"name": m["name"], "type": m.get("type", "")} for m in iface.get("members", [])],
+                            "bases": iface.get("extends", []),
+                        })
+                    for ta in fdata.get("ts_type_aliases", []):
+                        if ta.get("type_kind") == "object":
+                            data_models.append({"name": ta["name"], "type": "type_alias", "file": filepath, "line": ta.get("line", 0), "fields": []})
+                gap_results["data_models"] = data_models
+
+                ts_results["investigation_targets"] = compute_investigation_targets(
+                    ast_results=ast_results_ts,
+                    import_results=ts_results.get("imports", {}),
+                    call_results=ts_results.get("calls", {}),
+                    git_results=ts_results.get("git", {}),
+                    gap_results=gap_results,
+                    root_dir=target, verbose=verbose,
+                )
+            except Exception as e:
+                if verbose:
+                    print(f"  Investigation targets failed: {e}", file=sys.stderr)
+
             return ts_results
         # Fall through to Python pipeline if TS scanner not available
         if verbose:

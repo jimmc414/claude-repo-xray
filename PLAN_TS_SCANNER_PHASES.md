@@ -9,14 +9,14 @@ Phase 1 added import analysis, pipeline integration, and real-world validation a
 
 ### Quality Trajectory
 
-| After Phase | Est. Quality | What Changes |
-|-------------|-------------|--------------|
-| 1 (current) | ~25% | Skeleton, complexity, basic imports, type coverage |
-| 2A | ~50% | Pillars work, git works, mermaid works, skeletons look right |
-| 2B | ~65% | Silent failures, security, deprecation, side effects, test detection |
-| 2C | ~75% | Call graph, topological layers, partial investigation targets |
-| 2D | ~85% | Logic maps, git function churn, full investigation targets |
-| 2E | ~90% | CLI args, decorator display, polish, edge cases |
+| After Phase | Est. Quality | What Changes | Status |
+|-------------|-------------|--------------|--------|
+| 1 (current) | ~25% | Skeleton, complexity, basic imports, type coverage | Done |
+| 2A | ~50% | Pillars work, git works, mermaid works, skeletons look right | Done |
+| 2B | ~65% | Silent failures, security, deprecation, side effects, test detection | Done |
+| 2C | ~75% | Call graph, topological layers, partial investigation targets | Done |
+| 2D | ~85% | Logic maps, git function churn, full investigation targets | Done |
+| 2E | ~90% | CLI args, config rules, decorator display, polish, edge cases | Done 2026-04-05 |
 
 ---
 

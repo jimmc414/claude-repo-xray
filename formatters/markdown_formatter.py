@@ -38,6 +38,36 @@ def _self_prefix(code_lang):
     return "this." if code_lang == "typescript" else "self."
 
 
+def _build_display_names(all_paths):
+    """Compute shortest unique path suffix for each file path.
+
+    Unique basenames → basename only.
+    Colliding basenames → walk parent segments until unique.
+    If >3 segments needed → parent/.../name form.
+    """
+    from collections import defaultdict
+    by_basename = defaultdict(list)
+    for p in all_paths:
+        if p:
+            by_basename[Path(p).name].append(p)
+
+    result = {}
+    for basename, paths in by_basename.items():
+        if len(paths) == 1:
+            result[paths[0]] = basename
+            continue
+        for full_path in paths:
+            parts = Path(full_path).parts
+            for depth in range(2, len(parts) + 1):
+                suffix = parts[-depth:]
+                if sum(1 for p in paths if Path(p).parts[-min(depth, len(Path(p).parts)):] == suffix) == 1:
+                    result[full_path] = suffix[0] + "/.../" + suffix[-1] if depth > 3 else "/".join(suffix)
+                    break
+            else:
+                result[full_path] = full_path
+    return result
+
+
 def format_markdown(
     results: Dict[str, Any],
     project_name: Optional[str] = None,
@@ -58,6 +88,66 @@ def format_markdown(
     metadata = results.get("metadata", {})
     summary = results.get("summary", {})
     gap = gap_features or {}
+
+    # Build disambiguation map for monorepo-safe display names
+    # Normalize paths: strip target_dir prefix to dedup absolute/relative forms
+    _target_dir = str(gap.get("target_dir", ""))
+    _td_prefix = (_target_dir + "/") if _target_dir and not _target_dir.endswith("/") else _target_dir
+
+    def _norm(p):
+        if _td_prefix and p.startswith(_td_prefix):
+            return p[len(_td_prefix):]
+        return p
+
+    _all_paths = set()
+    for fp in results.get("structure", {}).get("files", {}).keys():
+        if fp:
+            _all_paths.add(_norm(fp))
+    for r in results.get("git", {}).get("risk", []):
+        _all_paths.add(_norm(r.get("file", "")))
+    for bucket in ("active", "aging", "stale", "dormant"):
+        for f in results.get("git", {}).get("freshness", {}).get(bucket, []):
+            p = f.get("file", "") if isinstance(f, dict) else str(f) if f else ""
+            if p:
+                _all_paths.add(_norm(p))
+    for fc in results.get("git", {}).get("function_churn", []):
+        _all_paths.add(_norm(fc.get("file", "")))
+    for cc in results.get("git", {}).get("coupling_clusters", []):
+        for f in cc.get("files", []):
+            _all_paths.add(_norm(f))
+    for v in results.get("git", {}).get("velocity", []):
+        _all_paths.add(_norm(v.get("file", "")))
+    for hs in results.get("hotspots", []):
+        _all_paths.add(_norm(hs.get("file", "")))
+    for effects in results.get("side_effects", {}).get("by_type", {}).values():
+        for e in effects:
+            _all_paths.add(_norm(e.get("file", "")))
+    for fp in results.get("security_concerns", {}).keys():
+        _all_paths.add(_norm(fp))
+    for fp in results.get("sql_strings", {}).keys():
+        _all_paths.add(_norm(fp))
+    for fp in results.get("silent_failures", {}).keys():
+        _all_paths.add(_norm(fp))
+    for dm in results.get("deprecation_markers", []):
+        _all_paths.add(_norm(dm.get("file", "")))
+    for av in results.get("async_patterns", {}).get("violations", []):
+        _all_paths.add(_norm(av.get("file", "")))
+    inv = results.get("investigation_targets", {})
+    for m in inv.get("high_uncertainty_modules", []):
+        _all_paths.add(_norm(m.get("module", "")))
+    for a in inv.get("coupling_anomalies", []):
+        for f in a.get("files", []):
+            _all_paths.add(_norm(f))
+    for s in inv.get("shared_mutable_state", []):
+        _all_paths.add(_norm(s.get("file", "")))
+    _all_paths.discard("")
+    _dn_map = _build_display_names(list(_all_paths))
+
+    def dn(path):
+        """Display name with monorepo disambiguation."""
+        if not path:
+            return ""
+        return _dn_map.get(_norm(path), Path(path).name)
 
     # Language-aware code fence and file label
     lang = metadata.get("language", "python")
@@ -168,7 +258,7 @@ def format_markdown(
                     dependents = ", ".join(p.get("imported_by", [])[:3])
                     if len(p.get("imported_by", [])) > 3:
                         dependents += "..."
-                    lines.append(f"| {i} | `{Path(p.get('file', '')).name}` | {p.get('imported_by_count', 0)} modules | {dependents} |")
+                    lines.append(f"| {i} | `{dn(p.get('file', ''))}` | {p.get('imported_by_count', 0)} modules | {dependents} |")
                 lines.append("")
 
             # Maintenance Hotspots - files with high risk/churn
@@ -186,7 +276,7 @@ def format_markdown(
                 lines.append("| # | File | Risk | Factors |")
                 lines.append("|---|------|------|---------|")
                 for i, h in enumerate(hotspots, 1):
-                    lines.append(f"| {i} | `{Path(h.get('file', '')).name}` | {h.get('risk_score', 0):.2f} | {h.get('reason', '')} |")
+                    lines.append(f"| {i} | `{dn(h.get('file', ''))}` | {h.get('risk_score', 0):.2f} | {h.get('reason', '')} |")
                 lines.append("")
         except Exception:
             pass
@@ -210,20 +300,38 @@ def format_markdown(
                         rel_path = "./" + str(Path(filepath).relative_to(target_dir))
                         rel_usage = usage.replace(str(target_dir), ".").replace("\\", "/")
                     except ValueError:
-                        rel_path = "./" + Path(filepath).name
+                        rel_path = "./" + dn(filepath)
                         rel_usage = usage
                     lines.append(f"| `{ep.get('entry_point', '')}` | {rel_path} | `{rel_usage}` |")
                 lines.append("")
 
-                # CLI Arguments (if enabled)
-                if gap.get("cli_arguments"):
+                # CLI Arguments — TS scanner data takes precedence
+                ts_cli = results.get("cli")
+                if ts_cli and ts_cli.get("framework"):
+                    lines.append("### CLI Arguments")
+                    lines.append("")
+                    lines.append(f"**Framework:** {ts_cli['framework']}")
+                    lines.append("")
+                    if ts_cli.get("options"):
+                        lines.append("| Option | Description |")
+                        lines.append("|--------|-------------|")
+                        for opt in ts_cli["options"][:15]:
+                            lines.append(f"| `{opt.get('flag', '')}` | {opt.get('description', '-') or '-'} |")
+                        lines.append("")
+                    if ts_cli.get("commands"):
+                        lines.append("**Commands:**")
+                        for cmd in ts_cli["commands"][:10]:
+                            desc = cmd.get("description", "") or ""
+                            lines.append(f"- `{cmd['name']}` — {desc}")
+                        lines.append("")
+                elif gap.get("cli_arguments"):
                     structure = results.get("structure", {})
                     cli_args = extract_cli_arguments(entry_pts, structure)
                     if cli_args:
                         lines.append("### CLI Arguments")
                         lines.append("")
                         for entry in cli_args[:5]:
-                            entry_name = Path(entry.get('file', '')).name
+                            entry_name = dn(entry.get('file', ''))
                             lines.append(f"**{entry_name}:**")
                             lines.append("")
                             lines.append("| Argument | Required | Default | Help |")
@@ -258,7 +366,7 @@ def format_markdown(
                 lines.append("")
                 for cls in skeletons:
                     bases = f"({', '.join(cls.get('bases', []))})" if cls.get('bases') else ""
-                    lines.append(f"### {cls['name']}{bases} ({Path(cls.get('file', '')).name}:{cls.get('line', 0)})")
+                    lines.append(f"### {cls['name']}{bases} ({dn(cls.get('file', ''))}:{cls.get('line', 0)})")
                     lines.append("")
                     # Show docstring if available
                     if cls.get("docstring"):
@@ -346,7 +454,7 @@ def format_markdown(
                             break
                         bases = f"({', '.join(model.get('bases', []))})" if model.get('bases') else ""
                         model_type = model.get("type", "")
-                        lines.append(f"**{model['name']}** [{model_type}] ({Path(model.get('file', '')).name})")
+                        lines.append(f"**{model['name']}** [{model_type}] ({dn(model.get('file', ''))})")
                         lines.append("")
 
                         # Show field constraints if enabled and available
@@ -422,7 +530,7 @@ def format_markdown(
                     lines.append("| Tokens | File | Recommendation |")
                     lines.append("|--------|------|----------------|")
                     for h in file_hazards[:10]:
-                        lines.append(f"| {h.get('tokens', 0):,} | `{Path(h.get('file', '')).name}` | {h.get('recommendation', '')} |")
+                        lines.append(f"| {h.get('tokens', 0):,} | `{dn(h.get('file', ''))}` | {h.get('recommendation', '')} |")
                     lines.append("")
 
                 # Directory hazards
@@ -455,7 +563,7 @@ def format_markdown(
                 lines.append("*Control flow visualization for complex functions:*")
                 lines.append("")
                 for lm in maps:
-                    lines.append(f"### {lm.get('method', '')}() - {Path(lm.get('file', '')).name}:{lm.get('line', 0)} (CC:{lm.get('complexity', 0)})")
+                    lines.append(f"### {lm.get('method', '')}() - {dn(lm.get('file', ''))}:{lm.get('line', 0)} (CC:{lm.get('complexity', 0)})")
                     lines.append("")
                     # Show docstring if available
                     if lm.get("docstring"):
@@ -501,7 +609,7 @@ def format_markdown(
                 lines.append("## Method Signatures (Hotspots)")
                 lines.append("")
                 for sig in sigs:
-                    lines.append(f"### {sig.get('name', '')}() - {Path(sig.get('file', '')).name}:{sig.get('line', 0)}")
+                    lines.append(f"### {sig.get('name', '')}() - {dn(sig.get('file', ''))}:{sig.get('line', 0)}")
                     lines.append("")
                     # Build signature
                     async_prefix = "async " if sig.get("is_async") else ""
@@ -585,7 +693,7 @@ def format_markdown(
                 lines.append("## Side Effects (Detailed)")
                 lines.append("")
                 for filepath, effects in list(detail.items())[:10]:
-                    lines.append(f"### {Path(filepath).name}")
+                    lines.append(f"### {dn(filepath)}")
                     lines.append("")
                     lines.append("| Line | Type | Call |")
                     lines.append("|------|------|------|")
@@ -655,7 +763,7 @@ def format_markdown(
             hum = inv.get("high_uncertainty_modules", [])
             if hum:
                 items = ", ".join(
-                    f"{Path(m['module']).name} ({m['uncertainty_score']})"
+                    f"{dn(m['module'])} ({m['uncertainty_score']})"
                     for m in hum[:6]
                 )
                 lines.append(f"**High-uncertainty modules ({len(hum)}):** {items}")
@@ -679,7 +787,7 @@ def format_markdown(
             if esp:
                 items_list = []
                 for p in esp[:5]:
-                    entry = Path(p["entry_point"].split(":")[0]).name if ":" in p["entry_point"] else p["entry_point"]
+                    entry = dn(p["entry_point"].split(":")[0]) if ":" in p["entry_point"] else p["entry_point"]
                     effects = ", ".join(set(
                         se["type"] for se in p.get("reachable_side_effects", [])
                     ))
@@ -694,7 +802,7 @@ def format_markdown(
             ca = inv.get("coupling_anomalies", [])
             if ca:
                 items = ", ".join(
-                    f"{Path(a['files'][0]).name} ↔ {Path(a['files'][1]).name} "
+                    f"{dn(a['files'][0])} ↔ {dn(a['files'][1])} "
                     f"(no imports, {int(a['co_modification_score']*100)}% co-modified)"
                     for a in ca[:4]
                 )
@@ -705,7 +813,7 @@ def format_markdown(
             sms = inv.get("shared_mutable_state", [])
             if sms:
                 items = ", ".join(
-                    f"{s['variable']} in {Path(s['file']).name}"
+                    f"{s['variable']} in {dn(s['file'])}"
                     for s in sms[:5]
                 )
                 lines.append(f"**Shared mutable state ({len(sms)}):** {items}")
@@ -761,14 +869,7 @@ def format_markdown(
             full_path = hs.get('file', '')
             func_name = hs.get('function', '')
 
-            # Show last 2-3 path components for context (e.g., "cli/main.py" not just "main.py")
-            path_parts = Path(full_path).parts
-            if len(path_parts) >= 3:
-                short_path = "/".join(path_parts[-3:])
-            elif len(path_parts) >= 2:
-                short_path = "/".join(path_parts[-2:])
-            else:
-                short_path = Path(full_path).name
+            short_path = dn(full_path)
 
             # Deduplicate by function name + short path (skip duplicate file copies)
             combo = f"{func_name}:{short_path}"
@@ -785,10 +886,16 @@ def format_markdown(
         lines.append("## Import Analysis")
         lines.append("")
 
-        # Layers - enhanced with layer_details if enabled
-        layers = imports.get("layers", {})
+        # Layers - prefer tiers (topological) over layers (heuristic)
+        raw_tiers = imports.get("tiers", {})
+        if raw_tiers and any(raw_tiers.get(k) for k in ("foundation", "core", "orchestration")):
+            layers = raw_tiers
+            layer_heading = "### Architectural Tiers"
+        else:
+            layers = imports.get("layers", {})
+            layer_heading = "### Architectural Layers"
         if layers:
-            lines.append("### Architectural Layers")
+            lines.append(layer_heading)
             lines.append("")
 
             # Check if layer_details is enabled
@@ -857,7 +964,7 @@ def format_markdown(
                     orphan_path = str(orphan)
                 # Show relative path or module name for portability
                 if "/" in orphan_path or "\\" in orphan_path:
-                    orphan_display = Path(orphan_path).name
+                    orphan_display = dn(orphan_path)
                 else:
                     orphan_display = orphan_path
                 if orphan_display in seen_orphan_names:
@@ -922,7 +1029,7 @@ def format_markdown(
             lines.append("|------|------|---------|")
             for r in risk[:5]:
                 factors = f"churn:{r.get('churn', 0)} hotfix:{r.get('hotfixes', 0)} authors:{r.get('authors', 0)}"
-                lines.append(f"| {r.get('risk_score', 0):.2f} | `{Path(r.get('file', '')).name}` | {factors} |")
+                lines.append(f"| {r.get('risk_score', 0):.2f} | `{dn(r.get('file', ''))}` | {factors} |")
             lines.append("")
 
         # Freshness
@@ -943,14 +1050,14 @@ def format_markdown(
             # Show outliers for aging/stale/dormant files
             def get_file_info(f):
                 if isinstance(f, dict):
-                    return Path(f.get("file", "")).name, f.get("days", 0)
-                return Path(f).name if f else "", 0
+                    return dn(f.get("file", "")), f.get("days", 0)
+                return dn(f) if f else "", 0
 
             # Build commit count lookup from risk data
             risk_data = git.get("risk", [])
             commit_counts = {}
             for r in risk_data:
-                fname = Path(r.get("file", "")).name
+                fname = dn(r.get("file", ""))
                 commit_counts[fname] = r.get("churn", 0)
 
             # Show most concerning files (stale and dormant first)
@@ -988,7 +1095,7 @@ def format_markdown(
                 lines.append("| File A | File B | Co-changes |")
                 lines.append("|--------|--------|------------|")
                 for c in coupling[:10]:
-                    lines.append(f"| `{Path(c.get('file_a', '')).name}` | `{Path(c.get('file_b', '')).name}` | {c.get('count', 0)} |")
+                    lines.append(f"| `{dn(c.get('file_a', ''))}` | `{dn(c.get('file_b', ''))}` | {c.get('count', 0)} |")
                 lines.append("")
         except Exception:
             pass
@@ -1003,7 +1110,7 @@ def format_markdown(
             lines.append("| Risk | Function | File | Commits | Hotfixes |")
             lines.append("|------|----------|------|---------|----------|")
             for fc in function_churn[:10]:
-                lines.append(f"| {fc.get('risk_score', 0):.2f} | `{fc.get('function', '')}` | {Path(fc.get('file', '')).name} | {fc.get('commits', 0)} | {fc.get('hotfixes', 0)} |")
+                lines.append(f"| {fc.get('risk_score', 0):.2f} | `{fc.get('function', '')}` | {dn(fc.get('file', ''))} | {fc.get('commits', 0)} | {fc.get('hotfixes', 0)} |")
             lines.append("")
 
         # Change Clusters
@@ -1016,7 +1123,7 @@ def format_markdown(
             lines.append("| Cluster | Files | Co-changes |")
             lines.append("|---------|-------|------------|")
             for cc in coupling_clusters[:10]:
-                file_list = ", ".join(f"`{Path(f).name}`" for f in cc.get("files", []))
+                file_list = ", ".join(f"`{dn(f)}`" for f in cc.get("files", []))
                 lines.append(f"| {cc.get('cluster_id', 0) + 1} | {file_list} | {cc.get('total_cochanges', 0)} |")
             lines.append("")
 
@@ -1034,7 +1141,7 @@ def format_markdown(
                 lines.append("|------|-------|---------|")
                 for v in notable[:10]:
                     monthly = v.get("monthly_commits", [])
-                    lines.append(f"| `{Path(v.get('file', '')).name}` | {v.get('trend', '')} | {monthly} |")
+                    lines.append(f"| `{dn(v.get('file', ''))}` | {v.get('trend', '')} | {monthly} |")
                 lines.append("")
             # If all stable, show top files by volume
             elif velocity:
@@ -1056,7 +1163,7 @@ def format_markdown(
                 if effects:
                     lines.append(f"### {effect_type.upper()}")
                     for e in effects[:5]:
-                        lines.append(f"- `{e.get('call', '')}` in {Path(e.get('file', '')).name}:{e.get('line', 0)}")
+                        lines.append(f"- `{e.get('call', '')}` in {dn(e.get('file', ''))}:{e.get('line', 0)}")
                     lines.append("")
 
     # Security Concerns
@@ -1072,7 +1179,7 @@ def format_markdown(
             lines.append("*Code injection vectors detected (exec/eval/compile):*")
             lines.append("")
             for c in all_concerns:
-                lines.append(f"- **{c.get('call', '')}()** in `{Path(c.get('file', '')).name}:{c.get('line', 0)}`")
+                lines.append(f"- **{c.get('call', '')}()** in `{dn(c.get('file', ''))}:{c.get('line', 0)}`")
             lines.append("")
 
     # SQL String Literals
@@ -1089,7 +1196,7 @@ def format_markdown(
             lines.append("|-------|----------|")
             for q in all_sql[:15]:
                 query_text = q.get("query", "")[:60]
-                lines.append(f"| `{query_text}` | {Path(q.get('file', '')).name}:{q.get('line', 0)} |")
+                lines.append(f"| `{query_text}` | {dn(q.get('file', ''))}:{q.get('line', 0)} |")
             lines.append("")
 
     # Environment Variables
@@ -1115,14 +1222,14 @@ def format_markdown(
                         required = "No (or fallback)"
                     else:
                         required = "No"
-                    location = f"{Path(ev.get('file', '')).name}:{ev.get('line', 0)}"
+                    location = f"{dn(ev.get('file', ''))}:{ev.get('line', 0)}"
                     lines.append(f"| `{ev.get('variable', '')}` | {default} | {required} | {location} |")
             else:
                 # Fallback to old format
                 lines.append("| Variable | File | Line |")
                 lines.append("|----------|------|------|")
                 for ev in env_vars[:20]:
-                    lines.append(f"| `{ev.get('variable', '')}` | {Path(ev.get('file', '')).name} | {ev.get('line', 0)} |")
+                    lines.append(f"| `{ev.get('variable', '')}` | {dn(ev.get('file', ''))} | {ev.get('line', 0)} |")
             lines.append("")
     except Exception:
         pass
@@ -1185,7 +1292,7 @@ def format_markdown(
             for sf in all_failures[:20]:
                 pattern = sf.get("pattern", "-")
                 except_type = sf.get("except_type", "-")
-                lines.append(f"| {pattern} | {except_type} | `{Path(sf.get('file', '')).name}:{sf.get('line', 0)}` |")
+                lines.append(f"| {pattern} | {except_type} | `{dn(sf.get('file', ''))}:{sf.get('line', 0)}` |")
             lines.append("")
 
     # Deprecated APIs
@@ -1199,10 +1306,10 @@ def format_markdown(
             source = dm.get("source", dm.get("kind", "decorator"))
             name = dm.get("name", "")
             if name:
-                lines.append(f"- `{name}` ({source}) — {Path(dm.get('file', '')).name}:{dm.get('line', 0)}")
+                lines.append(f"- `{name}` ({source}) — {dn(dm.get('file', ''))}:{dm.get('line', 0)}")
             else:
                 text = dm.get("text", "")
-                lines.append(f"- {text} ({source}) — {Path(dm.get('file', '')).name}:{dm.get('line', 0)}")
+                lines.append(f"- {text} ({source}) — {dn(dm.get('file', ''))}:{dm.get('line', 0)}")
         lines.append("")
 
     # Decorators
@@ -1236,7 +1343,7 @@ def format_markdown(
             lines.append("*Blocking calls detected inside async functions:*")
             lines.append("")
             for v in violations[:15]:
-                lines.append(f"- **{v.get('violation_type', '')}**: `{v.get('call', '')}` in `{v.get('function', '')}` — {Path(v.get('file', '')).name}:{v.get('line', 0)}")
+                lines.append(f"- **{v.get('violation_type', '')}**: `{v.get('call', '')}` in `{v.get('function', '')}` — {dn(v.get('file', ''))}:{v.get('line', 0)}")
             lines.append("")
 
     # Test Example (Rosetta Stone)
@@ -1265,8 +1372,37 @@ def format_markdown(
         except Exception:
             pass
 
-    # Linter Rules (Project Idioms)
-    if gap.get("linter_rules"):
+    # Project Idioms — TS config rules take precedence over Python linter extraction
+    config_rules = results.get("config_rules")
+    if config_rules:
+        ts_config = config_rules.get("typescript")
+        eslint_config = config_rules.get("eslint")
+        prettier_config = config_rules.get("prettier")
+        if ts_config or eslint_config or prettier_config:
+            lines.append("## Project Idioms")
+            lines.append("")
+            if gap.get("explain"):
+                lines.append("> **How to use:** Follow these rules to ensure your code passes CI.")
+                lines.append("")
+            if ts_config:
+                strict_label = "strict mode" if ts_config.get("strict") else "non-strict"
+                lines.append(f"**TypeScript:** {strict_label} (from `{ts_config.get('config_file', 'tsconfig.json')}`)")
+                flags = ts_config.get("flags", {})
+                if flags:
+                    lines.append("")
+                    lines.append("| Flag | Value |")
+                    lines.append("|------|-------|")
+                    for flag, val in sorted(flags.items()):
+                        lines.append(f"| {flag} | {val} |")
+                lines.append("")
+            if eslint_config:
+                fw = f" (extends {eslint_config['framework']})" if eslint_config.get("framework") else ""
+                lines.append(f"**ESLint:** `{eslint_config.get('config_file', '')}`{fw}")
+                lines.append("")
+            if prettier_config:
+                lines.append(f"**Prettier:** `{prettier_config.get('config_file', '')}`")
+                lines.append("")
+    elif gap.get("linter_rules"):
         try:
             from gap_features import extract_linter_rules
             target_dir = gap.get("target_dir", ".")

@@ -20,11 +20,19 @@ interface RawImport {
   specifier: string;
   kind: "default" | "named" | "namespace" | "side-effect" | "dynamic";
   isRelative: boolean;
+  bindings?: Array<{ localName: string; exportedName: string }>;
 }
 
 interface GraphNode {
   imports: Set<string>;
   importedBy: Set<string>;
+}
+
+export interface BindingEntry {
+  localName: string;
+  resolvedModule: string;  // absolute path
+  exportedName: string;    // "*" for namespace, "default" for default import
+  kind: "named" | "default" | "namespace";
 }
 
 // =============================================================================
@@ -44,6 +52,54 @@ const LAYER_PATTERNS: Array<[RegExp, string]> = [
   [/\b(config|configs?|settings?)\b/i, "config"],
   [/\b(tests?|__tests__|spec|__spec__)\b/i, "tests"],
 ];
+
+// =============================================================================
+// Topological tier classification
+// =============================================================================
+
+const ORCHESTRATION_KEYWORDS = /\b(app|main|cli|server|index|run|bootstrap|orchestrat|coordinat|workflow|pipeline)\b/i;
+const FOUNDATION_KEYWORDS = /\b(util|utils|helper|common|shared|base|config|constants?|types?|interfaces?|lib)\b/i;
+
+function computeTiers(
+  graph: Map<string, GraphNode>,
+  files: string[],
+  absRoot: string,
+): Record<string, string[]> {
+  const tiers: Record<string, string[]> = {
+    orchestration: [],
+    core: [],
+    foundation: [],
+    leaf: [],
+  };
+
+  for (const filePath of files) {
+    const node = graph.get(filePath);
+    const rel = relativePath(filePath, absRoot);
+    const basename = path.basename(filePath).replace(/\.[^.]+$/, "");
+    const importsCount = node ? node.imports.size : 0;
+    const importedByCount = node ? node.importedBy.size : 0;
+    const ratio = importedByCount / (importsCount + 1);
+
+    let tier: string;
+    if (importedByCount === 0 && importsCount === 0) {
+      tier = "leaf";
+    } else if (ORCHESTRATION_KEYWORDS.test(basename)) {
+      tier = "orchestration";
+    } else if (FOUNDATION_KEYWORDS.test(basename)) {
+      tier = "foundation";
+    } else if (ratio > 2) {
+      tier = "foundation";
+    } else if (ratio < 0.5 && importsCount > 2) {
+      tier = "orchestration";
+    } else {
+      tier = "core";
+    }
+
+    tiers[tier].push(rel);
+  }
+
+  return tiers;
+}
 
 // =============================================================================
 // Node.js builtin detection
@@ -116,6 +172,9 @@ export function analyzeImports(
   // Step 3: Layer detection
   const layers = detectLayers(files, absRoot);
 
+  // Step 3b: Topological tiers
+  const tiers = computeTiers(graph, files, absRoot);
+
   // Step 4: Circular dependency detection
   const circular = detectCircularDeps(graph);
 
@@ -145,6 +204,7 @@ export function analyzeImports(
   return {
     graph: graphOutput,
     layers: layersOutput,
+    tiers,
     aliases: {},
     alias_patterns: [],
     orphans: orphans.map(f => relativePath(f, absRoot)),
@@ -202,7 +262,8 @@ function parseImports(filePath: string): RawImport[] {
         const specifier = specNode.text;
         const isRelative = specifier.startsWith(".");
         const kind = getImportKind(node);
-        imports.push({ specifier, kind, isRelative });
+        const bindings = extractImportBindings(node);
+        imports.push({ specifier, kind, isRelative, bindings });
       }
     }
 
@@ -225,7 +286,12 @@ function parseImports(filePath: string): RawImport[] {
     ) {
       const specifier = (node.arguments[0] as ts.StringLiteral).text;
       const isRelative = specifier.startsWith(".");
-      imports.push({ specifier, kind: "default", isRelative });
+      // Extract binding from parent: const mod = require("...")
+      const bindings: Array<{ localName: string; exportedName: string }> = [];
+      if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+        bindings.push({ localName: node.parent.name.text, exportedName: "*" });
+      }
+      imports.push({ specifier, kind: "default", isRelative, bindings });
     }
 
     // Dynamic import: import("specifier")
@@ -255,6 +321,69 @@ function getImportKind(node: ts.ImportDeclaration): RawImport["kind"] {
     return "named";
   }
   return "default";
+}
+
+function extractImportBindings(node: ts.ImportDeclaration): Array<{ localName: string; exportedName: string }> {
+  const bindings: Array<{ localName: string; exportedName: string }> = [];
+  const clause = node.importClause;
+  if (!clause) return bindings;
+
+  // import Default from "..."
+  if (clause.name) {
+    bindings.push({ localName: clause.name.text, exportedName: "default" });
+  }
+
+  if (clause.namedBindings) {
+    // import * as mod from "..."
+    if (ts.isNamespaceImport(clause.namedBindings)) {
+      bindings.push({ localName: clause.namedBindings.name.text, exportedName: "*" });
+    }
+    // import { foo, bar as baz } from "..."
+    if (ts.isNamedImports(clause.namedBindings)) {
+      for (const el of clause.namedBindings.elements) {
+        const exportedName = el.propertyName ? el.propertyName.text : el.name.text;
+        bindings.push({ localName: el.name.text, exportedName });
+      }
+    }
+  }
+
+  return bindings;
+}
+
+// =============================================================================
+// Binding table (consumed by call-analysis)
+// =============================================================================
+
+/**
+ * Build a mapping from local identifier names to their resolved module + export.
+ * Used by call-analysis to resolve cross-module calls.
+ */
+export function buildBindingTable(
+  filePath: string,
+  knownFiles: Set<string>,
+): Map<string, BindingEntry> {
+  const table = new Map<string, BindingEntry>();
+  const imports = parseImports(filePath);
+
+  for (const imp of imports) {
+    if (!imp.isRelative || !imp.bindings) continue;
+    const resolved = resolveRelativeImport(filePath, imp.specifier, knownFiles);
+    if (!resolved) continue;
+
+    for (const binding of imp.bindings) {
+      const kind: BindingEntry["kind"] =
+        binding.exportedName === "*" ? "namespace" :
+        binding.exportedName === "default" ? "default" : "named";
+      table.set(binding.localName, {
+        localName: binding.localName,
+        resolvedModule: resolved,
+        exportedName: binding.exportedName,
+        kind,
+      });
+    }
+  }
+
+  return table;
 }
 
 // =============================================================================
