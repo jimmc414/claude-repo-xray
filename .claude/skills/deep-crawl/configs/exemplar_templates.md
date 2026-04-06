@@ -11,9 +11,9 @@ Target: hub module table + hidden coupling bullets + blast radius ranking + safe
 ```markdown
 ### {Cluster Name}
 
-| Hub Module | Imported By | High-Impact Functions | Signature Change Breaks | Behavior Change Breaks |
-|------------|-------------|----------------------|------------------------|----------------------|
-| `{module_path}` | {N} production modules + {M} {pattern} importers | `{function}()` ({call_count} call sites, {impact_level}), `{constant}` ({importer_count} importers, {impact_level}) | {Describe what breaks on rename/signature change} [FACT] ({file}:{line}). {Describe downstream model impacts} [FACT] — {explain silent consequence}. | `{function}()` {describe hidden side effect} [FACT] ({file}:{line}) — {explain why callers don't expect this}. |
+| Hub Module | Imported By | Blast Radius | High-Impact Functions | Signature Change Breaks | Behavior Change Breaks |
+|------------|-------------|-------------|----------------------|------------------------|----------------------|
+| `{module_path}` | {N} production modules + {M} {pattern} importers | {affected_count} affected, {risk} risk, {max_hops} hops | `{function}()` ({call_count} call sites, {impact_level}), `{constant}` ({importer_count} importers, {impact_level}) | {Describe what breaks on rename/signature change} [FACT] ({file}:{line}). {Describe downstream model impacts} [FACT] — {explain silent consequence}. | `{function}()` {describe hidden side effect} [FACT] ({file}:{line}) — {explain why callers don't expect this}. |
 
 **Hidden coupling discovered:**
 - `{entity}` ({visibility hint} = "{actual visibility}") is imported by {N} external modules [FACT] ({file}:{line}) — de facto public API. {Describe breaking change consequence}.
@@ -22,6 +22,9 @@ Target: hub module table + hidden coupling bullets + blast radius ranking + safe
 **Blast radius ranking:**
 1. `{Entity}` class — {N} importers + {M} manual mapping sites + {K} representations (highest risk)
 2. `{Entity}` dataclass — {N} importers across {layer_a} + {layer_b} layers
+
+**Test coverage gaps (from blast radius):**
+- `{module_a}` depends on `{hub}` (2 hops) but has never been co-modified — 0 historical co-changes. [ABSENCE]
 
 **Safe changes:** {List changes that won't break callers}. {List changes isolated to low-impact modules}.
 **Dangerous changes:** {Rename/move that breaks N importers}. {Return type change affecting N callers}. {File move that breaks path resolution}.

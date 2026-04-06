@@ -65,7 +65,8 @@ files, cyclomatic complexity per function, side effect categorization
 (DB/API/file/subprocess), git risk scores, co-modification coupling, author
 expertise, type hint coverage, environment variable extraction with defaults, CLI
 argument parsing, Pydantic validator constraints, TODO/FIXME markers, test file
-mapping, investigation targets.
+mapping, investigation targets, blast radius (transitive impact per module),
+HTTP route detection, resource leak flags, security concerns (unsafe deserialization).
 
 These signals informed this document's investigation but are not repeated here.
 

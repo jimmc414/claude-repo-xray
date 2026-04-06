@@ -3,7 +3,8 @@
     "indicators": {
       "frameworks": ["fastapi", "flask", "django", "starlette", "sanic", "tornado"],
       "patterns": ["@app.route", "@router.", "APIRouter", "Blueprint"],
-      "directories": ["routes/", "api/", "views/", "endpoints/"]
+      "directories": ["routes/", "api/", "views/", "endpoints/"],
+      "xray_signals": ["routes.routes"]
     },
     "additional_investigation": [
       "Authentication and authorization middleware chain",

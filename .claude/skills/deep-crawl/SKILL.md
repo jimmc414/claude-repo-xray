@@ -238,7 +238,26 @@ Save all pre-flight output to `/tmp/deep_crawl/PREFLIGHT.md` for Phase 1 consump
 1. Read `/tmp/xray/xray.md` for orientation
 2. Read `investigation_targets` from `/tmp/xray/xray.json`
 3. Read `git.function_churn` and `git.velocity` from `/tmp/xray/xray.json`. Files with accelerating velocity or high function-level churn should be prioritized for investigation.
+2b. Read `investigation_targets.import_time_side_effects` from `/tmp/xray/xray.json`.
+    If non-empty, add a P4 cross-cutting task: "Investigate import-time side effects —
+    verify each flagged call, determine if intentional or accidental, document consequences."
+    These are high-value gotcha candidates.
+2c. Read `security_concerns` from `/tmp/xray/xray.json`. If any entries have
+    category "unsafe_deserialization", add a P4 cross-cutting task:
+    "Investigate unsafe deserialization — trace data source for each pickle.loads/
+    yaml.load call. Determine if untrusted data can reach these calls."
 4. Detect all applicable domain facets using indicators from `.claude/skills/deep-crawl/configs/domain_profiles.json`. A repo can match multiple facets (e.g., a Django app with Celery workers and a CLI gets `web_api` + `async_service` + `cli_tool`). Union their `additional_investigation` tasks into the crawl plan. If no facet matches, use `library` as default. Read `/tmp/deep_crawl/PREFLIGHT.md` for framework detection results to guide facet matching.
+4b. If `routes.routes` exists and is non-empty in `/tmp/xray/xray.json`, automatically
+    activate the `web_api` facet (even if no other web_api indicators matched). The
+    presence of detected HTTP routes is a deterministic signal that supersedes heuristic
+    framework detection.
+4c. When `routes.routes` exists, seed P1 trace tasks from routes instead of
+    generic entry_to_side_effect_paths. Group routes by handler file, then select
+    one representative route per file (prefer routes with side_effects > 0). For each
+    selected route, create a P1 trace task:
+      "Trace {METHOD} {path} → {handler} (side effects: {list})"
+    This produces richer traces than generic entry point tracing because each trace
+    starts with HTTP method context.
 
 For each matched facet:
 1. Add its `additional_investigation` tasks to the crawl plan at P4 priority (cross-cutting concerns)
@@ -249,7 +268,11 @@ For each matched facet:
 If facet investigation tasks push any batch beyond its max agent limit, split into sub-batches.
 Use the facet's `primary_entity` to determine the adversarial simulation scenario in Phase 5.
 If multiple facets match, the adversarial simulation should use the primary facet's entity.
-4. Produce a prioritized crawl plan using the template at `.claude/skills/deep-crawl/templates/CRAWL_PLAN.md.template`
+5. Read `blast_radius` from `/tmp/xray/xray.json`. Use `blast_radius.files` (filtered to
+   risk "critical" or "high") to seed P7 change-impact tasks instead of hub_modules alone.
+   blast_radius combines import AND call graph traversal — it is strictly richer than
+   hub_modules. Order P7 tasks by affected_count descending.
+6. Produce a prioritized crawl plan using the template at `.claude/skills/deep-crawl/templates/CRAWL_PLAN.md.template`
 5. Save to `/tmp/deep_crawl/CRAWL_PLAN.md`
 6. **Module coverage pre-check (mandatory).** After saving the plan, verify P2+P3 task count meets the coverage target:
 
@@ -506,6 +529,11 @@ Sub-agents receive these protocol instructions verbatim:
 6. Note branching (error paths, conditional logic) at each hop
 7. Note data transformations between hops
 8. Note gotchas discovered during tracing
+9. If this trace starts from an HTTP route (method + path provided):
+   - Note the HTTP method and path in the trace header
+   - Look for middleware/dependency injection before the handler (auth, validation, rate limiting)
+   - Note request body parsing and response serialization
+   - Tag side effects with their HTTP context: "POST creates resource" vs "GET reads"
 ```
 
 #### Protocol B: Module Deep Read
@@ -531,7 +559,30 @@ Sub-agents receive these protocol instructions verbatim:
       Test coverage: {tested_count}/{total_public} public functions tested.
       Tested: {list}. Untested: {list}.
       Test file: {path} ({N} test functions)
-3. Record any gotchas
+2c. Check if this module appears in `investigation_targets.import_time_side_effects`
+    from `/tmp/xray/xray.json`. If it does, investigate each flagged call:
+    - Is this intentional (e.g., module-level singleton, registry pattern)?
+    - What happens if the side effect fails at import time?
+    - What modules import this one (from imports.graph) and are affected?
+    Note in findings: "⚠ Import-time: {call} at line {N} — {consequence}"
+2d. For classes with magic methods beyond __init__ (check `is_dunder` in method
+    info from xray), document:
+    - What each magic method does (read the actual implementation)
+    - Behavioral implications: __getattr__ = hidden attribute interception,
+      __eq__ without __hash__ = unhashable, __call__ = instances are callable,
+      __enter__/__exit__ = context manager protocol
+    - Whether consumers rely on these behaviors
+3. For each public function, note decorator arguments that affect behavior:
+   - Retry decorators: max_attempts, backoff strategy, which exceptions are retried
+   - Cache decorators: TTL, cache key strategy, invalidation
+   - Auth decorators: required role, permission level
+   - Rate limit decorators: limits, window, key function
+   These are behavioral contracts — downstream agents need to know them.
+3b. If xray flags resource_leaks in this module (check xray.json), verify:
+    is there a close() call elsewhere? Is it inside a finally block? Is it a
+    real leak or does the caller manage the lifecycle? Note confirmed leaks
+    as [MEDIUM] gotchas.
+4. Record any gotchas
 ```
 
 #### Protocol C: Cross-Cutting Concern
@@ -566,6 +617,9 @@ grep -rn "global " --include="*.py"
 grep -rn "asyncio\.run\|loop\.run_until_complete\|run_coroutine_threadsafe" --include="*.py"
 grep -rn "async def " --include="*.py" | wc -l
 
+# Unsafe deserialization
+grep -rn "pickle\.loads\|pickle\.load\|yaml\.load\|marshal\.loads" --include="*.py"
+
 # Exception taxonomy (for exception_taxonomy investigations)
 grep -rn "class.*Exception\|class.*Error" --include="*.py"  # custom exception classes
 grep -rn "except.*pass\|except:$" --include="*.py"  # silent failures
@@ -585,10 +639,24 @@ When the crawl plan includes an exception taxonomy task, Protocol C agents shoul
    bare except — these are high-value gotcha candidates
 6. Write to findings/cross_cutting/exception_taxonomy.md
 
+**Unsafe deserialization investigations (Protocol C):**
+
+When the crawl plan includes an unsafe deserialization task, Protocol C agents should:
+1. Find all `pickle.loads`, `pickle.load`, `yaml.load`, `marshal.loads` calls
+2. For each call, read the full function containing it
+3. Trace the data parameter backward — where does the serialized data originate?
+4. Classify: user input (CRITICAL), file from disk (HIGH), internal wire format (MEDIUM)
+5. Check for SafeLoader usage with yaml.load — `yaml.safe_load` is safe, `yaml.load` is not
+6. Note in findings with severity based on data source classification
+7. Write to findings/cross_cutting/unsafe_deserialization.md
+
 #### Protocol D: Convention Documentation
 
 ```
 1. Read examples of the pattern from xray pillar/hotspot list — at least max(5, pillar_count / 3) examples, covering different architectural layers
+1b. When reading examples, note decorator PATTERNS including arguments.
+    "All endpoints use @require_auth(role=...)" is a more useful convention
+    than "@require_auth". The argument pattern is part of the convention.
 2. Identify the common structure
 3. State the convention as a directive ("always X", "never Y")
 4. Read each flagged deviation
@@ -599,6 +667,11 @@ When the crawl plan includes an exception taxonomy task, Protocol C agents shoul
 #### Protocol E: Reverse Dependency & Change Impact
 
 ```
+0. Read `blast_radius.files` from `/tmp/xray/xray.json` for this hub module.
+   Note the pre-computed affected_count, risk level, max_hops, and undertested_dependents.
+   This is your starting landscape — verify it, don't recompute it.
+   If undertested_dependents is non-empty, flag in findings: these modules depend
+   on the hub but have never been co-modified in git — potential test gap.
 1. Read xray reverse dependency data for the assigned hub module cluster:
    - .imports.graph[module]["imported_by"] — list of importer modules
    - .imports.distances.hub_modules — sorted by connection count
@@ -736,6 +809,15 @@ fi
 
 If state_diagrams.md has content, assembly agent S1 includes it at the top of the Critical Paths section.
 
+**S1 API Endpoint Index:** If route trace findings exist (traces starting with HTTP methods),
+S1 adds an `### API Endpoint Index` subsection at the end of Critical Paths. Format as a table:
+
+| Method | Path | Handler | Side Effects | Auth |
+|--------|------|---------|-------------|------|
+
+Populate from trace findings. This satisfies the web_api domain profile's
+"API endpoint index" `additional_output_section` requirement.
+
 #### Step 1b: Temporarily remove CLAUDE.md compression contamination
 
 Sub-agents spawn with fresh context and read CLAUDE.md files automatically. If the project's CLAUDE.md references "compressed intelligence" or similar framing, sub-agents absorb "my job is compression" before reading their task prompt. Temporarily rename CLAUDE.md files to prevent this:
@@ -854,8 +936,41 @@ Your output MUST use exactly one `## ` header per template section assigned to y
 ## S2 Historical Risk Annotation
 If you are S2 (Module Behavioral Index): for each module ### being assembled, check if it appears in `git.risk`, `git.function_churn`, or `git.velocity` from `/tmp/xray/xray.json`. If it does, append a brief **Historical Risk** note at the end of that module's subsection with: risk score, most-volatile functions, and trend direction. Format: `> **Git risk:** 0.88 — volatile functions: load_config (8 commits, 2 hotfixes). Trend: stable.`
 
+## S2 Import-Time Side Effect Annotation
+If you are S2: for each module ### being assembled, check if it appears in
+`investigation_targets.import_time_side_effects` from `/tmp/xray/xray.json`.
+If it does, prepend a warning: `> ⚠ **Import-time side effect:** {call} at
+line {N} — executes on import. {consequence from findings}.`
+
 ## S3b Depth Directive
 If you are S3b (Error Handling, Shared State): the Error Handling Strategy section must document the dominant error pattern, per-subsystem deviations, retry strategies, exception hierarchies, and recovery paths. Target: >= 3,500 words for Error Handling alone. Read module findings for error/exception/retry patterns in addition to cross-cutting findings — every module's error handling deviations contribute to this section. If `findings/cross_cutting/exception_taxonomy.md` exists, include it as a subsection under Error Handling: inheritance tree of custom exceptions, raise/catch mapping, uncaught paths, and silent failure patterns (`except: pass`, bare except, log-and-swallow). Silent failures are high-value gotcha candidates — flag them in your gotchas output file.
+
+## S3a Magic Methods Directive
+If you are S3a (Key Interfaces): when documenting class interfaces, include magic methods
+that affect API behavior. Group by behavior type:
+- Attribute access: __getattr__, __setattr__, __getattribute__, __delattr__
+- Container: __getitem__, __setitem__, __len__, __contains__, __iter__
+- Callable: __call__
+- Context: __enter__, __exit__
+- Comparison: __eq__, __hash__, __lt__, __le__
+- Representation: __str__, __repr__, __format__
+Only document magic methods that investigation findings confirmed as behaviorally
+significant — don't list __init__ or trivial __repr__.
+
+## S4 Resource Leak Convention
+If you are S4 (Conventions): if investigation findings note resource leak deviations
+(open() without with), document as convention: "File I/O uses context managers
+(`with open(...)`) — {N} deviations found at {file:line list}."
+
+## S4 Decorator Configuration Surface
+If you are S4 (Configuration Surface): decorator arguments containing configuration
+values are part of the Configuration Surface. Extract from investigation findings:
+- Retry configuration: max_attempts, backoff multipliers
+- Cache TTLs and strategies
+- Rate limits and windows
+- Auth role requirements
+Document alongside env vars and config files. Format:
+"Retry: 3 attempts with exponential backoff (@retry in {module}, {module})"
 
 ## Rules
 - INCLUDE EVERY FINDING. The output context window is 1M tokens. Your section will consume less than 5% of available context. There is no reason to drop, summarize, or condense any finding.
@@ -910,13 +1025,46 @@ S5's prompt follows the same template as S1-S4, with these additions for the **G
 
 Organize gotchas into domain-cluster ### subsections derived from the investigation's subsystem structure (e.g., "Agent System", "Data Models", "Execution Engine", "LLM Integration", "Configuration"). Derive cluster names from the module findings directory — group `findings/modules/*.md` by top-level package directory. Within each cluster, order entries by severity (critical first). Prefix each entry with severity tag: `[CRITICAL]`, `[HIGH]`, or `[MEDIUM]`. Target: one ### per 5-15 gotchas. Never put more than 15 gotchas under a single ### heading.
 
+S5's additional gotcha rules from xray signals:
+
+- **Import-time side effects** from investigation findings are [HIGH] severity gotchas.
+  Format: "[HIGH] Importing {module} executes {call} at module load ({file}:{line}).
+  {consequence}. Affected importers: {list from imports.graph}."
+
+- **Unsafe deserialization** findings are [CRITICAL] severity when data source is
+  user-controlled, [HIGH] when from external files, [MEDIUM] when internal.
+  Format: "[CRITICAL] pickle.loads at {file}:{line} — deserializes {data_source}.
+  Arbitrary code execution risk if {data_source} is attacker-controlled."
+
+- **Dangerous magic method combinations** are gotchas:
+  - __eq__ without __hash__ → class instances cannot be used in sets or as dict keys
+  - __getattr__ that catches all attributes → can mask real AttributeError bugs
+  - __del__ with side effects → unpredictable cleanup timing
+  - __bool__ returning non-obvious values → conditional checks behave unexpectedly
+
 S5's template sections remain: Gotchas, Hazards — Do Not Read, Extension Points, and Reading Order from DEEP_ONBOARD.md.template.
 
 S6's prompt for **Data Contracts**: extract all Pydantic models, dataclasses, TypedDicts, and NamedTuples from module findings + xray `investigation_targets.domain_entities`. Format as table with Model, File, Type, Key Fields, Serialization, Gotcha.
 
 S6's prompt for **Change Impact Index**: organize impact findings by hub module cluster. Each cluster gets a table showing importers, high-impact functions, signature-change consequences, behavior-change consequences, safe vs dangerous changes. Also read `git.coupling_clusters` from `/tmp/xray/xray.json`. For each cluster, add a **Hidden Coupling** row to the relevant hub module's impact table. Format: `When modifying {file_a}, also verify {file_b} — {count} historical co-changes with no import relationship.`
 
+For each hub module cluster in impact findings, cross-reference with
+`blast_radius.files` from `/tmp/xray/xray.json`. Add a **Blast Radius** row to
+each hub module's table:
+- Affected modules: {affected_count} ({risk} risk)
+- Max propagation: {max_hops} hops
+- Undertested: {list of undertested_dependents, or "none"}
+
+If blast_radius shows a module at "critical" risk that Protocol E findings didn't
+cover, note it as a gap: "blast_radius flags {module} as critical ({N} affected)
+but investigation did not reach it."
+
 S6's prompt for **Change Playbooks**: organize playbook findings into step-by-step checklists with validation commands and common mistakes.
+
+If HTTP route traces exist in findings, include an "Add New API Endpoint" playbook.
+Reference the pattern from an existing route: "Follow the pattern of {METHOD} {path}
+in {handler_file}:{line}." Include middleware/auth setup, request validation, handler
+implementation, response serialization, and test creation steps.
 
 S6's prompt must include this **Playbook Quality Floor (mechanically checked after you finish)**:
 ```
