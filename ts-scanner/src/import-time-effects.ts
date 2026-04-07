@@ -2,7 +2,9 @@
  * Import-time side effect detection.
  *
  * Identifies side effect calls at module scope (outside functions/classes)
- * that execute on import. These are action-at-a-distance risks.
+ * that execute on import. Uses range-based scope checking: a side effect
+ * is module-scope only if its line does NOT fall within any function/class
+ * [start_line, end_line] range.
  */
 
 import * as path from "path";
@@ -25,41 +27,45 @@ export function computeImportTimeSideEffects(
   for (const [filePath, fa] of Object.entries(fileResults)) {
     if (fa.side_effects.length === 0) continue;
 
-    // Build line ranges for functions and classes (these are NOT module scope)
-    const scopeRanges: Array<{ start: number; end: number }> = [];
+    // Build excluded ranges from all functions and classes using [line, end_line]
+    const excludedRanges: Array<{ start: number; end: number }> = [];
 
     for (const fn of fa.functions) {
-      // Approximate: function starts at fn.line, extends ~50 lines (heuristic)
-      // We don't have end lines, so use a heuristic: any side effect on the
-      // same line as a function is inside it. For better accuracy we'd need
-      // end lines, but this catches the common case of module-scope calls.
-      scopeRanges.push({ start: fn.line, end: fn.line + 200 });
+      if (fn.end_line != null) {
+        excludedRanges.push({ start: fn.line, end: fn.end_line });
+      }
     }
     for (const cls of fa.classes) {
-      const lastMethodLine = cls.methods.length > 0
-        ? Math.max(...cls.methods.map(m => m.line))
-        : cls.line;
-      scopeRanges.push({ start: cls.line, end: lastMethodLine + 200 });
+      if (cls.end_line != null) {
+        excludedRanges.push({ start: cls.line, end: cls.end_line });
+      } else {
+        // Fallback: use last method line if no end_line
+        const lastMethodLine = cls.methods.length > 0
+          ? Math.max(...cls.methods.map(m => m.end_line ?? m.line))
+          : cls.line;
+        excludedRanges.push({ start: cls.line, end: lastMethodLine });
+      }
     }
-
-    // A side effect is module-scope if its line is BEFORE any function/class
-    // The heuristic: side effects at lines before the first function/class are module-scope
-    const firstScopeLine = scopeRanges.length > 0
-      ? Math.min(...scopeRanges.map(r => r.start))
-      : Infinity;
 
     for (const se of fa.side_effects) {
       if (!DANGEROUS_CATEGORIES.has(se.category)) continue;
-      // Module scope: before first function/class definition
-      if (se.line < firstScopeLine) {
-        const rel = path.relative(targetDir, filePath).replace(/\\/g, "/");
-        results.push({
-          file: rel,
-          line: se.line,
-          call: se.call,
-          category: se.category,
-        });
-      }
+
+      // Primary filter: if depth is tracked, only module-scope (depth 0) effects qualify
+      if (se.depth != null && se.depth > 0) continue;
+
+      // Secondary filter: line must not fall inside any function/class range
+      const insideScope = excludedRanges.some(
+        r => se.line >= r.start && se.line <= r.end,
+      );
+      if (insideScope) continue;
+
+      const rel = path.relative(targetDir, filePath).replace(/\\/g, "/");
+      results.push({
+        file: rel,
+        line: se.line,
+        call: se.call,
+        category: se.category,
+      });
     }
   }
 

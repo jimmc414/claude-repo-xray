@@ -244,7 +244,10 @@ function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis, classM
   // CallExpression → side effects, security, async violations, resource leaks, routes
   if (ts.isCallExpression(node)) {
     const se = detectSideEffect(node, ctx.sourceFile);
-    if (se) result.side_effects.push(se);
+    if (se) {
+      se.depth = ctx.depth;
+      result.side_effects.push(se);
+    }
     const sc = detectSecurityConcern(node, ctx.sourceFile);
     if (sc) result.security_concerns.push(sc);
     const dr = detectDynamicRequire(node, ctx.sourceFile);
@@ -327,6 +330,15 @@ function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis, classM
     }
   }
 
+  // Increment depth for function-like scopes not handled above (callbacks, object methods).
+  // This ensures side effects inside callbacks aren't misclassified as module-scope.
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node) ||
+      (ts.isMethodDeclaration(node) && !ctx.currentClass)) {
+    const childCtx = { ...ctx, depth: ctx.depth + 1 };
+    ts.forEachChild(node, child => walkPass1(child, childCtx, result, classMutations));
+    return;
+  }
+
   // Default: recurse into children
   ts.forEachChild(node, child => walkPass1(child, ctx, result, classMutations));
 }
@@ -352,6 +364,7 @@ function extractFunctionInfo(node: ts.FunctionDeclaration, ctx: WalkContext): Fu
     decorators,
     is_async: isAsync,
     line: getLineNumber(node, ctx.sourceFile),
+    end_line: ctx.sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line + 1,
     complexity: cc,
     docstring,
   };
@@ -378,6 +391,7 @@ function extractArrowFunctionInfo(
     decorators,
     is_async: isAsync,
     line: getLineNumber(node, ctx.sourceFile),
+    end_line: ctx.sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line + 1,
     complexity: cc,
     docstring,
   };
@@ -416,6 +430,7 @@ function extractClassInfo(
     methods,
     decorators,
     line: getLineNumber(node, ctx.sourceFile),
+    end_line: ctx.sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line + 1,
     docstring,
     kind: "class",
   };
@@ -453,6 +468,7 @@ function extractMethodInfo(
     decorators,
     is_async: isAsync,
     line: getLineNumber(node, ctx.sourceFile),
+    end_line: ctx.sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line + 1,
     complexity: cc,
   };
   if (isDunder) methodInfo.is_dunder = true;

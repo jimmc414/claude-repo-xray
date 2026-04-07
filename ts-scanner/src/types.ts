@@ -37,6 +37,8 @@ export interface XRayResults {
   blast_radius?: BlastRadius;
   investigation_targets?: InvestigationTargets;
   resource_leaks?: Record<string, ResourceLeak[]>;
+  git?: GitAnalysis;
+  tech_debt?: TechDebt;
   // TS-specific
   ts_specific?: TsSpecific;
 }
@@ -146,6 +148,7 @@ export interface ClassInfo {
   decorators: string[];
   decorator_details?: DecoratorDetail[];
   line: number;
+  end_line?: number;
   docstring: string | null;
   file?: string;
   kind?: "class" | "interface" | "enum";
@@ -162,6 +165,7 @@ export interface MethodInfo {
   is_async: boolean;
   is_dunder?: boolean;
   line: number;
+  end_line?: number;
   complexity: number;
 }
 
@@ -173,6 +177,7 @@ export interface FunctionInfo {
   decorator_details?: DecoratorDetail[];
   is_async: boolean;
   line: number;
+  end_line?: number;
   complexity: number;
   docstring: string | null;
   file?: string;
@@ -279,6 +284,7 @@ export interface SideEffect {
   category: string;
   call: string;
   line: number;
+  depth?: number;
 }
 
 export interface SideEffectEntry {
@@ -525,4 +531,137 @@ export interface ImportTimeSideEffect {
 
 export interface InvestigationTargets {
   import_time_side_effects: ImportTimeSideEffect[];
+  high_uncertainty_modules?: UncertaintyModule[];
+  ambiguous_interfaces?: AmbiguousInterface[];
+  entry_to_side_effect_paths?: EntryToSideEffectPath[];
+  shared_mutable_state?: SharedMutableStateTarget[];
+  domain_entities?: DomainEntity[];
+  coupling_anomalies?: CouplingAnomaly[];
+}
+
+export interface UncertaintyModule {
+  file: string;
+  score: number;
+  reasons: string[];
+}
+
+export interface AmbiguousInterface {
+  file: string;
+  function: string;
+  score: number;
+  reasons: string[];
+}
+
+export interface EntryToSideEffectPath {
+  entry_point: string;
+  entry_file: string;
+  side_effects: Array<{ call: string; file: string; hops: number }>;
+}
+
+export interface SharedMutableStateTarget {
+  name: string;
+  file: string;
+  line: number;
+  kind: string;
+  mutated_by?: string[];
+}
+
+export interface DomainEntity {
+  name: string;
+  kind: "class" | "interface" | "type_alias";
+  file: string;
+  used_in_files: string[];
+}
+
+export interface CouplingAnomaly {
+  file_a: string;
+  file_b: string;
+  git_cochanges: number;
+  has_import_relationship: boolean;
+}
+
+// =============================================================================
+// Git Analysis
+// =============================================================================
+
+export interface GitAnalysis {
+  risk: GitRiskEntry[];
+  coupling: GitCouplingEntry[];
+  coupling_clusters: GitCouplingCluster[];
+  freshness: GitFreshness;
+  function_churn: GitFunctionChurnEntry[];
+  velocity: GitVelocityEntry[];
+}
+
+export interface GitRiskEntry {
+  file: string;
+  risk_score: number;
+  churn: number;
+  hotfixes: number;
+  authors: number;
+}
+
+export interface GitCouplingEntry {
+  file_a: string;
+  file_b: string;
+  count: number;
+}
+
+export interface GitCouplingCluster {
+  cluster_id: number;
+  files: string[];
+  total_cochanges: number;
+}
+
+export interface GitFreshness {
+  active: GitFreshnessEntry[];
+  aging: GitFreshnessEntry[];
+  stale: GitFreshnessEntry[];
+  dormant: GitFreshnessEntry[];
+}
+
+export interface GitFreshnessEntry {
+  file: string;
+  days: number;
+}
+
+export interface GitFunctionChurnEntry {
+  file: string;
+  function: string;
+  commits: number;
+  hotfixes: number;
+  authors: number;
+  risk_score: number;
+}
+
+export interface GitVelocityEntry {
+  file: string;
+  monthly_commits: number[];
+  trend: "accelerating" | "decelerating" | "stable";
+  total_commits: number;
+}
+
+// =============================================================================
+// Tech Debt
+// =============================================================================
+
+export interface TechDebt {
+  markers: Record<string, TechDebtMarker[]>;
+  by_file: Record<string, TechDebtFileEntry[]>;
+  summary: {
+    total_count: number;
+    by_type: Record<string, number>;
+  };
+}
+
+export interface TechDebtMarker {
+  file: string;
+  line: number;
+  text: string;
+}
+
+export interface TechDebtFileEntry {
+  type: string;
+  line: number;
+  text: string;
 }

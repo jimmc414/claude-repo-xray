@@ -382,13 +382,57 @@ const RESOURCE_LEAK_PATTERNS = [
   "openSync", "createReadStream", "createWriteStream",
 ];
 
+const CLEANUP_METHODS = [".pipe(", ".close(", ".end(", ".destroy(", ".on('close'", '.on("close"', ".on('end'", '.on("end"'];
+
 export function detectResourceLeak(node: ts.CallExpression, sourceFile: ts.SourceFile): ResourceLeak | null {
   const callText = node.expression.getText(sourceFile);
+  let matched = false;
   for (const pattern of RESOURCE_LEAK_PATTERNS) {
     if (callText === pattern || callText.endsWith("." + pattern)) {
-      const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
-      return { call: callText, line };
+      matched = true;
+      break;
     }
+  }
+  if (!matched) return null;
+
+  // Check if the result is assigned to a variable and cleanup is performed
+  const parent = node.parent;
+  if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+    const varName = parent.name.text;
+    // Find the containing function or block scope
+    const container = findContainingFunction(node);
+    if (container) {
+      const bodyText = container.getText(sourceFile);
+      // Check if cleanup methods are called on this variable
+      for (const cleanup of CLEANUP_METHODS) {
+        if (bodyText.includes(varName + cleanup)) {
+          return null; // Cleanup found, not a leak
+        }
+      }
+    }
+  }
+
+  // Check if the call is chained with .pipe() directly (e.g., createReadStream().pipe(...))
+  if (parent && ts.isPropertyAccessExpression(parent)) {
+    const propName = parent.name.text;
+    if (propName === "pipe" || propName === "on" || propName === "close" || propName === "destroy") {
+      return null;
+    }
+  }
+
+  const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+  return { call: callText, line };
+}
+
+function findContainingFunction(node: ts.Node): ts.Node | null {
+  let current = node.parent;
+  while (current) {
+    if (ts.isFunctionDeclaration(current) || ts.isArrowFunction(current) ||
+        ts.isFunctionExpression(current) || ts.isMethodDeclaration(current) ||
+        ts.isConstructorDeclaration(current) || ts.isSourceFile(current)) {
+      return current;
+    }
+    current = current.parent;
   }
   return null;
 }
