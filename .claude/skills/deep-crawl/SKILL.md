@@ -60,7 +60,7 @@ evidence standards, and validation — the entire pipeline is identical.
 
 | Tag | Standard | Example |
 |-----|----------|---------|
-| [FACT] | Read specific code, cite file:line | "3x retry with backoff [FACT] (stripe.py:89)" |
+| [FACT] | Read specific code, cite file:line | "3x retry with backoff [FACT] (payments.ts:89 / stripe.py:89)" |
 | [PATTERN] | Observed in >=3 examples, state count | "DI via __init__ [PATTERN: 12/14 services]" |
 | [ABSENCE] | Searched and confirmed non-existence | "No rate limiting [ABSENCE: grep — 0 hits]" |
 
@@ -156,6 +156,17 @@ mkdir -p /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impa
 
 # Verify xray output exists
 test -f /tmp/xray/xray.json && echo "READY" || echo "Run: python xray.py $DEEP_CRAWL_ROOT --output both --out /tmp/xray"
+
+# Clean stale data from previous crawl
+if [ -f /tmp/deep_crawl/CRAWL_PLAN.md ]; then
+    PREV_HASH=$(head -1 /tmp/deep_crawl/CRAWL_PLAN.md | grep -oP '[a-f0-9]{7,}' || echo "unknown")
+    echo "⚠️ PREVIOUS CRAWL FOUND (hash: $PREV_HASH)"
+    echo "Cleaning stale data for fresh crawl..."
+    rm -rf /tmp/deep_crawl/findings/* /tmp/deep_crawl/batch_status/* /tmp/deep_crawl/sections/*
+    rm -f /tmp/deep_crawl/CRAWL_PLAN.md /tmp/deep_crawl/SYNTHESIS_INPUT.md
+    rm -f /tmp/deep_crawl/DRAFT_ONBOARD.md /tmp/deep_crawl/DEEP_ONBOARD.md
+    rm -f /tmp/deep_crawl/VALIDATION_REPORT.md /tmp/deep_crawl/REFINE_LOG.md
+fi
 
 # Check for existing crawl state (resumability)
 if [ -f /tmp/deep_crawl/CRAWL_PLAN.md ]; then
@@ -429,7 +440,7 @@ You are investigating [CODEBASE] at [ROOT_PATH] for an onboarding document.
 [Full text of the relevant protocol (A, B, C, or D) copied verbatim from below]
 
 ## Evidence Standards
-- [FACT]: Read specific code, cite file:line. Example: "retries 3x (stripe.py:89)"
+- [FACT]: Read specific code, cite file:line. Example: "retries 3x (payments.ts:89)" or "retries 3x (stripe.py:89)"
 - [PATTERN]: Observed in >=3 examples, state count. Example: "DI via __init__ (12/14 services)"
 - [ABSENCE]: Searched and confirmed non-existence. Example: "No rate limiting (grep — 0 hits)"
 - Gotchas must be [FACT] claims with file:line.
@@ -1323,10 +1334,12 @@ You are investigating {CODEBASE} at {ROOT_PATH} to fill a specific gap in the on
 {Protocol A/B/C/D text, copied verbatim}
 
 ## Specific Target
-{What to investigate — e.g., "Read conftest.py, 3 representative test files, pytest.ini. Document fixture patterns, mocking strategies, coverage configuration, marker usage."}
+{What to investigate — e.g.:
+  Python: "Read conftest.py, 3 representative test files, pytest.ini. Document fixture patterns, mocking strategies, coverage configuration, marker usage."
+  TypeScript: "Read jest.config.ts/vitest.config.ts, 3 representative .test.ts files, test setup files. Document test runner config, mocking patterns, fixture strategies."}
 
 ## Evidence Standards
-- [FACT]: Read specific code, cite file:line. Example: "retries 3x (stripe.py:89)"
+- [FACT]: Read specific code, cite file:line. Example: "retries 3x (payments.ts:89)" or "retries 3x (stripe.py:89)"
 - [PATTERN]: Observed in >=3 examples, state count. Example: "DI via __init__ (12/14 services)"
 - [ABSENCE]: Searched and confirmed non-existence. Example: "No rate limiting (grep — 0 hits)"
 
@@ -1505,6 +1518,17 @@ Example:
 **Gap:** Fixture patterns and mocking strategies are surface-level only. No examples of how conftest.py layers fixtures or how tests mock LLM calls.
 **Investigation needed:** Protocol D targeting conftest.py, tests/unit/agents/test_research_director.py, tests/unit/core/test_llm.py
 **Expected output:** Detailed testing conventions with fixture hierarchy, LLM mocking patterns, database isolation strategies
+```
+
+TypeScript example:
+```
+### Q8. TESTING: What are the testing conventions?
+**Rating:** PARTIAL
+**Answer:** Testing section covers test runner, file patterns, and basic structure, but lacks fixture/mock detail.
+**Source section:** Testing Conventions
+**Gap:** Test setup patterns and mocking strategies are surface-level only. No examples of vitest/jest configuration or how tests mock external services.
+**Investigation needed:** Protocol D targeting vitest.config.ts or jest.config.ts, 3 representative *.test.ts files, test setup files
+**Expected output:** Detailed testing conventions with mock patterns, fixture strategies, test isolation approach
 ```
 
 The 12 standard questions:
@@ -1702,7 +1726,7 @@ Not all claims have the same epistemological status. Use these tags:
 
 | Level | Tag | Standard | Example |
 |-------|-----|----------|---------|
-| Verified Fact | `[FACT]` | Read the specific code, confirmed at cited file:line | "payment_service retries 3x with exponential backoff (providers/stripe.py:89)" |
+| Verified Fact | `[FACT]` | Read the specific code, confirmed at cited file:line | "payment_service retries 3x with exponential backoff (providers/stripe.py:89 or payments.ts:89)" |
 | Verified Pattern | `[PATTERN]` | Observed in >=3 independent examples, state the count | "All service classes use DI via __init__ (observed in 12/14 services)" |
 | Verified Absence | `[ABSENCE]` | Searched for something expected, confirmed it doesn't exist | "No rate limiting found (grepped for rate_limit, throttle, slowapi — zero hits)" |
 

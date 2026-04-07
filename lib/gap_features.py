@@ -972,7 +972,7 @@ def extract_data_models(results: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 ENTRY_POINT_FILES_PY = {"main.py", "cli.py", "__main__.py", "app.py", "run.py", "server.py"}
 ENTRY_POINT_FILES_TS = {"index.ts", "main.ts", "cli.ts", "app.ts", "run.ts", "server.ts", "index.js", "main.js", "cli.js", "app.js", "server.js"}
-ENTRY_POINT_FUNCTIONS = {"main", "cli", "run", "app", "serve", "bootstrap"}
+ENTRY_POINT_FUNCTIONS = {"main", "cli", "run", "app", "serve", "bootstrap", "start"}
 
 
 def detect_entry_points(results: Dict[str, Any], target_dir: str = ".") -> List[Dict[str, Any]]:
@@ -1029,6 +1029,53 @@ def detect_entry_points(results: Dict[str, Any], target_dir: str = ".") -> List[
                     "file": filepath,
                     "usage": make_usage(filepath, filename),
                     "type": "function"
+                })
+
+    # TS-specific: detect entry points from package.json bin field
+    if is_ts:
+        try:
+            pkg_path = Path(target_dir) / "package.json"
+            if pkg_path.exists():
+                import json
+                pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+                bin_field = pkg.get("bin")
+                if isinstance(bin_field, str):
+                    entry_points.append({
+                        "entry_point": "bin",
+                        "file": bin_field,
+                        "usage": f"npx {pkg.get('name', project_name)}",
+                        "type": "package.json bin"
+                    })
+                elif isinstance(bin_field, dict):
+                    for cmd, cmd_path in bin_field.items():
+                        entry_points.append({
+                            "entry_point": cmd,
+                            "file": cmd_path,
+                            "usage": f"npx {cmd}",
+                            "type": "package.json bin"
+                        })
+                # Also check scripts.start
+                scripts = pkg.get("scripts", {})
+                if "start" in scripts and not any(ep.get("entry_point") == "start" for ep in entry_points):
+                    entry_points.append({
+                        "entry_point": "start",
+                        "file": "package.json",
+                        "usage": f"npm start ({scripts['start']})",
+                        "type": "npm script"
+                    })
+        except Exception:
+            pass
+
+        # Detect CLI framework entry from xray results
+        cli_info = results.get("cli")
+        if cli_info and isinstance(cli_info, dict):
+            framework = cli_info.get("framework", "")
+            if framework and not any(ep.get("type") == "cli_framework" for ep in entry_points):
+                entry_points.append({
+                    "entry_point": f"{framework} CLI",
+                    "file": "",
+                    "usage": f"CLI framework: {framework}",
+                    "type": "cli_framework"
                 })
 
     return entry_points
