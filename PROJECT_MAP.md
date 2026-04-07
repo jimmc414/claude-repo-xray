@@ -10,7 +10,7 @@ repo-xray solves the cold start problem for AI coding assistants. When a fresh A
 
 This project produces that map in two phases:
 
-**Phase 1 (X-Ray Scanner)** — A deterministic Python script that parses every `.py` file via AST, mines git history, builds dependency graphs, and produces a ~15K token structural map. Runs in 5 seconds. Zero dependencies. Same input, same output, every time.
+**Phase 1 (X-Ray Scanner)** — A deterministic scanner that parses every source file via AST (Python's `ast` module for `.py` files, TypeScript compiler API for `.ts`/`.js` files), mines git history, builds dependency graphs, and produces a ~15K token structural map. Runs in 5 seconds. Same input, same output, every time.
 
 **Phase 2 (Deep Crawl)** — An optional LLM-powered investigation that uses the scanner output as a map, then spawns parallel agents to read actual source code, trace request paths, discover gotchas, and produce a comprehensive onboarding document (~60K words, every claim backed by `file:line` evidence). Runs in 30-70 minutes. Non-deterministic. The generation cost is amortized across every future AI session that reads the document.
 
@@ -24,11 +24,11 @@ Read `INTENT.md` for the full rationale. The key decisions:
 
 1. **Determinism in Phase 1.** The scanner runs in CI, before every session, on every commit. It cannot be flaky, slow, or expensive. Intelligence lives in Phase 2.
 
-2. **Zero dependencies.** `pip install` would cut addressable use cases in half. Python 3.8+ stdlib only. No exceptions.
+2. **Minimal dependencies.** Python scanner: zero dependencies, Python 3.8+ stdlib only. TypeScript scanner: Node.js + npm (typescript is the only package dependency). No `pip install` on the Python side.
 
 3. **Output is for AI, not humans.** Dense, structured, token-efficient. A human can read code directly; an AI's effectiveness is bottlenecked by what fits in context.
 
-4. **Single AST parse per file.** Every signal (skeletons, complexity, side effects, security, types) is extracted from one `ast.parse()` call. Adding a new signal means extending the existing visitor, never parsing again.
+4. **Single AST parse per file.** Every signal (skeletons, complexity, side effects, security, types) is extracted from one `ast.parse()` call (Python) or one `ts.createSourceFile()` call (TypeScript). Adding a new signal means extending the existing visitor, never parsing again.
 
 5. **Investigation targets in the scanner.** The scanner cheaply computes "this function is probably confusing" from name genericity and type coverage, saving the expensive crawl agent from deciding what to investigate.
 
@@ -50,7 +50,9 @@ python xray.py /path/to/project [--output both] [--out /tmp/xray] [--preset mini
 CLI args → config_loader.load_config() → run_analysis() → gap_features → formatter → output
 ```
 
-Inside `run_analysis()`, 8 stages execute sequentially. Each depends on prior stages:
+`xray.py` first calls `detect_language()` to determine the project language (Python vs TypeScript/JavaScript) based on file extensions.
+
+**For Python projects**, `run_analysis()` runs 10 stages sequentially:
 
 | Stage | Module | Input | Output | Depends On |
 |-------|--------|-------|--------|------------|
@@ -63,6 +65,8 @@ Inside `run_analysis()`, 8 stages execute sequentially. Each depends on prior st
 | 7 | `tech_debt_analysis.py` | File paths | TODO/FIXME markers, deprecation markers | Stage 1 |
 | 8 | `investigation_targets.py` | All prior results | Prioritized signals: ambiguous interfaces, coupling anomalies, high-uncertainty modules, domain entities | Stages 1-7 |
 
+**For TypeScript/JavaScript projects**, `xray.py` invokes `ts-scanner/` via subprocess (`node ts-scanner/dist/index.js`). The TS scanner performs its own file discovery, AST analysis, import analysis, call analysis, and produces the same `XRayResults` JSON schema. `xray.py` then augments the results with language-agnostic git analysis (`_augment_with_git()`) and investigation targets (`compute_investigation_targets()`).
+
 After `run_analysis()`, gap features are computed separately (`gap_features.py`) because they need combined results from multiple stages. Then formatters produce output.
 
 ---
@@ -73,7 +77,7 @@ After `run_analysis()`, gap features are computed separately (`gap_features.py`)
 
 | File | Lines | Role | Key Insight |
 |------|-------|------|-------------|
-| `xray.py` | ~700 | Orchestrator, CLI, pipeline | `run_analysis()` is the critical path. `config_to_gap_features()` bridges config flags to formatter. Version string at top. |
+| `xray.py` | ~900 | Orchestrator, CLI, pipeline | `run_analysis()` is the critical path. `detect_language()` determines Python vs TS. `invoke_ts_scanner()` delegates to TS scanner via subprocess. `_augment_with_git()` adds git analysis to TS results. `config_to_gap_features()` bridges config flags to formatter. |
 | `lib/file_discovery.py` | ~320 | Find .py files, apply ignores | `discover_python_files()` uses `os.walk` with in-place directory filtering. Token estimate = file_size // 4. |
 | `lib/ast_analysis.py` | ~850 | Single-pass AST extraction | `analyze_file()` parses once, extracts everything: skeletons, complexity (base=1, +1 per branch), types, side effects, security (exec/eval/compile), silent failures (bare except), async violations, SQL strings, deprecations. Per-file error handling — one bad file never crashes the scan. |
 | `lib/import_analysis.py` | ~450 | Dependency graph | Builds module→imports/imported_by graph. Layer classification (FOUNDATION/CORE/ORCHESTRATION by keyword). Hub ranking by connection count. BFS for dependency distance. Handles relative imports. |
@@ -85,11 +89,38 @@ After `run_analysis()`, gap features are computed separately (`gap_features.py`)
 | `lib/gap_features.py` | ~2900 | Multi-module synthesis | The largest lib file. Combines results from all stages to produce: priority scores, mermaid diagrams, hazard detection, data model extraction, logic maps, entry points, architecture prose, state mutations, CLI arguments, Pydantic validators, linter rules, security summaries, env var defaults. If you're adding a new combined-results analysis, create a new file — don't add to this one. |
 | `lib/config_loader.py` | ~340 | Configuration | Load order: --config flag > .xray.json in target > defaults. Presets (minimal/standard/full) override sections. CLI --no-{section} flags override everything. `is_section_enabled()` handles both bool and {enabled: true} dict formats. |
 
+### TypeScript/JavaScript Scanner
+
+Self-contained npm project in `ts-scanner/`. Communicates with `xray.py` via subprocess + JSON. Produces the same `XRayResults` JSON schema as the Python pipeline.
+
+| File | Lines | Role | Key Insight |
+|------|-------|------|-------------|
+| `ts-scanner/src/index.ts` | ~370 | Entry point + orchestration | CLI parsing, file discovery, scanner pipeline, JSON output to stdout. Mirror of `xray.py:run_analysis()`. |
+| `ts-scanner/src/ast-analysis.ts` | ~860 | Single-pass TS AST extraction | Uses `ts.createSourceFile()`. Extracts skeletons, complexity, types, side effects, security, decorators, async patterns. |
+| `ts-scanner/src/import-analysis.ts` | ~640 | Dependency graph | Import/export resolution, barrel files, layer classification, hub detection, circular deps. |
+| `ts-scanner/src/call-analysis.ts` | ~260 | Cross-module call graph | Call site tracking, reverse lookup, fan-in computation. |
+| `ts-scanner/src/detectors.ts` | ~490 | Behavioral detectors | Security concerns, silent failures, SQL patterns, resource leaks, unsafe deserialization, deprecation markers. |
+| `ts-scanner/src/investigation-targets.ts` | ~460 | Prioritized crawl signals | Ambiguity scoring, entry-to-side-effect tracing, coupling anomalies. |
+| `ts-scanner/src/git-analysis.ts` | ~500 | Git history mining | Risk scores, coupling, freshness, churn — same algorithms as Python `git_analysis.py`. |
+| `ts-scanner/src/logic-maps.ts` | ~390 | Logic map generation | Symbolic control flow for complex functions (CC > threshold). |
+| `ts-scanner/src/types.ts` | ~670 | Type definitions | `XRayResults` interface — the shared output contract between scanners. |
+| `ts-scanner/src/cli-analysis.ts` | ~270 | CLI extraction | Commander/yargs/minimist argument detection. |
+| `ts-scanner/src/config-analysis.ts` | ~150 | Config detection | Environment variables, config file patterns. |
+| `ts-scanner/src/route-analysis.ts` | ~120 | HTTP route detection | Express/Fastify/Koa route extraction. |
+| `ts-scanner/src/blast-analysis.ts` | ~160 | Blast radius | Transitive impact via BFS over import+call graph. |
+| `ts-scanner/src/tech-debt.ts` | ~90 | Debt markers | TODO/FIXME/HACK comment scanning. |
+| `ts-scanner/src/test-analysis.ts` | ~70 | Test detection | Jest/Vitest/Mocha test file and function detection. |
+| `ts-scanner/src/import-time-effects.ts` | ~75 | Import-time side effects | Top-level calls, global mutations at module scope. |
+| `ts-scanner/src/file-discovery.ts` | ~100 | File discovery | Find .ts/.tsx/.js/.jsx files, apply ignore patterns. |
+| `ts-scanner/src/utils.ts` | ~50 | Shared utilities | Path manipulation, relative path computation. |
+
+Tests: `cd ts-scanner && npm test` — 8 test files with Vitest.
+
 ### Formatters
 
 | File | Lines | Role | Key Insight |
 |------|-------|------|-------------|
-| `formatters/markdown_formatter.py` | ~1500 | Markdown output | The largest file in the project (~50K bytes). Assembles all sections with tables, Mermaid diagrams, code blocks. Each section gated by config flag. New v3.2 sections: Security Concerns, Database Queries, Silent Failures, Deprecated APIs, Async/Sync Violations. |
+| `formatters/markdown_formatter.py` | ~1500 | Markdown output | The largest file in the project (~50K bytes). Assembles all sections with tables, Mermaid diagrams, code blocks. Each section gated by config flag. Language-aware: switches syntax markers (`#` vs `//`, `def` vs `function`) based on `code_lang` parameter. |
 | `formatters/json_formatter.py` | ~100 | JSON output | Complete structured dump. 30-50K tokens (vs 8-15K markdown). Used by deep crawl agents for programmatic lookups. |
 
 ### Configuration
@@ -108,7 +139,7 @@ After `run_analysis()`, gap features are computed separately (`gap_features.py`)
 | `tests/test_investigation_targets.py` | ~50 | Ambiguous interfaces, entry paths, coupling anomalies, convention deviations, shared state, uncertainty |
 | `tests/test_scanner_enhancements.py` | ~30 | v3.2: security concerns (exec not cursor.execute), silent failures (bare except), async violations (blocking in async), SQL detection, deprecation markers |
 
-Run: `python -m pytest tests/ -x -q` — currently 129 tests, all passing.
+Run: `python -m pytest tests/ -x -q` — currently 137 tests, all passing.
 
 ### Tools
 
@@ -317,7 +348,7 @@ The R14 output contains:
 | `docs/METHODOLOGY.md` | Technical reference for pipeline algorithms (updated for v3.2) | Understanding scanner internals |
 | `docs/TECHNICAL_METRICS.md` | Thresholds and formulas (29 sections, updated for v3.2) | Tuning quality gates |
 | `docs/PLAN_INCREMENTAL_CRAWL.md` | Design for `@deep_crawl refresh` (not yet implemented) | Working on incremental updates |
-| `MULTI_LANGUAGE_RESEARCH.md` | Research on extending scanner beyond Python | Planning multi-language support |
+| `MULTI_LANGUAGE_RESEARCH.md` | Research on extending scanner beyond Python (historical — TypeScript now implemented) | Planning additional language support |
 
 **Examples** (`examples/`):
 
@@ -342,7 +373,7 @@ The R14 output contains:
 
 These are load-bearing constraints. Violating them, even to "improve" things, is a bug:
 
-1. **No external dependencies.** Python 3.8+ stdlib only. If you need library functionality, implement it.
+1. **No external dependencies on the Python side.** Python 3.8+ stdlib only. If you need library functionality, implement it. The TypeScript scanner is a separate npm project with its own `package.json` (typescript only).
 
 2. **No re-parsing files.** Extend the existing AST visitor in `ast_analysis.py`. One parse per file.
 
@@ -379,19 +410,33 @@ These are load-bearing constraints. Violating them, even to "improve" things, is
 ## Dependency Graph
 
 ```
-xray.py
-  ├── lib/config_loader.py
-  ├── lib/file_discovery.py
-  ├── lib/ast_analysis.py ──────────────────┐
-  ├── lib/import_analysis.py                │
-  ├── lib/call_analysis.py ──── needs ──────┤ ast results
-  ├── lib/git_analysis.py                   │
-  ├── lib/test_analysis.py                  │
-  ├── lib/tech_debt_analysis.py             │
-  ├── lib/investigation_targets.py ◄────────┘ needs all above
-  ├── lib/gap_features.py ◄── combines all results
-  ├── formatters/markdown_formatter.py ◄── uses gap features
-  └── formatters/json_formatter.py
+<<<<<<< HEAD
+xray.py ─── detect_language() → Python or TypeScript path
+  │
+  ├── [Python path]
+  │   ├── lib/config_loader.py
+  │   ├── lib/file_discovery.py
+  │   ├── lib/ast_analysis.py ──────────────────┐
+  │   ├── lib/import_analysis.py                │
+  │   ├── lib/call_analysis.py ──── needs ──────┤ ast results
+  │   ├── lib/git_analysis.py                   │
+  │   ├── lib/test_analysis.py                  │
+  │   ├── lib/tech_debt_analysis.py             │
+  │   ├── lib/blast_analysis.py ──── needs ──────┤ import + call results
+  │   ├── lib/route_analysis.py ──── needs ──────┤ ast results
+  │   ├── lib/investigation_targets.py ◄────────┘ needs all above
+  │   ├── lib/gap_features.py ◄── combines all results
+  │   ├── formatters/markdown_formatter.py ◄── uses gap features
+  │   └── formatters/json_formatter.py
+  │
+  └── [TypeScript path]
+      ├── ts-scanner/ ◄── invoked via subprocess (node dist/index.js)
+      │   └── produces XRayResults JSON (same schema as Python pipeline)
+      ├── lib/git_analysis.py ◄── augments TS results (_augment_with_git)
+      ├── lib/investigation_targets.py ◄── computes targets from TS results
+      ├── lib/gap_features.py ◄── entry points, data models
+      ├── formatters/markdown_formatter.py ◄── language-aware formatting
+      └── formatters/json_formatter.py
 
 .claude/skills/deep-crawl/SKILL.md
   ├── Reads: /tmp/xray/xray.json (Phase 1 output)
@@ -414,9 +459,11 @@ tests/
 
 ## Current State
 
-- **Branch:** `unrestricted-deep-crawl`
-- **Version:** 3.2 (signal count updated from 37 to 42)
-- **Tests:** 129/129 passing
+- **Branch:** `master`
+- **Languages:** Python, TypeScript/JavaScript
+- **Tests:** 137/137 passing (Python side); 8 test files (TypeScript side)
 - **Latest validation run (R14):** 12/12 standard questions YES, 10/10 spot checks CONFIRMED, adversarial PASS (5/5)
-- **Scanner signals:** 42+ (original 37 + 5 new v3.2 categories)
+- **Python scanner signals:** 49+ (original 37 + 5 v3.2 categories + 7 extended signals: blast radius, routes, decorator details, resource leaks, unsafe deserialization, magic methods, import-time side effects)
+- **TypeScript scanner:** 20 modules, ~5,700 lines, produces same XRayResults JSON schema as Python scanner
+- **Shared output contract:** Both scanners produce identical JSON shape — the JSON schema IS the abstraction layer, not a code-level interface
 - **Deep crawl pipeline:** 7 phases, 6 investigation protocols, 6 batches, up to 27 parallel sub-agents
