@@ -212,17 +212,35 @@ else
     [ "$XRAY_HASH" = "?" ] && echo "WARNING: Xray has no git_commit field. Proceeding without freshness check."
 fi
 
-# Repo characteristics
-FILE_COUNT=$(find "$DEEP_CRAWL_ROOT" -name "*.py" -not -path "*/.git/*" | wc -l)
-TEST_COUNT=$(find "$DEEP_CRAWL_ROOT" -name "test_*.py" -o -name "*_test.py" | wc -l)
-echo "Python files: $FILE_COUNT | Test files: $TEST_COUNT"
+# Repo characteristics — detect language
+PY_COUNT=$(find "$DEEP_CRAWL_ROOT" -name "*.py" -not -path "*/.git/*" -not -path "*/node_modules/*" 2>/dev/null | wc -l)
+TS_COUNT=$(find "$DEEP_CRAWL_ROOT" \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \) -not -path "*/.git/*" -not -path "*/node_modules/*" -not -path "*/dist/*" 2>/dev/null | wc -l)
+
+if [ "$TS_COUNT" -gt "$PY_COUNT" ]; then
+    CODE_LANG="typescript"
+    FILE_COUNT=$TS_COUNT
+    TEST_COUNT=$(find "$DEEP_CRAWL_ROOT" \( -name "*.test.ts" -o -name "*.spec.ts" -o -name "*.test.js" -o -name "*.test.tsx" \) -not -path "*/node_modules/*" 2>/dev/null | wc -l)
+    echo "Language: TypeScript/JavaScript | Files: $FILE_COUNT | Test files: $TEST_COUNT"
+else
+    CODE_LANG="python"
+    FILE_COUNT=$PY_COUNT
+    TEST_COUNT=$(find "$DEEP_CRAWL_ROOT" -name "test_*.py" -o -name "*_test.py" | wc -l)
+    echo "Language: Python | Files: $FILE_COUNT | Test files: $TEST_COUNT"
+fi
+echo "CODE_LANG=$CODE_LANG"
 [ "$FILE_COUNT" -gt 5000 ] && echo "WARNING: Very large repo. Consider focused crawl."
-[ "$TEST_COUNT" -eq 0 ] && echo "WARNING: No test files. Testing section will be thin."
+[ "$TEST_COUNT" -eq 0 ] && echo "WARNING: No test files detected. Testing section may be thin. (Note: in-source testing via import.meta.vitest won't be detected by file naming.)"
 
 # Framework detection
-for fw in fastapi flask django click typer torch tensorflow airflow dagster numpy scipy asyncio aiohttp paramiko boto3 pluggy stevedore; do
-    grep -rl "$fw" --include="*.py" "$DEEP_CRAWL_ROOT" 2>/dev/null | head -1 >/dev/null 2>&1 && echo "Framework: $fw"
-done
+if [ "$CODE_LANG" = "typescript" ]; then
+    for fw in express next nestjs fastify koa hapi commander yargs oclif react vue angular jest vitest mocha prisma typeorm sequelize mongoose graphql trpc zod valibot; do
+        grep -rl "\"$fw\"" --include="*.json" "$DEEP_CRAWL_ROOT" 2>/dev/null | grep -v node_modules | head -1 >/dev/null 2>&1 && echo "Framework: $fw"
+    done
+else
+    for fw in fastapi flask django click typer torch tensorflow airflow dagster numpy scipy asyncio aiohttp paramiko boto3 pluggy stevedore; do
+        grep -rl "$fw" --include="*.py" "$DEEP_CRAWL_ROOT" 2>/dev/null | head -1 >/dev/null 2>&1 && echo "Framework: $fw"
+    done
+fi
 ```
 
 **Halt condition:** If xray hash doesn't match HEAD, stop and tell user to re-run xray. Other warnings are logged to `/tmp/deep_crawl/PREFLIGHT.md` for context during investigation planning.
@@ -523,9 +541,12 @@ Sub-agents receive these protocol instructions verbatim:
      - Side effects
      - Error behavior
 2b. Check for corresponding test files:
-    - Look for tests/test_{module_name}.py, tests/unit/**/test_{module_name}.py,
+    - Python: Look for tests/test_{module_name}.py, tests/unit/**/test_{module_name}.py,
       tests/{module_name}_test.py, and any test file importing from this module
-    - If found, scan test function names and docstrings
+    - TypeScript/JavaScript: Look for {module_name}.test.ts, {module_name}.spec.ts,
+      __tests__/{module_name}.ts, and in-source tests via `import.meta.vitest` blocks
+      within the module itself (colocated testing pattern)
+    - If found, scan test function names and docstrings/descriptions
     - Note which public functions have test coverage and which don't
     - Add to findings:
       Test coverage: {tested_count}/{total_public} public functions tested.
@@ -545,44 +566,60 @@ Sub-agents receive these protocol instructions verbatim:
 6. Write to /tmp/deep_crawl/findings/cross_cutting/{concern_name}.md
 ```
 
-**Grep patterns for common concerns:**
+**Grep patterns for common concerns (language-adaptive):**
+
+Use `$CODE_LANG` from Phase 0b pre-flight to select patterns. All grep commands should target `$DEEP_CRAWL_ROOT`.
+
+**Python patterns** (use when `CODE_LANG=python`):
 
 ```bash
-# Error handling
-grep -rn "except " --include="*.py" | head -40
-grep -rn "except.*pass" --include="*.py"  # swallowed exceptions — high value
-grep -rn "retry\|backoff\|fallback" --include="*.py"
+grep -rn "except " --include="*.py" "$DEEP_CRAWL_ROOT" | head -40
+grep -rn "except.*pass" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "retry\|backoff\|fallback" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "os.getenv\|os.environ" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "config\[" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "^[a-z_].*= " --include="*.py" "$DEEP_CRAWL_ROOT" | grep -v "def \|class \|#\|import " | head -30
+grep -rn "_instance\|_cache\|_registry\|_pool" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "global " --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "asyncio\.run\|loop\.run_until_complete" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "async def " --include="*.py" "$DEEP_CRAWL_ROOT" | wc -l
+grep -rn "pickle\.loads\|pickle\.load\|yaml\.load\|marshal\.loads" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "class.*Exception\|class.*Error" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "except.*pass\|except:$" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "raise " --include="*.py" "$DEEP_CRAWL_ROOT" | head -40
+```
 
-# Configuration
-grep -rn "os.getenv\|os.environ" --include="*.py"
-grep -rn "config\[" --include="*.py"
+**TypeScript/JavaScript patterns** (use when `CODE_LANG=typescript`):
 
-# Shared mutable state
-grep -rn "^[a-z_].*= " --include="*.py" | grep -v "def \|class \|#\|import " | head -30
-grep -rn "_instance\|_cache\|_registry\|_pool" --include="*.py"
-grep -rn "global " --include="*.py"
-
-# Async/sync boundaries
-grep -rn "asyncio\.run\|loop\.run_until_complete\|run_coroutine_threadsafe" --include="*.py"
-grep -rn "async def " --include="*.py" | wc -l
-
-# Exception taxonomy (for exception_taxonomy investigations)
-grep -rn "class.*Exception\|class.*Error" --include="*.py"  # custom exception classes
-grep -rn "except.*pass\|except:$" --include="*.py"  # silent failures
-grep -rn "except.*:\s*$\|except Exception" --include="*.py" | head -30  # bare/broad catches
-grep -rn "raise " --include="*.py" | head -40  # raise sites
+```bash
+grep -rn "catch" --include="*.ts" --include="*.tsx" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -40
+grep -rn "catch\s*{}" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules  # empty catch — high value
+grep -rn "retry\|backoff\|fallback" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules
+grep -rn "process\.env" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -30
+grep -rn "config\.\|getConfig\|loadConfig" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+grep -rn "^let \|^var " --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -30
+grep -rn "cache\|singleton\|_instance\|getInstance" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+grep -rn "async function\|async (" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | wc -l
+grep -rn "new Promise\|Promise\.all" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+grep -rn "eval(\|new Function(" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules
+grep -rn "JSON\.parse" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+grep -rn "as any\|@ts-ignore\|@ts-expect-error" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+grep -rn "extends Error" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules
+grep -rn "throw " --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -40
+grep -rn "process\.exit" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules
+grep -rn "readFile\|readdir\|createReadStream" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
 ```
 
 **Exception taxonomy investigations (Protocol C):**
 
 When the crawl plan includes an exception taxonomy task, Protocol C agents should:
-1. Find all classes inheriting from Exception or BaseException
-2. Build inheritance tree (which exceptions derive from which)
-3. For each custom exception: where it's raised, where it's caught, whether
+1. Find all classes inheriting from Exception/BaseException (Python) or Error (TypeScript)
+2. Build inheritance tree (which exceptions/errors derive from which)
+3. For each custom exception/error: where it's raised/thrown, where it's caught, whether
    it crosses module boundaries
-4. Identify uncaught exception paths (raise without corresponding catch in callers)
-5. Identify silent failure patterns: `except: pass`, `except Exception: log`,
-   bare except — these are high-value gotcha candidates
+4. Identify uncaught exception paths (raise/throw without corresponding catch in callers)
+5. Identify silent failure patterns: `except: pass` (Python), empty `catch {}` (TypeScript),
+   log-and-swallow — these are high-value gotcha candidates
 6. Write to findings/cross_cutting/exception_taxonomy.md
 
 #### Protocol D: Convention Documentation
@@ -1111,11 +1148,11 @@ This is a mechanical step — no LLM needed. Extract all file:line citations tha
 ```bash
 # Extract unique file:line citations from [FACT]-tagged lines in findings
 grep '\[FACT' /tmp/deep_crawl/SYNTHESIS_INPUT.md \
-  | grep -oP '[\w/]+\.py:\d+' | sort -u \
+  | grep -oP '[\w/.-]+\.(py|ts|tsx|js|jsx):\d+' | sort -u \
   > /tmp/deep_crawl/_synthesis_fact_citations.txt
 
 # Extract unique file:line citations from assembled draft
-grep -oP '[\w/]+\.py:\d+' /tmp/deep_crawl/DRAFT_ONBOARD.md \
+grep -oP '[\w/.-]+\.(py|ts|tsx|js|jsx):\d+' /tmp/deep_crawl/DRAFT_ONBOARD.md \
   | sort -u > /tmp/deep_crawl/_draft_citations.txt
 
 # Find dropped citations
@@ -1267,11 +1304,11 @@ If any standard question is NO or PARTIAL, or if the adversarial simulation is P
 | Q5 ERRORS incomplete | C | Error handling patterns | findings/cross_cutting/gap_errors.md |
 | Q6 EXTERNAL missing systems | C | External system patterns (grep: requests, httpx, boto, redis) | findings/cross_cutting/gap_external.md |
 | Q7 STATE incomplete | C | Shared state patterns (grep: global, _instance, _cache) | findings/cross_cutting/gap_state.md |
-| Q8 TESTING thin | D | Testing conventions (read conftest.py, sample test files) | findings/conventions/gap_testing.md |
+| Q8 TESTING thin | D | Testing conventions (Python: conftest.py, pytest.ini; TypeScript: jest.config, vitest.config, in-source import.meta.vitest) | findings/conventions/gap_testing.md |
 | Q9 GOTCHAS insufficient | (review) | Re-scan existing findings for uncollected gotchas | findings/cross_cutting/gap_gotchas.md |
 | Q10 EXTENSION missing | B | Primary entity base class + extension patterns | findings/modules/gap_extension.md |
 | Q11 IMPACT missing | E | Hub modules from xray | findings/impact/gap_impact.md |
-| Q12 BOOTSTRAP missing | C | Setup patterns (requirements.txt, Dockerfile, Makefile) | findings/cross_cutting/gap_bootstrap.md |
+| Q12 BOOTSTRAP missing | C | Setup patterns (Python: requirements.txt, Dockerfile, Makefile; TypeScript: package.json, tsconfig.json, Dockerfile) | findings/cross_cutting/gap_bootstrap.md |
 | Adversarial step N failed | B | Module referenced in failing step | findings/modules/gap_adversarial_{N}.md |
 
 **Step R2: Spawn targeted investigation agents.** For each gap, spawn one sub-agent with the appropriate protocol. Use `run_in_background: true` for parallel execution. Sub-agent prompts follow the standard Phase 2 format:
