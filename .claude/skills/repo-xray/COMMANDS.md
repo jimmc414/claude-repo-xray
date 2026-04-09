@@ -11,7 +11,7 @@ python xray.py <target> [options]
 ## Common Patterns
 
 ```bash
-# Full analysis (agent workflow)
+# Full analysis (agent workflow) — auto-detects Python or TypeScript
 python xray.py . --output both --out /tmp/xray
 # Creates: xray.md (summary) + xray.json (reference)
 
@@ -24,6 +24,14 @@ python xray.py . --preset standard
 # Focused on subdirectory
 python xray.py ./src/core --preset full
 ```
+
+## TypeScript Setup (one-time)
+
+```bash
+cd ts-scanner && npm install && npm run build && cd ..
+```
+
+Language is auto-detected. No flags needed.
 
 ## Output Options
 

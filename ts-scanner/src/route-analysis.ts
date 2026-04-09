@@ -85,6 +85,10 @@ export function analyzeRoutes(
         }
       }
     }
+
+    // 3. File-path convention routes (Next.js App Router, SvelteKit)
+    const seenFiles = new Set(routes.map((r) => r.file));
+    detectFilePathRoutes(fa, rel, seenFiles, routes, frameworks);
   }
 
   if (routes.length === 0) return null;
@@ -107,6 +111,83 @@ export function analyzeRoutes(
       frameworks_detected: [...frameworks],
     },
   };
+}
+
+// HTTP methods that Next.js App Router and SvelteKit recognize as route exports
+const CONVENTION_HTTP_METHODS = new Set([
+  "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS",
+]);
+
+/**
+ * Detect file-path convention routes:
+ * - Next.js App Router: app/.../route.(ts|tsx|js|jsx)
+ * - SvelteKit: routes/.../+server.(ts|js)
+ */
+function detectFilePathRoutes(
+  fa: FileAnalysis,
+  rel: string,
+  seenFiles: Set<string>,
+  routes: Route[],
+  frameworks: Set<string>,
+): void {
+  if (seenFiles.has(rel)) return;
+
+  // Next.js App Router: path must contain /app/ as a segment, file named route.(ts|tsx|js|jsx)
+  const nextMatch = rel.match(/(?:^|\/)app\/(.*\/)?route\.(ts|tsx|js|jsx)$/);
+  // SvelteKit: path must contain /routes/ as a segment, file named +server.(ts|js)
+  const svelteMatch = !nextMatch
+    ? rel.match(/(?:^|\/)routes\/(.*\/)\+server\.(ts|js)$/)
+    : null;
+
+  if (!nextMatch && !svelteMatch) return;
+
+  const framework = nextMatch ? "nextjs" : "sveltekit";
+  const rawSegments = (nextMatch ? nextMatch[1] : svelteMatch![1]) || "";
+
+  // Build URL path: strip route groups like (auth), (chat)
+  const urlPath =
+    "/" +
+    rawSegments
+      .split("/")
+      .filter((seg) => seg && !seg.startsWith("("))
+      .join("/");
+
+  // Find HTTP method functions (in route files, matching names implies export)
+  const exportedMethods: string[] = [];
+  for (const fn of fa.functions) {
+    if (CONVENTION_HTTP_METHODS.has(fn.name)) {
+      exportedMethods.push(fn.name);
+    }
+  }
+
+  if (exportedMethods.length === 0) {
+    // Re-export file or no recognized exports — add with wildcard
+    routes.push({
+      method: "*",
+      path: urlPath,
+      handler: rel,
+      file: rel,
+      line: 1,
+      is_async: false,
+      framework_hint: framework,
+      side_effects: [],
+    });
+  } else {
+    for (const method of exportedMethods) {
+      const fn = fa.functions.find((f) => f.name === method)!;
+      routes.push({
+        method,
+        path: urlPath,
+        handler: `${method}`,
+        file: rel,
+        line: fn.line,
+        is_async: fn.is_async,
+        framework_hint: framework,
+        side_effects: collectSideEffects(fa, fn.line),
+      });
+    }
+  }
+  frameworks.add(framework);
 }
 
 function collectSideEffects(fa: FileAnalysis, routeLine: number): string[] {

@@ -31,27 +31,18 @@ def format_json(
         "summary": results.get("summary", {})
     }
 
-    # Include all sections that have data
-    sections = [
-        "structure", "complexity", "git", "imports", "calls",
-        "side_effects", "tests", "tech_debt", "types",
-        "decorators", "author_expertise", "commit_sizes",
-        "priority_files", "investigation_targets",
-        "security_concerns", "silent_failures", "async_violations",
-        "sql_strings", "deprecation_markers"
-    ]
+    # Pass through all sections that have data.
+    # Only skip keys already handled above or emitted separately below.
+    HANDLED_SEPARATELY = {"metadata", "summary"}
+    EMIT_UNCONDITIONALLY = {"all_classes", "all_functions", "hotspots"}
 
-    for section in sections:
-        if section in results and results[section]:
-            output[section] = results[section]
-
-    # Handle nested sections
-    if "all_classes" in results:
-        output["all_classes"] = results["all_classes"]
-    if "all_functions" in results:
-        output["all_functions"] = results["all_functions"]
-    if "hotspots" in results:
-        output["hotspots"] = results["hotspots"]
+    for key in results:
+        if key in HANDLED_SEPARATELY:
+            continue
+        if key in EMIT_UNCONDITIONALLY:
+            output[key] = results[key]
+        elif results[key]:
+            output[key] = results[key]
 
     return json.dumps(output, indent=indent, default=str)
 

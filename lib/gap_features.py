@@ -960,6 +960,59 @@ def extract_data_models(results: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "domain": domain
                 })
 
+    # TS-specific: interfaces and type aliases as data models
+    result_lang = results.get("metadata", {}).get("language", "python")
+    if result_lang in ("typescript", "mixed"):
+        for filepath, fdata in files.items():
+            for iface in fdata.get("ts_interfaces", []):
+                name = iface.get("name", "")
+                key = f"{filepath}:{name}"
+                if key in seen_models:
+                    continue
+                seen_models.add(key)
+                fields = [{"name": m["name"], "type": m.get("type", ""), "required": not m.get("optional", False)}
+                          for m in iface.get("members", [])]
+                # Determine domain from filepath
+                path_lower = filepath.lower()
+                name_lower = name.lower()
+                if "api" in path_lower or "handler" in path_lower or "controller" in path_lower:
+                    domain = "API"
+                elif "model" in path_lower or "schema" in path_lower or "entity" in path_lower:
+                    domain = "Models"
+                elif "config" in name_lower or "settings" in name_lower or "options" in name_lower:
+                    domain = "Config"
+                elif "request" in name_lower or "response" in name_lower:
+                    domain = "API"
+                else:
+                    parts = filepath.replace("\\", "/").split("/")
+                    domain = parts[-2].title() if len(parts) >= 2 else "Other"
+                models.append({
+                    "name": name,
+                    "type": "interface",
+                    "file": filepath,
+                    "line": iface.get("line", 0),
+                    "fields": fields,
+                    "bases": iface.get("extends", []),
+                    "domain": domain,
+                })
+            for ta in fdata.get("ts_type_aliases", []):
+                if ta.get("type_kind") == "object":
+                    name = ta.get("name", "")
+                    key = f"{filepath}:{name}"
+                    if key in seen_models:
+                        continue
+                    seen_models.add(key)
+                    parts = filepath.replace("\\", "/").split("/")
+                    domain = parts[-2].title() if len(parts) >= 2 else "Other"
+                    models.append({
+                        "name": name,
+                        "type": "type_alias",
+                        "file": filepath,
+                        "line": ta.get("line", 0),
+                        "fields": [],
+                        "domain": domain,
+                    })
+
     # Sort by domain, then by name
     models.sort(key=lambda x: (x["domain"], x["name"]))
 
@@ -1077,6 +1130,45 @@ def detect_entry_points(results: Dict[str, Any], target_dir: str = ".") -> List[
                     "usage": f"CLI framework: {framework}",
                     "type": "cli_framework"
                 })
+
+        # Detect routes as entry points (from TS scanner route analysis)
+        routes_data = results.get("routes", {})
+        if routes_data and isinstance(routes_data, dict):
+            for route in routes_data.get("routes", []):
+                rf = route.get("file", "")
+                if rf and rf not in seen_files:
+                    method = route.get("method", "?")
+                    rpath = route.get("path", "/")
+                    entry_points.append({
+                        "entry_point": f"{method} {rpath}",
+                        "file": rf,
+                        "usage": f"HTTP {method} {rpath}",
+                        "type": "api_route"
+                    })
+                    seen_files.add(rf)
+
+        # Fallback: detect App Router routes directly from file paths
+        if not routes_data:
+            import re
+            structure = results.get("structure", {})
+            files_dict = structure.get("files", {}) if isinstance(structure, dict) else {}
+            for filepath in files_dict:
+                if filepath in seen_files:
+                    continue
+                m = re.search(r'(?:^|/)app/(.*/)?(route\.(?:ts|tsx|js|jsx))$', filepath)
+                if m:
+                    segments = m.group(1) or ""
+                    url_path = "/" + "/".join(
+                        seg for seg in segments.split("/")
+                        if seg and not seg.startswith("(")
+                    )
+                    entry_points.append({
+                        "entry_point": f"* {url_path}",
+                        "file": filepath,
+                        "usage": f"HTTP route {url_path}",
+                        "type": "api_route"
+                    })
+                    seen_files.add(filepath)
 
     return entry_points
 
@@ -1580,6 +1672,11 @@ def generate_logic_maps(results: Dict[str, Any], n: int = 10) -> List[Dict[str, 
     if pre:
         return pre[:n]
 
+    # For TS projects without pre-computed logic maps, return empty (don't try ast.parse)
+    lang = results.get("metadata", {}).get("language", "python")
+    if lang in ("typescript", "javascript", "mixed"):
+        return []
+
     logic_maps = []
     seen = set()  # Track to avoid duplicates
 
@@ -1842,6 +1939,25 @@ def extract_state_mutations(results: Dict[str, Any]) -> Dict[str, List[str]]:
     Returns dict mapping function names to list of mutated attributes.
     """
     mutations = {}
+
+    # TS fallback: read pre-computed state_mutations from class data
+    lang = results.get("metadata", {}).get("language", "python")
+    if lang in ("typescript", "javascript", "mixed"):
+        structure = results.get("structure", {})
+        for cls_info in structure.get("classes", []):
+            cls_name = cls_info.get("name", "")
+            filepath = cls_info.get("file", "")
+            basename = Path(filepath).name if filepath else ""
+            for mut in cls_info.get("state_mutations", []):
+                prop = mut.get("property", "")
+                method = mut.get("method", "")
+                key = f"{basename}:{cls_name}.{method}" if method else f"{basename}:{cls_name}"
+                if key not in mutations:
+                    mutations[key] = []
+                mutation_str = f"this.{prop}"
+                if mutation_str not in mutations[key]:
+                    mutations[key].append(mutation_str)
+        return mutations
 
     hotspots = results.get("hotspots", [])[:20]
     structure = results.get("structure", {})
@@ -2496,6 +2612,33 @@ def get_environment_variables(results: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     structure = results.get("structure", {})
     files = structure.get("files", {})
+
+    # TS fallback: read pre-computed env_vars from per-file data
+    lang = results.get("metadata", {}).get("language", "python")
+    if lang in ("typescript", "javascript", "mixed"):
+        for filepath, file_data in files.items():
+            for ev in file_data.get("env_vars", []):
+                var_name = ev.get("variable", "")
+                key = (var_name, filepath)
+                if key not in seen:
+                    seen.add(key)
+                    env_vars.append({
+                        "variable": var_name,
+                        "default": ev.get("default"),
+                        "fallback_type": ev.get("fallback_type", "none"),
+                        "required": ev.get("required", False),
+                        "file": filepath,
+                        "line": ev.get("line", 0),
+                    })
+        # Deduplicate by variable name, keep first with most info
+        final_vars = {}
+        for ev in env_vars:
+            vn = ev["variable"]
+            if vn not in final_vars:
+                final_vars[vn] = ev
+            elif final_vars[vn]["default"] is None and ev["default"] is not None:
+                final_vars[vn] = ev
+        return sorted(final_vars.values(), key=lambda x: (not x.get("required"), x["variable"]))
 
     # Prioritize config files, then scan all files
     priority_files = []
