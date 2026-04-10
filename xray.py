@@ -274,6 +274,36 @@ def detect_language(target: str) -> str:
     return "python"
 
 
+def _find_ts_scanner(verbose: bool = False) -> Optional[Path]:
+    """Locate the TS scanner binary. Search order:
+    1. XRAY_TS_SCANNER env var (explicit path to index.js)
+    2. Sibling directory ../repo-xray-ts-scanner/dist/index.js
+    3. Legacy in-tree ts-scanner/dist/index.js
+    """
+    # 1. Explicit env var
+    env_path = os.environ.get("XRAY_TS_SCANNER")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+        if verbose:
+            print(f"XRAY_TS_SCANNER={env_path} does not exist", file=sys.stderr)
+
+    # 2. Sibling repo (common local dev layout)
+    sibling = SCRIPT_DIR.parent / "repo-xray-ts-scanner" / "dist" / "index.js"
+    if sibling.exists():
+        return sibling
+
+    # 3. Legacy in-tree path
+    legacy = SCRIPT_DIR / "ts-scanner" / "dist" / "index.js"
+    if legacy.exists():
+        return legacy
+
+    if verbose:
+        print("TS scanner not found. Set XRAY_TS_SCANNER or clone repo-xray-ts-scanner as sibling directory.", file=sys.stderr)
+    return None
+
+
 def invoke_ts_scanner(target: str, verbose: bool = False) -> Optional[Dict[str, Any]]:
     """Invoke the TypeScript scanner subprocess and return parsed JSON results.
 
@@ -281,10 +311,8 @@ def invoke_ts_scanner(target: str, verbose: bool = False) -> Optional[Dict[str, 
     """
     import tempfile
 
-    scanner_path = SCRIPT_DIR / "ts-scanner" / "dist" / "index.js"
-    if not scanner_path.exists():
-        if verbose:
-            print("TS scanner not built (ts-scanner/dist/index.js missing)", file=sys.stderr)
+    scanner_path = _find_ts_scanner(verbose)
+    if not scanner_path:
         return None
 
     cmd = ["node", str(scanner_path), target]
