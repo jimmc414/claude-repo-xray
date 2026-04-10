@@ -301,6 +301,12 @@ If P23_COUNT < TARGET:
    d. **Hop promotion:** Any module that appears as an intermediate hop in a P1 trace task description AND does not already have a P2/P3 task gets added as a P3 task (these are modules the traces pass through — they deserve deep-reads)
    e. Update the Progress table's P3 total
    f. Log: `Coverage pre-check: {P23_COUNT} tasks → {new_count} (added {added} modules, target {TARGET})`
+   g. **Barrel file analysis (TypeScript only):** If CODE_LANG is typescript, identify `index.ts` files that are mostly re-exports (high export count, low logic). These are architectural chokepoints — if they create circular imports, many modules break. Add the top 3 barrel files as P3 tasks if not already present.
+
+7. **TypeScript-specific prioritization signals:** If CODE_LANG is typescript:
+   - Modules with high `as any` / `@ts-ignore` density should be prioritized (type safety gaps indicate under-documented behavior)
+   - Files listed in `ts_specific.module_augmentations` are coupling risks — add as P3 tasks
+   - Check for `ts_specific.any_density` in xray.json — if `explicit_any + as_any_assertions > 20`, add a P4 cross-cutting task: "Audit type safety escape hatches and document which are intentional vs technical debt"
 
 **Prioritization logic (by information density):**
 
@@ -535,6 +541,16 @@ Sub-agents receive these protocol instructions verbatim:
 6. Note branching (error paths, conditional logic) at each hop
 7. Note data transformations between hops
 8. Note gotchas discovered during tracing
+
+**TypeScript-specific trace guidance:**
+
+When tracing through TypeScript/JavaScript codebases:
+- **Async boundaries:** Note where sync→async transitions occur (missing `await`, `.then()` chains). Flag any function that starts a Promise chain without error handling.
+- **Middleware chains:** In Express/Fastify/Koa, trace through the middleware stack in order. Note where `next()` is called, where it's skipped (early return), and where error middleware breaks the chain.
+- **DI resolution:** In NestJS/Angular, trace from `@Injectable()` declaration through `@Inject()` sites. Note lifecycle hooks (`onModuleInit`, `onApplicationBootstrap`) that run at startup.
+- **Barrel file hops:** When a trace passes through an `index.ts` that only re-exports, note this but don't count it as a meaningful hop. The real target is the source module.
+- **Type narrowing at branches:** Note where `if (x instanceof Foo)` or discriminated union checks (`if (x.type === 'bar')`) gate code paths — these are the real branching points.
+- **Event-driven flows:** When the trace reaches `emit()`, `on()`, or `subscribe()`, follow the event to ALL listeners. Note if multiple handlers exist for the same event.
 ```
 
 #### Protocol B: Module Deep Read
@@ -564,6 +580,15 @@ Sub-agents receive these protocol instructions verbatim:
       Tested: {list}. Untested: {list}.
       Test file: {path} ({N} test functions)
 3. Record any gotchas
+
+**TypeScript-specific module investigation:**
+
+When deep-reading a TypeScript module, also document:
+- **Exported types:** List all `export interface`, `export type`, `export enum` — these are the module's contract. Note which are used externally (via xray import graph).
+- **Decorator metadata:** For classes with decorators (`@Entity`, `@Injectable`, `@Controller`), extract the decorator arguments — they encode runtime configuration that isn't visible from the type signature alone.
+- **Generic constraints:** Note generic type parameters with constraints (`T extends SomeBase`) — these restrict what callers can pass and are a common source of type errors when changed.
+- **`any` escape hatches:** Count `as any`, `@ts-ignore`, `@ts-expect-error` in the module. Each is a place where the type system has been deliberately bypassed — potential bug hiding spots.
+- **Re-export surface:** If the module is a barrel file (mostly re-exports), note what it re-exports and whether it adds any transformation.
 ```
 
 #### Protocol C: Cross-Cutting Concern
@@ -621,6 +646,40 @@ grep -rn "process\.exit" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modu
 grep -rn "readFile\|readdir\|createReadStream" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
 ```
 
+**TypeScript deep patterns** (run after the basic patterns above when time allows):
+
+```bash
+# Promise error handling gaps
+grep -rn "\.then(" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | grep -v "\.catch" | head -20  # .then() without .catch()
+grep -rn "Promise\.all\b" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules  # bulk operations — check error handling
+grep -rn "new Promise" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -15  # manual Promise construction — often buggy
+
+# Barrel file analysis (circular import risk)
+for f in $(find "$DEEP_CRAWL_ROOT" -name "index.ts" -not -path "*/node_modules/*" 2>/dev/null); do
+  EXPORTS=$(grep -c "^export" "$f" 2>/dev/null || echo 0)
+  LOGIC=$(grep -cvE "^export|^import|^$|^//" "$f" 2>/dev/null || echo 0)
+  if [ "$EXPORTS" -gt 3 ] && [ "$LOGIC" -lt 5 ]; then echo "BARREL: $f ($EXPORTS re-exports)"; fi
+done
+
+# Type safety escape hatches (aggregate)
+echo "=== Type safety signals ==="
+echo "as any: $(grep -rn 'as any' --include='*.ts' "$DEEP_CRAWL_ROOT" | grep -v node_modules | wc -l)"
+echo "@ts-ignore: $(grep -rn '@ts-ignore' --include='*.ts' "$DEEP_CRAWL_ROOT" | grep -v node_modules | wc -l)"
+echo "@ts-expect-error: $(grep -rn '@ts-expect-error' --include='*.ts' "$DEEP_CRAWL_ROOT" | grep -v node_modules | wc -l)"
+echo "non-null assertion (!.): $(grep -rn '\!\.' --include='*.ts' "$DEEP_CRAWL_ROOT" | grep -v node_modules | wc -l)"
+
+# AbortController / cancellation patterns
+grep -rn "AbortController\|AbortSignal\|signal:" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -10
+
+# Module augmentation (global type patching — coupling risk)
+grep -rn "declare module\|declare global" --include="*.ts" --include="*.d.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules
+
+# Workspace/monorepo structure
+ls "$DEEP_CRAWL_ROOT"/packages/*/package.json 2>/dev/null && echo "MONOREPO: packages/* detected"
+ls "$DEEP_CRAWL_ROOT"/apps/*/package.json 2>/dev/null && echo "MONOREPO: apps/* detected"
+cat "$DEEP_CRAWL_ROOT/package.json" 2>/dev/null | grep -A5 '"workspaces"' | head -8
+```
+
 **Exception taxonomy investigations (Protocol C):**
 
 When the crawl plan includes an exception taxonomy task, Protocol C agents should:
@@ -642,6 +701,17 @@ When the crawl plan includes an exception taxonomy task, Protocol C agents shoul
 4. Read each flagged deviation
 5. Assess: intentional variation or oversight?
 6. Write to /tmp/deep_crawl/findings/conventions/patterns.md
+
+**TypeScript-specific conventions to document:**
+
+When documenting conventions for TypeScript codebases, check for these patterns:
+- **Import organization:** Are imports grouped (external → internal → types)? Are path aliases used consistently? Are barrel files the standard import target?
+- **Null safety style:** Optional chaining (`?.`) vs explicit null checks? Non-null assertions (`!`) — banned or accepted?
+- **Error class hierarchy:** One base `AppError` or ad-hoc `throw new Error()`? Error codes or just messages?
+- **Async patterns:** Always `async/await` or mixed with `.then()`? Raw Promises or wrapped (e.g., `Result<T, E>` monads)?
+- **Type annotation style:** Return types always explicit or inferred? `interface` vs `type` preference? `unknown` vs `any` for untyped data?
+- **Component patterns (if React/Vue):** Function components vs class? Props interface naming (`FooProps`)? Hook extraction conventions?
+- **Decorator usage (if NestJS/Angular):** Custom decorator conventions? Metadata patterns?
 ```
 
 #### Protocol E: Reverse Dependency & Change Impact
@@ -960,7 +1030,20 @@ Organize gotchas into domain-cluster ### subsections derived from the investigat
 
 S5's template sections remain: Gotchas, Hazards — Do Not Read, Extension Points, and Reading Order from DEEP_ONBOARD.md.template.
 
-S6's prompt for **Data Contracts**: extract all Pydantic models, dataclasses, TypedDicts, and NamedTuples from module findings + xray `investigation_targets.domain_entities`. Format as table with Model, File, Type, Key Fields, Serialization, Gotcha.
+**TypeScript-specific gotcha categories** (ensure these are checked during gotcha clustering):
+
+When organizing gotchas for TypeScript projects, ensure these categories are represented if evidence exists:
+- **Type safety escapes:** `as any` casts, `@ts-ignore` directives, non-null assertions (`!`) hiding potential null access
+- **Async error handling:** Missing `.catch()` on Promise chains, unhandled rejection paths, `try/catch` not wrapping `await`
+- **Circular imports:** Barrel files (`index.ts`) creating import cycles, runtime `undefined` from circular dependencies
+- **Build/runtime divergence:** Type-only imports stripped at build time, `const enum` inlining differences, path alias resolution mismatches between IDE and runtime
+- **State management:** Module-level `let` used as cache without invalidation, singleton services with mutable state, React `useState` without cleanup
+- **External boundary unsafety:** `JSON.parse()` returning `any`, API response types asserted but not validated at runtime, `process.env` values used without undefined checks
+
+S6's prompt for **Data Contracts**:
+- For Python: extract all Pydantic models, dataclasses, TypedDicts, and NamedTuples from module findings + xray `investigation_targets.domain_entities`.
+- For TypeScript: extract all interfaces, type aliases (especially discriminated unions), Zod schemas, class-validator decorated classes, and enums. Also check xray `ts_interfaces` and `ts_type_aliases` data.
+- Format as table with Model/Interface, File, Type (interface/class/enum/schema), Key Fields, Validation (Zod/class-validator/none), Gotcha.
 
 S6's prompt for **Change Impact Index**: organize impact findings by hub module cluster. Each cluster gets a table showing importers, high-impact functions, signature-change consequences, behavior-change consequences, safe vs dangerous changes. Also read `git.coupling_clusters` from `/tmp/xray/xray.json`. For each cluster, add a **Hidden Coupling** row to the relevant hub module's impact table. Format: `When modifying {file_a}, also verify {file_b} — {count} historical co-changes with no import relationship.`
 

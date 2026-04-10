@@ -992,6 +992,115 @@ def format_markdown(
         except Exception:
             pass
 
+        # Barrel Files (TypeScript re-export hubs)
+        barrel_files = imports.get("barrel_files", [])
+        if barrel_files:
+            lines.append("### Barrel Files")
+            lines.append("")
+            lines.append("*`index.ts` re-export hubs (high export count, minimal logic):*")
+            lines.append("")
+            lines.append("| File | Re-exports | Logic Lines | Sources |")
+            lines.append("|------|------------|-------------|---------|")
+            for bf in barrel_files[:10]:
+                sources = ", ".join(f"`{s}`" for s in bf.get("reexported_from", [])[:5])
+                if len(bf.get("reexported_from", [])) > 5:
+                    sources += f", +{len(bf['reexported_from']) - 5} more"
+                lines.append(f"| `{dn(bf.get('file', ''))}` | {bf.get('reexport_count', 0)} | {bf.get('logic_lines', 0)} | {sources} |")
+            lines.append("")
+
+    # TS Type System Overview (only for TypeScript/mixed projects)
+    if lang in ("typescript", "mixed"):
+        structure_files = results.get("structure", {}).get("files", {})
+        all_interfaces = []
+        all_type_aliases = []
+        all_enums = []
+        for fp, fdata in structure_files.items():
+            for iface in fdata.get("ts_interfaces", []):
+                all_interfaces.append({**iface, "file": fp})
+            for ta in fdata.get("ts_type_aliases", []):
+                all_type_aliases.append({**ta, "file": fp})
+            for en in fdata.get("ts_enums", []):
+                all_enums.append({**en, "file": fp})
+
+        if all_interfaces or all_type_aliases or all_enums:
+            lines.append("## Type System Overview")
+            lines.append("")
+
+            # Exported interfaces (top 20 by member count)
+            exported_ifaces = [i for i in all_interfaces if i.get("exported")]
+            if exported_ifaces:
+                exported_ifaces.sort(key=lambda x: len(x.get("members", [])), reverse=True)
+                lines.append("### Key Interfaces")
+                lines.append("| Interface | Members | Extends | File |")
+                lines.append("|-----------|---------|---------|------|")
+                for iface in exported_ifaces[:20]:
+                    members = len(iface.get("members", []))
+                    extends = ", ".join(iface.get("extends", [])) or "-"
+                    lines.append(f"| `{iface['name']}` | {members} | {extends} | {dn(iface['file'])} |")
+                lines.append("")
+
+            # Union/intersection types (discriminated unions are architecturally important)
+            union_types = [t for t in all_type_aliases if t.get("type_kind") in ("union", "intersection") and t.get("exported")]
+            if union_types:
+                lines.append("### Union/Intersection Types")
+                lines.append("| Type | Kind | File |")
+                lines.append("|------|------|------|")
+                for t in union_types[:15]:
+                    lines.append(f"| `{t['name']}` | {t['type_kind']} | {dn(t['file'])} |")
+                lines.append("")
+
+            # Enums
+            exported_enums = [e for e in all_enums if e.get("exported")]
+            if exported_enums:
+                lines.append("### Enums")
+                lines.append("| Enum | Members | Const | File |")
+                lines.append("|------|---------|-------|------|")
+                for e in exported_enums[:15]:
+                    lines.append(f"| `{e['name']}` | {len(e.get('members', []))} | {'yes' if e.get('is_const') else 'no'} | {dn(e['file'])} |")
+                lines.append("")
+
+    # TS Type Safety signals
+    ts_specific = results.get("ts_specific", {})
+    if ts_specific:
+        any_d = ts_specific.get("any_density", {})
+        if any(any_d.values()):
+            lines.append("## Type Safety")
+            lines.append("")
+            lines.append("| Signal | Count |")
+            lines.append("|--------|-------|")
+            if any_d.get("explicit_any"):
+                lines.append(f"| `any` type annotations | {any_d['explicit_any']} |")
+            if any_d.get("as_any_assertions"):
+                lines.append(f"| `as any` assertions | {any_d['as_any_assertions']} |")
+            if any_d.get("ts_ignore_count"):
+                lines.append(f"| `@ts-ignore` directives | {any_d['ts_ignore_count']} |")
+            if any_d.get("ts_expect_error_count"):
+                lines.append(f"| `@ts-expect-error` directives | {any_d['ts_expect_error_count']} |")
+            lines.append("")
+
+            mod_sys = ts_specific.get("module_system")
+            if mod_sys:
+                lines.append(f"Module system: **{mod_sys}**")
+                lines.append("")
+
+    # API Routes
+    routes = results.get("routes", {})
+    if routes:
+        route_list = routes.get("routes", [])
+        route_summary = routes.get("summary", {})
+        if route_list:
+            lines.append("## API Routes")
+            lines.append("")
+            fw = route_summary.get("frameworks_detected", [])
+            fw_note = f" ({', '.join(fw)})" if fw else ""
+            lines.append(f"*{route_summary.get('total_routes', len(route_list))} routes detected{fw_note}*")
+            lines.append("")
+            lines.append("| Method | Path | Handler | File |")
+            lines.append("|--------|------|---------|------|")
+            for r in route_list[:30]:
+                lines.append(f"| {r.get('method', '?')} | `{r.get('path', '')}` | `{r.get('handler', '')}` | {dn(r.get('file', ''))}:{r.get('line', 0)} |")
+            lines.append("")
+
     # Cross-Module Calls
     calls = results.get("calls", {})
     if calls:
@@ -1349,9 +1458,12 @@ def format_markdown(
     # Test Example (Rosetta Stone)
     if gap.get("test_example"):
         try:
-            from test_analysis import get_test_example
-            target_dir = gap.get("target_dir", ".")
-            example = get_test_example(target_dir, max_lines=50)
+            # Prefer TS scanner's test_example if present
+            example = tests.get("test_example") if tests else None
+            if not example:
+                from test_analysis import get_test_example
+                target_dir = gap.get("target_dir", ".")
+                example = get_test_example(target_dir, max_lines=50)
             if example:
                 lines.append("## Testing Idioms")
                 lines.append("")

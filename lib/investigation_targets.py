@@ -18,6 +18,7 @@ Usage:
 """
 
 import ast as ast_module
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -173,62 +174,84 @@ def compute_entry_side_effect_paths(
     cross_module = call_results.get("cross_module", {}) if call_results else {}
     files = ast_results.get("files", {})
 
-    # Collect all side effects by file
+    # Detect root directory from file paths for normalizing abs→rel
+    file_paths = list(files.keys())
+    if file_paths and os.path.isabs(file_paths[0]):
+        root = os.path.commonpath(file_paths)
+    else:
+        root = ""
+
+    def relpath(p):
+        """Normalize any path to relative form for consistent matching."""
+        if not p:
+            return ""
+        if root and os.path.isabs(p):
+            return os.path.relpath(p, root)
+        return p
+
+    # Collect all side effects by relative path
     side_effects_by_file = defaultdict(list)
     for filepath, file_data in files.items():
+        rel = relpath(filepath)
         for se in file_data.get("side_effects", []):
-            side_effects_by_file[filepath].append(se)
+            side_effects_by_file[rel].append(se)
 
-    # Build a simplified call graph: caller_module_stem -> set of callee_module_stems
-    # Also build stem->filepath mapping
-    stem_to_filepath = {}
+    # Build set of known relative file paths
+    known_files = set()
     for filepath in files:
-        stem = Path(filepath).stem
-        stem_to_filepath[stem] = filepath
+        known_files.add(relpath(filepath))
 
+    # Build callee map: function_name → relative file it's defined in
+    func_to_file = {}
+    for func_name, data in cross_module.items():
+        module_prefix = func_name.split(".")[0] if "." in func_name else ""
+        if module_prefix:
+            for kf in known_files:
+                if Path(kf).stem == module_prefix:
+                    func_to_file[func_name] = kf
+                    break
+
+    # Build call graph: caller_relpath → set of callee_relpaths
     call_graph = defaultdict(set)
     for func_name, data in cross_module.items():
+        callee_file = func_to_file.get(func_name, "")
         for site in data.get("call_sites", []):
-            caller_file = site.get("file", "")
-            caller_stem = Path(caller_file).stem
-            # The func_name key format varies; extract module stem
-            callee_stem = func_name.split(".")[0] if "." in func_name else ""
-            if caller_stem and callee_stem and caller_stem != callee_stem:
-                call_graph[caller_stem].add(callee_stem)
+            caller_file = relpath(site.get("file", ""))
+            if caller_file and callee_file and caller_file != callee_file:
+                call_graph[caller_file].add(callee_file)
 
     paths = []
     for ep in entry_points:
-        ep_file = ep.get("file", "")
-        ep_stem = Path(ep_file).stem
+        ep_file = relpath(ep.get("file", ""))
+        if not ep_file or ep_file not in known_files:
+            continue
 
         # BFS to find reachable side effects
         visited = set()
-        queue = [(ep_stem, 0)]
+        queue = [(ep_file, 0)]
         reachable_effects = []
         max_hops = 0
 
         while queue:
-            module_stem, hops = queue.pop(0)
-            if module_stem in visited or hops > 8:
+            current_file, hops = queue.pop(0)
+            if current_file in visited or hops > 8:
                 continue
-            visited.add(module_stem)
+            visited.add(current_file)
             max_hops = max(max_hops, hops)
 
-            # Check for side effects in this module
-            module_filepath = stem_to_filepath.get(module_stem, "")
-            if module_filepath:
-                for se in side_effects_by_file.get(module_filepath, []):
-                    reachable_effects.append({
-                        "type": se.get("category", "unknown"),
-                        "location": f"{module_filepath}:{se.get('line', 0)}",
-                        "pattern": se.get("call", ""),
-                        "hops_from_entry": hops,
-                    })
+            # Check for side effects in this file
+            for se in side_effects_by_file.get(current_file, []):
+                reachable_effects.append({
+                    "type": se.get("category", "unknown"),
+                    "location": f"{current_file}:{se.get('line', 0)}",
+                    "pattern": se.get("call", ""),
+                    "hops_from_entry": hops,
+                })
 
             # Follow call graph edges
-            for callee_stem in call_graph.get(module_stem, set()):
-                if callee_stem not in visited:
-                    queue.append((callee_stem, hops + 1))
+            for callee_file in call_graph.get(current_file, set()):
+                if callee_file not in visited:
+                    queue.append((callee_file, hops + 1))
 
         if reachable_effects:
             entry_name = ep.get("entry_point", ep.get("function", ep_file))

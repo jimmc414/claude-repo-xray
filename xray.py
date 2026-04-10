@@ -417,21 +417,7 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
                 gap_results = {}
                 gap_results["entry_points"] = detect_entry_points(ts_results, target)
 
-                data_models = extract_data_models(ts_results)
-                for filepath, fdata in ast_results_ts.get("files", {}).items():
-                    for iface in fdata.get("ts_interfaces", []):
-                        data_models.append({
-                            "name": iface.get("name", ""),
-                            "type": "interface",
-                            "file": filepath,
-                            "line": iface.get("line", 0),
-                            "fields": [{"name": m["name"], "type": m.get("type", "")} for m in iface.get("members", [])],
-                            "bases": iface.get("extends", []),
-                        })
-                    for ta in fdata.get("ts_type_aliases", []):
-                        if ta.get("type_kind") == "object":
-                            data_models.append({"name": ta["name"], "type": "type_alias", "file": filepath, "line": ta.get("line", 0), "fields": []})
-                gap_results["data_models"] = data_models
+                gap_results["data_models"] = extract_data_models(ts_results)
 
                 ts_results["investigation_targets"] = compute_investigation_targets(
                     ast_results=ast_results_ts,
