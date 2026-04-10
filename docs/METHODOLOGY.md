@@ -1,6 +1,6 @@
 # Methodology: From Code to Onboarding Document
 
-This document is the authoritative technical reference for the claude-repo-xray pipeline. It describes the two-stage process that transforms a Python codebase into a comprehensive AI onboarding document: a deterministic scanner (xray.py) produces structural intelligence, then an LLM-powered deep crawl uses that intelligence to investigate and produce a DEEP_ONBOARD.md.
+This document is the authoritative technical reference for the claude-repo-xray pipeline. It describes the two-stage process that transforms a codebase (Python or TypeScript/JavaScript) into a comprehensive AI onboarding document: a deterministic scanner (xray.py) produces structural intelligence, then an LLM-powered deep crawl uses that intelligence to investigate and produce a DEEP_ONBOARD.md.
 
 **Core metric:** File-reads saved per onboarding token. Every token in the output should reduce the number of files a downstream AI agent needs to open before it can confidently make changes.
 

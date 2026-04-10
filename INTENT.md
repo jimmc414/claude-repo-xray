@@ -59,7 +59,7 @@ The deep_crawl agent is designed to spend unlimited tokens during generation to 
 ## Design Decisions That Were Hard
 
 **Why AST-only and not runtime analysis for the scanner.**
-We considered adding pytest tracing, coverage integration, and runtime type capture. Each would produce more accurate data. We rejected them because they add dependencies, require a working test suite, take minutes instead of seconds, and produce non-deterministic output. The scanner's value is that it works on any Python codebase with zero setup. Requiring `pip install` or a passing test suite would cut our addressable use cases in half. Runtime analysis belongs in the agent layer, not the scanner.
+We considered adding pytest tracing, coverage integration, and runtime type capture. Each would produce more accurate data. We rejected them because they add dependencies, require a working test suite, take minutes instead of seconds, and produce non-deterministic output. The scanner's value is that it works on any codebase with zero setup (Python) or minimal setup (TypeScript — requires Node.js). Requiring a passing test suite would cut our addressable use cases in half. Runtime analysis belongs in the agent layer, not the scanner.
 
 **Why the onboarding document is for AI, not humans.**
 Early versions tried to serve both audiences. The result was a document that was too verbose for AI (wasting context tokens on prose that helps humans but not machines) and too structured for humans (tables and compact notation that machines parse easily but humans find cold). We chose the AI audience because that's where the leverage is — a human can read code directly, but an AI's ability to work effectively is bottlenecked by what fits in context. Optimizing for the constrained consumer matters more.
@@ -72,7 +72,7 @@ An agent that has to know to look for the onboarding document will sometimes not
 
 ## Scope Boundaries
 
-**We only analyze Python.** The scanner uses Python's AST parser. Supporting other languages would require language-specific parsers, and the analysis patterns differ enough that a multi-language scanner would be a different project. The agent layer and onboarding document format are language-agnostic — a future scanner for TypeScript or Rust could feed into the same crawl and synthesis pipeline.
+**We analyze Python and TypeScript/JavaScript.** The Python scanner uses Python's `ast` module; the TypeScript scanner uses the TypeScript compiler API (`ts.createSourceFile`). Each is a self-contained implementation — they share no code, only the output JSON schema (`XRayResults`). `xray.py` detects the project language and delegates to the appropriate scanner, then runs language-agnostic git analysis and investigation target computation on top. The agent layer, formatters, and onboarding document format are fully language-agnostic — a future scanner for Rust or Go would plug into the same pipeline by producing the same JSON shape.
 
 **We don't modify code.** We observe, analyze, and document. We never suggest refactoring, never auto-fix, never change a file. Our output is read-only intelligence for something else to act on.
 

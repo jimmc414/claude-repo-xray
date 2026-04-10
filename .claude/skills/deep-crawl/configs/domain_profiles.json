@@ -237,5 +237,148 @@
       "hooks": "hookimpl\\|hookspec\\|hook_\\|on_\\|register_hook",
       "lifecycle": "activate\\|deactivate\\|unload\\|initialize_plugin"
     }
+  },
+  "web_api_js": {
+    "indicators": {
+      "frameworks": ["express", "fastify", "koa", "hapi", "nestjs", "@nestjs/core", "hono"],
+      "patterns": ["app.get(", "app.post(", "router.get(", "@Get(", "@Controller(", "Hono("],
+      "directories": ["routes/", "api/", "controllers/", "middleware/"]
+    },
+    "additional_investigation": [
+      "Express/Fastify middleware chain and execution order",
+      "Request validation (zod, joi, class-validator)",
+      "Authentication middleware (passport, custom JWT)",
+      "CORS configuration",
+      "Error handling middleware (app.use with 4 params or error filter)",
+      "Database connection lifecycle (connection pool, per-request)"
+    ],
+    "additional_output_sections": [
+      "API endpoint index (route → handler → service)",
+      "Auth flow trace",
+      "Middleware chain with execution order"
+    ],
+    "primary_entity": "API route handler",
+    "grep_patterns": {
+      "auth": "passport\\|jwt\\|Bearer\\|authenticate\\|@UseGuards",
+      "middleware": "app\\.use\\|middleware\\|@UseInterceptors\\|@UseFilters",
+      "rate_limit": "rateLimit\\|throttle\\|@Throttle"
+    }
+  },
+  "cli_tool_js": {
+    "indicators": {
+      "frameworks": ["commander", "yargs", "oclif", "meow", "cac", "gunshi", "clipanion"],
+      "patterns": ["program.command(", ".option(", ".argument(", "defineCommand(", "define("],
+      "directories": ["commands/", "cli/", "bin/"]
+    },
+    "additional_investigation": [
+      "Command hierarchy and subcommand dispatch",
+      "Argument parsing and validation",
+      "Output modes (table, JSON, plain text)",
+      "Exit code conventions",
+      "stdin/stdout/stderr usage patterns",
+      "Configuration file loading and merge strategy"
+    ],
+    "additional_output_sections": [
+      "Command tree with argument signatures",
+      "Output format documentation",
+      "Exit code table"
+    ],
+    "primary_entity": "CLI command",
+    "grep_patterns": {
+      "commands": "command\\|subcommand\\|\\.action\\|defineCommand",
+      "options": "\\.option\\|--\\w+\\|process\\.argv",
+      "output": "console\\.log\\|process\\.stdout\\|chalk\\|picocolors"
+    }
+  },
+  "library_js": {
+    "indicators": {
+      "frameworks": [],
+      "patterns": ["export default", "export {", "module.exports"],
+      "directories": ["src/", "lib/", "dist/"],
+      "files": ["package.json"]
+    },
+    "additional_investigation": [
+      "Public API surface via package.json 'exports' field and main/types entries",
+      "Type declaration files (.d.ts) — are they hand-written or auto-generated?",
+      "Dual CJS/ESM build (check for separate CJS and ESM output, conditional exports)",
+      "Peer dependency expectations and version constraints",
+      "Backwards compatibility patterns (deprecation strategy, semver discipline)",
+      "Bundle size considerations (tree-shaking support, side-effects field)"
+    ],
+    "primary_entity": "exported function or class",
+    "grep_patterns": {
+      "public_api": "export\\s+(default|\\{|function|class|const|interface|type|enum)",
+      "deprecation": "@deprecated\\|@since\\|@internal",
+      "peer_deps": "peerDependencies"
+    }
+  },
+  "monorepo_js": {
+    "indicators": {
+      "frameworks": ["nx", "turborepo", "lerna"],
+      "patterns": ["workspaces", "packages/*"],
+      "directories": ["packages/", "apps/", "libs/"],
+      "files": ["nx.json", "turbo.json", "lerna.json", "pnpm-workspace.yaml"]
+    },
+    "additional_investigation": [
+      "Workspace package boundaries — which packages depend on which?",
+      "Shared type definitions across packages (are types duplicated or shared?)",
+      "Build ordering and task dependencies (nx task graph, turbo pipeline)",
+      "Package versioning strategy (independent or lockstep?)",
+      "Cross-package import restrictions (do packages import from each other's internals?)",
+      "Development vs production dependency boundaries"
+    ],
+    "primary_entity": "workspace package",
+    "grep_patterns": {
+      "cross_package": "from.*@\\w+/\\|require.*@\\w+/",
+      "workspace_config": "workspaces\\|references\\|composite",
+      "shared_types": "from.*shared\\|from.*common\\|from.*types"
+    }
+  },
+  "nextjs_fullstack": {
+    "indicators": {
+      "frameworks": ["next", "@next/core"],
+      "patterns": ["getServerSideProps", "getStaticProps", "useRouter", "NextResponse"],
+      "directories": ["app/", "pages/", "api/"],
+      "files": ["next.config.js", "next.config.mjs", "next.config.ts"]
+    },
+    "additional_investigation": [
+      "Server vs client component boundary ('use client' / 'use server' directives)",
+      "Data fetching patterns (Server Components, Route Handlers, Server Actions)",
+      "Middleware execution (Edge vs Node runtime, matcher config)",
+      "Caching and revalidation strategy (ISR, on-demand revalidation)",
+      "API route vs Server Action choice rationale",
+      "Authentication flow across server/client boundary"
+    ],
+    "primary_entity": "page or API route",
+    "grep_patterns": {
+      "server_client": "use client\\|use server",
+      "data_fetching": "fetch\\|getServerSideProps\\|getStaticProps\\|generateStaticParams",
+      "middleware": "NextResponse\\|middleware\\.ts"
+    }
+  },
+  "frontend_js": {
+    "indicators": {
+      "frameworks": ["react", "vue", "angular", "svelte", "solid-js", "next", "nuxt"],
+      "patterns": ["useState(", "useEffect(", "createSignal(", "defineComponent("],
+      "directories": ["components/", "pages/", "views/", "app/"]
+    },
+    "additional_investigation": [
+      "State management approach (Redux, Zustand, Pinia, signals)",
+      "Routing configuration",
+      "Data fetching patterns (SWR, React Query, fetch)",
+      "Component composition patterns",
+      "Build configuration (Vite, webpack, turbopack)"
+    ],
+    "additional_output_sections": [
+      "Component hierarchy overview",
+      "State management architecture",
+      "Data flow from API to UI"
+    ],
+    "primary_entity": "component/page",
+    "grep_patterns": {
+      "state": "useState\\|useReducer\\|createStore\\|defineStore\\|createSignal",
+      "effects": "useEffect\\|onMounted\\|onCleanup\\|watch(",
+      "routing": "useRouter\\|Link\\|Route\\|navigate"
+    }
   }
 }

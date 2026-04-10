@@ -3,7 +3,7 @@
 Solve the cold start problem for AI coding assistants. Two phases: a fast deterministic scan, then an optional LLM-powered deep investigation.
 
 ```
-Phase 1 — X-Ray:     python xray.py /path/to/project     # 5 seconds, ~15K tokens, zero dependencies
+Phase 1 — X-Ray:     python xray.py /path/to/project     # 5 sec, ~15K tokens, Python or TypeScript/JS
 Phase 2 — Deep Crawl: /deep-crawl full                    # 30-70 min, ~60K words, every claim cited
 ```
 
@@ -61,7 +61,7 @@ A codebase might span 2 million tokens. A context window holds 200K. The agent c
 |---|---|
 | Speed | 5 seconds on 500 files |
 | Output | ~15K tokens (configurable: 2K-15K) |
-| Dependencies | None. Python 3.8+ stdlib only. |
+| Dependencies | Python scanner: Python 3.8+ stdlib only. TypeScript scanner: Node.js + npm. |
 | Determinism | Same input produces identical output every time |
 | What it extracts | 49+ signals: AST skeletons, import layers, complexity, git risk, side effects, call graph, hub modules, security concerns, silent failures, async violations, SQL patterns, deprecation markers, blast radius, HTTP routes, decorator details, resource leaks, unsafe deserialization, magic methods, import-time side effects |
 | What it can't do | Read code semantically. It knows a function has CC=25 and 8 callers. It doesn't know why. |
@@ -87,10 +87,14 @@ The scanner tells you a function has cyclomatic complexity 25 and is called from
 git clone https://github.com/jimmc414/claude-repo-xray.git
 cd claude-repo-xray
 
-# Layer 1: Scan any Python project
-python xray.py /path/to/project                          # Full analysis to stdout
-python xray.py /path/to/project --output both --out /tmp/xray   # Markdown + JSON to files
-python xray.py /path/to/project --preset minimal          # ~2K tokens, quick survey
+# Scan any Python project (zero dependencies)
+python xray.py /path/to/python-project                          # Full analysis to stdout
+python xray.py /path/to/python-project --output both --out /tmp/xray   # Markdown + JSON to files
+python xray.py /path/to/python-project --preset minimal          # ~2K tokens, quick survey
+
+# Scan any TypeScript/JavaScript project (requires Node.js)
+cd claude-repo-xray/ts-scanner && npm install && npm run build && cd ..
+python xray.py /path/to/ts-project                              # Auto-detects language
 
 # Layer 2: Deep crawl (requires Claude Code)
 cd /path/to/project
@@ -98,7 +102,7 @@ python /path/to/xray.py . --output both --out /tmp/xray   # Scanner first
 /deep-crawl full                                           # Then exhaustive investigation
 ```
 
-Requirements: Python 3.8+. No `pip install`. Layer 2 requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview).
+Requirements: Python 3.8+. No `pip install` for Python scanning. TypeScript scanning requires Node.js (run `npm install && npm run build` in `ts-scanner/` once). Layer 2 requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview).
 
 ---
 
@@ -336,7 +340,7 @@ The section reference tells the diff crawl exactly where in the document to look
 
 ### Scanner Internals
 
-Single-pass AST traversal using Python's `ast` module. Each file is parsed once; multiple analyzers extract different signals from the same tree.
+**Python scanner:** Single-pass AST traversal using Python's `ast` module. Each file is parsed once; multiple analyzers extract different signals from the same tree.
 
 | Technique | Used For |
 |-----------|----------|
@@ -346,14 +350,16 @@ Single-pass AST traversal using Python's `ast` module. Each file is parsed once;
 | `collections.deque` | BFS (dependency distance computation) |
 | Git log parsing | Risk scores, coupling, freshness |
 
+**TypeScript scanner:** Uses the TypeScript compiler API (`ts.createSourceFile`) for AST parsing. Self-contained npm project in `ts-scanner/` with 20 modules. Produces the same `XRayResults` JSON schema as the Python scanner. `xray.py` detects the project language, invokes the appropriate scanner, then augments results with language-agnostic git analysis.
+
 ### Performance
 
 For a 500-file codebase:
-- AST analysis: ~2 seconds
+- AST analysis: ~2 seconds (Python), ~3 seconds (TypeScript)
 - Git analysis: ~1 second
 - Total: ~5 seconds
 
-No external dependencies. Python 3.8+ stdlib only.
+Python scanner: no external dependencies, Python 3.8+ stdlib only. TypeScript scanner: requires Node.js.
 
 ### Deep Crawl Internals
 
@@ -367,7 +373,7 @@ Calibration runs before the main crawl: three exemplar investigations (one trace
 
 ## Design Decisions
 
-**Why AST-only for the scanner.** We considered pytest tracing, coverage integration, and runtime type capture. Each would produce more accurate data. We rejected them because they add dependencies, require a working test suite, take minutes instead of seconds, and produce non-deterministic output. The scanner's value is that it works on any Python codebase with zero setup.
+**Why AST-only for the scanner.** We considered pytest tracing, coverage integration, and runtime type capture. Each would produce more accurate data. We rejected them because they add dependencies, require a working test suite, take minutes instead of seconds, and produce non-deterministic output. The scanner's value is that it works on any codebase with zero setup (Python) or minimal setup (TypeScript).
 
 **Why the output is for AI, not humans.** Early versions served both audiences. The result was too verbose for AI (wasting context on prose) and too structured for humans (tables and compact notation). We chose the AI audience because that's where the leverage is -- a human can read code directly, but an AI's effectiveness is bottlenecked by what fits in context.
 
@@ -381,7 +387,7 @@ Calibration runs before the main crawl: three exemplar investigations (one trace
 
 ## Limitations
 
-- **Python only.** The scanner uses Python's AST parser. The agent layer and document format are language-agnostic -- a future scanner for TypeScript or Rust could feed into the same pipeline.
+- **Python and TypeScript/JavaScript only.** Other languages are not yet supported. The agent layer and document format are language-agnostic -- adding a new scanner means producing the same JSON schema.
 - **Git history required** for risk, coupling, and freshness signals. Works without git, just with fewer signals.
 - **Side effect detection is heuristic.** Pattern matching on function names (`session.commit`, `requests.post`). Has a whitelist to reduce false positives, but won't catch novel patterns. SQL string detection may flag docstrings containing SQL-like keywords.
 - **Documents go stale.** Code changes but the document stays the same until refresh. A slightly stale onboarding document is better than none.
@@ -393,8 +399,8 @@ Calibration runs before the main crawl: three exemplar investigations (one trace
 
 ```
 repo-xray/
-├── xray.py                          Entry point + orchestration
-├── lib/
+├── xray.py                          Entry point + orchestration (language detection, scanner dispatch)
+├── lib/                             Python scanner modules
 │   ├── ast_analysis.py              Single-pass AST extraction
 │   ├── import_analysis.py           Dependency graph, layers, hub detection
 │   ├── call_analysis.py             Cross-module call sites, reverse lookup
@@ -407,8 +413,13 @@ repo-xray/
 │   ├── test_analysis.py             Test file detection, pattern extraction
 │   ├── tech_debt_analysis.py        TODO/FIXME markers
 │   └── config_loader.py             Config file loading, validation
+├── ts-scanner/                      TypeScript/JavaScript scanner (self-contained npm project)
+│   ├── src/                         20 modules: AST analysis, imports, calls, detectors, etc.
+│   ├── test/                        8 test files + fixtures
+│   ├── package.json                 Own deps (typescript only)
+│   └── tsconfig.json                Own build config
 ├── formatters/
-│   ├── markdown_formatter.py        Human/AI-readable output
+│   ├── markdown_formatter.py        Human/AI-readable output (language-aware)
 │   └── json_formatter.py            Structured output
 ├── configs/
 │   ├── default_config.json          All sections enabled
@@ -447,10 +458,14 @@ repo-xray/
 ```bash
 git clone https://github.com/jimmc414/claude-repo-xray.git
 cd claude-repo-xray
-python xray.py /path/to/your/project
+python xray.py /path/to/your/project          # Python projects work immediately
+
+# For TypeScript/JavaScript projects (one-time setup):
+cd ts-scanner && npm install && npm run build && cd ..
+python xray.py /path/to/your/ts-project       # Auto-detects language
 ```
 
-Requirements: Python 3.8+, no external dependencies.
+Requirements: Python 3.8+ (no external dependencies for Python scanning). Node.js for TypeScript scanning.
 
 To install the deep crawl skill globally in Claude Code:
 ```bash

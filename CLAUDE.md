@@ -4,7 +4,7 @@ Read INTENT.md before starting any task. It explains why this project exists and
 
 ## What This Is
 
-A deterministic Python codebase analyzer that produces compressed intelligence for AI coding assistants. Single entry point: `python xray.py /path/to/project`. No external dependencies. Python 3.8+ stdlib only.
+A deterministic codebase analyzer for Python and TypeScript/JavaScript projects. Produces compressed intelligence for AI coding assistants. Single entry point: `python xray.py /path/to/project`. The Python scanner has zero external dependencies (stdlib only). The TypeScript scanner requires Node.js and is a self-contained npm project in `ts-scanner/`.
 
 ## How to Run
 
@@ -20,8 +20,8 @@ Tests: `python -m pytest tests/ -x -q`
 ## Architecture
 
 ```
-xray.py                        Entry point + orchestration (run_analysis → format → output)
-  ├── lib/
+xray.py                        Entry point + orchestration (detect language → run scanner → format → output)
+  ├── lib/                       Python scanner modules
   │   ├── file_discovery.py    Find Python files, apply ignore patterns
   │   ├── ast_analysis.py      Single-pass AST: skeletons, complexity, types, side effects, security, silent failures, async violations, SQL, deprecations, decorator args, resource leaks, unsafe deserialization, magic methods
   │   ├── import_analysis.py   Dependency graph, layers, circular deps, distance
@@ -32,8 +32,13 @@ xray.py                        Entry point + orchestration (run_analysis → for
   │   ├── gap_features.py      Logic maps, hazards, data models, entry points, mermaid diagrams
   │   ├── test_analysis.py     Test file detection, pattern extraction
   │   └── tech_debt_analysis.py  TODO/FIXME markers
+  ├── ts-scanner/                TypeScript/JavaScript scanner (self-contained npm project)
+  │   ├── src/                   20 modules (~5,700 lines): AST analysis, imports, calls, detectors, etc.
+  │   ├── test/                  8 test files + fixtures
+  │   ├── package.json           Own deps (typescript only)
+  │   └── tsconfig.json          Own build config
   ├── formatters/
-  │   ├── markdown_formatter.py  Curated human/AI-readable output (~8-15K tokens)
+  │   ├── markdown_formatter.py  Curated human/AI-readable output (~8-15K tokens), language-aware
   │   └── json_formatter.py      Complete structured output (~30-50K tokens)
   ├── configs/
   │   ├── presets.json           Analysis presets (minimal, standard, full)
@@ -47,7 +52,7 @@ xray.py                        Entry point + orchestration (run_analysis → for
 
 `xray.py:main()` → parse args → `config_loader.load_config()` → `run_analysis()` → `gap_features` processing → formatter → output
 
-Inside `run_analysis()`, the pipeline is:
+For Python projects, `run_analysis()` pipeline is:
 1. `file_discovery.discover_python_files()` — find files, apply ignores
 2. `ast_analysis.analyze_codebase()` — single-pass AST extraction (everything structural)
 3. `import_analysis.analyze_imports()` — dependency graph from import statements
@@ -56,6 +61,8 @@ Inside `run_analysis()`, the pipeline is:
 6. `test_analysis` + `tech_debt_analysis` — supplementary signals
 7. `blast_analysis.analyze_blast_radius()` — transitive impact per module (depends on stages 3-4)
 8. `route_analysis.analyze_routes()` — HTTP route detection (depends on stage 2)
+
+For TypeScript/JavaScript projects, `xray.py` detects the language via `detect_language()`, invokes `ts-scanner/` via subprocess (`node ts-scanner/dist/index.js`), then augments the results with language-agnostic git analysis and investigation targets. The TS scanner produces the same `XRayResults` JSON schema as the Python pipeline.
 
 After `run_analysis()`, gap features are computed separately via `config_to_gap_features()` and passed to the markdown formatter. This separation exists because gap features need the combined results from multiple analyses.
 
@@ -69,7 +76,7 @@ All `lib/` modules are imported by `xray.py` using `sys.path` manipulation (`sys
 
 `ast_analysis.py` parses each file exactly once. Multiple analysis types (skeleton, complexity, types, decorators, side effects) are extracted from the same AST walk. If you need new AST-derived data, add it to the existing visitor rather than parsing files again.
 
-The tool has zero external dependencies by design. Do not add `pip install` requirements. If you need functionality from an external library, implement it using stdlib.
+The Python scanner has zero external dependencies by design. Do not add `pip install` requirements. If you need functionality from an external library, implement it using stdlib. The TypeScript scanner is a separate npm project in `ts-scanner/` with its own `package.json` (typescript is the only dependency). It communicates with `xray.py` via subprocess + JSON — it does not import from or depend on the Python codebase.
 
 ## Conventions
 

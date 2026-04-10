@@ -41,6 +41,9 @@ __all__ = [
 ]
 
 
+_TS_EXTENSIONS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs")
+
+
 def run_git(cmd: List[str], cwd: str, verbose: bool = False) -> str:
     """Execute a git command and return output."""
     try:
@@ -63,13 +66,14 @@ def run_git(cmd: List[str], cwd: str, verbose: bool = False) -> str:
         return ""
 
 
-def get_tracked_files(cwd: str) -> List[str]:
-    """Get list of tracked Python files."""
-    raw = run_git(["ls-files", "*.py"], cwd)
+def get_tracked_files(cwd: str, extensions: tuple = (".py",)) -> List[str]:
+    """Get list of tracked source files matching the given extensions."""
+    raw = run_git(["ls-files"] + [f"*{ext}" for ext in extensions], cwd)
     return [f for f in raw.splitlines() if f.strip()]
 
 
-def analyze_risk(cwd: str, files: List[str], months: int = 6, verbose: bool = False) -> List[Dict]:
+def analyze_risk(cwd: str, files: List[str], months: int = 6, verbose: bool = False,
+                 extensions: tuple = (".py",)) -> List[Dict]:
     """
     Calculate Risk Score based on:
     - Churn: Number of commits in period (40% weight)
@@ -103,7 +107,7 @@ def analyze_risk(cwd: str, files: List[str], months: int = 6, verbose: bool = Fa
                 current_author = parts[1]
                 subject = parts[2].lower()
                 is_hotfix = any(kw in subject for kw in hotfix_keywords)
-        elif line.strip() and line.endswith(".py"):
+        elif line.strip() and any(line.strip().endswith(e) for e in extensions):
             f = line.strip()
             if f in files:
                 s = stats[f]
@@ -140,7 +144,7 @@ def analyze_risk(cwd: str, files: List[str], months: int = 6, verbose: bool = Fa
 
 
 def analyze_coupling(cwd: str, max_commits: int = 200, min_cooccurrences: int = 3,
-                     verbose: bool = False) -> List[Dict]:
+                     verbose: bool = False, extensions: tuple = (".py",)) -> List[Dict]:
     """
     Find files that change together even without import relationships.
 
@@ -165,7 +169,7 @@ def analyze_coupling(cwd: str, max_commits: int = 200, min_cooccurrences: int = 
             if current_files:
                 commits.append(list(current_files))
             current_files = set()
-        elif line.strip().endswith(".py"):
+        elif line.strip() and any(line.strip().endswith(e) for e in extensions):
             current_files.add(line.strip())
 
     if current_files:
@@ -189,7 +193,8 @@ def analyze_coupling(cwd: str, max_commits: int = 200, min_cooccurrences: int = 
     return results
 
 
-def analyze_freshness(cwd: str, files: List[str], verbose: bool = False) -> Dict[str, List[Dict]]:
+def analyze_freshness(cwd: str, files: List[str], verbose: bool = False,
+                      extensions: tuple = (".py",)) -> Dict[str, List[Dict]]:
     """
     Categorize files by last modification time.
 
@@ -215,7 +220,7 @@ def analyze_freshness(cwd: str, files: List[str], verbose: bool = False) -> Dict
                 current_ts = int(line.split("::")[1])
             except (IndexError, ValueError):
                 pass
-        elif line.strip() and line.endswith(".py"):
+        elif line.strip() and any(line.strip().endswith(e) for e in extensions):
             f = line.strip()
             if f not in last_modified:
                 last_modified[f] = current_ts
@@ -243,7 +248,8 @@ def analyze_freshness(cwd: str, files: List[str], verbose: bool = False) -> Dict
     return result
 
 
-def analyze_commit_sizes(cwd: str, months: int = 6, verbose: bool = False) -> List[Dict]:
+def analyze_commit_sizes(cwd: str, months: int = 6, verbose: bool = False,
+                         extensions: tuple = (".py",)) -> List[Dict]:
     """
     Analyze commit sizes (lines added/removed) per file.
 
@@ -267,7 +273,7 @@ def analyze_commit_sizes(cwd: str, months: int = 6, verbose: bool = False) -> Li
         parts = line.split('\t')
         if len(parts) == 3:
             added, removed, filepath = parts
-            if filepath.endswith('.py'):
+            if any(filepath.endswith(e) for e in extensions):
                 try:
                     add_count = int(added) if added != '-' else 0
                     rem_count = int(removed) if removed != '-' else 0
@@ -339,7 +345,7 @@ def get_codebase_expertise(files: List[str], cwd: str, verbose: bool = False) ->
 
 
 def analyze_function_churn(cwd: str, files: List[str], months: int = 6,
-                           verbose: bool = False) -> List[Dict]:
+                           verbose: bool = False, extensions: tuple = (".py",)) -> List[Dict]:
     """
     Function-level churn analysis using git diff hunk headers.
 
@@ -360,8 +366,14 @@ def analyze_function_churn(cwd: str, files: List[str], months: int = 6,
         return []
 
     hotfix_keywords = {"fix", "bug", "urgent", "revert", "hotfix", "patch", "emergency"}
-    # Match @@ ... @@ optional_context — extract def/class name
-    hunk_re = re.compile(r'^@@ .+ @@\s+(?:(?:async\s+)?def|class)\s+(\w+)')
+    # Match @@ ... @@ optional_context — extract def/class/function name
+    if any(ext in (".ts", ".tsx", ".js", ".jsx") for ext in extensions):
+        hunk_re = re.compile(
+            r'^@@ .+ @@\s+(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class)'
+            r'|(?:const|let|var)\s+)\s*(\w+)'
+        )
+    else:
+        hunk_re = re.compile(r'^@@ .+ @@\s+(?:(?:async\s+)?def|class)\s+(\w+)')
     diff_file_re = re.compile(r'^diff --git a/.+ b/(.+)$')
 
     stats = defaultdict(lambda: {"commits": set(), "authors": set(), "hotfixes": 0})
@@ -485,7 +497,7 @@ def analyze_coupling_clusters(pairs: List[Dict]) -> List[Dict]:
 
 
 def analyze_velocity(cwd: str, files: List[str], months: int = 6,
-                     verbose: bool = False) -> List[Dict]:
+                     verbose: bool = False, extensions: tuple = (".py",)) -> List[Dict]:
     """
     Compute monthly commit velocity per file and classify trend.
 
@@ -516,7 +528,7 @@ def analyze_velocity(cwd: str, files: List[str], months: int = 6,
             current_ts = int(line)
             continue
         # File line
-        if line.endswith(".py") and line in file_set and current_ts:
+        if any(line.endswith(e) for e in extensions) and line in file_set and current_ts:
             dt = datetime.fromtimestamp(current_ts)
             month_key = (dt.year, dt.month)
             file_months[line][month_key] += 1

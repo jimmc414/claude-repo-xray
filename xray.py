@@ -28,6 +28,7 @@ Examples:
 import argparse
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -246,11 +247,167 @@ Examples:
     return parser
 
 
+def detect_language(target: str) -> str:
+    """Detect the primary language of a project directory.
+
+    Returns 'python', 'typescript', or 'mixed'.
+    """
+    ts_extensions = {".ts", ".tsx", ".mts", ".cts"}
+    py_extensions = {".py"}
+    ignore_dirs = {"node_modules", "dist", "build", ".git", "__pycache__", ".venv", "venv", ".next", ".nuxt"}
+
+    has_ts = False
+    has_py = False
+
+    for dirpath, dirnames, filenames in os.walk(target):
+        # Prune ignored directories in-place
+        dirnames[:] = [d for d in dirnames if d not in ignore_dirs and not d.startswith(".")]
+        for filename in filenames:
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in ts_extensions and not filename.endswith(".d.ts"):
+                has_ts = True
+            elif ext in py_extensions:
+                has_py = True
+            if has_ts and has_py:
+                return "mixed"
+
+    if has_ts:
+        return "typescript"
+    return "python"
+
+
+def _find_ts_scanner(verbose: bool = False) -> Optional[Path]:
+    """Locate the TS scanner binary. Search order:
+    1. XRAY_TS_SCANNER env var (explicit path to index.js)
+    2. Sibling directory ../repo-xray-ts-scanner/dist/index.js
+    3. Legacy in-tree ts-scanner/dist/index.js
+    """
+    # 1. Explicit env var
+    env_path = os.environ.get("XRAY_TS_SCANNER")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+        if verbose:
+            print(f"XRAY_TS_SCANNER={env_path} does not exist", file=sys.stderr)
+
+    # 2. Sibling repo (common local dev layout)
+    sibling = SCRIPT_DIR.parent / "repo-xray-ts-scanner" / "dist" / "index.js"
+    if sibling.exists():
+        return sibling
+
+    # 3. Legacy in-tree path
+    legacy = SCRIPT_DIR / "ts-scanner" / "dist" / "index.js"
+    if legacy.exists():
+        return legacy
+
+    if verbose:
+        print("TS scanner not found. Set XRAY_TS_SCANNER or clone repo-xray-ts-scanner as sibling directory.", file=sys.stderr)
+    return None
+
+
+def invoke_ts_scanner(target: str, verbose: bool = False) -> Optional[Dict[str, Any]]:
+    """Invoke the TypeScript scanner subprocess and return parsed JSON results.
+
+    Uses a temp file for stdout to avoid pipe buffer truncation on large codebases.
+    """
+    import tempfile
+
+    scanner_path = _find_ts_scanner(verbose)
+    if not scanner_path:
+        return None
+
+    cmd = ["node", str(scanner_path), target]
+    if verbose:
+        cmd.append("--verbose")
+
+    try:
+        with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        with open(tmp_path, "w") as stdout_file:
+            proc = subprocess.run(
+                cmd, stdout=stdout_file, stderr=subprocess.PIPE, text=True, timeout=120
+            )
+
+        # Exit code 0 = success, 2 = success with parse warnings
+        if proc.returncode not in (0, 2):
+            if verbose:
+                print(f"TS scanner failed (exit {proc.returncode}): {proc.stderr[:200]}", file=sys.stderr)
+            return None
+
+        if verbose and proc.stderr:
+            # Forward TS scanner verbose output
+            for line in proc.stderr.strip().split("\n"):
+                print(f"  [TS] {line}", file=sys.stderr)
+
+        with open(tmp_path, "r") as f:
+            return json.load(f)
+
+    except FileNotFoundError:
+        if verbose:
+            print("Node.js not found — cannot run TS scanner", file=sys.stderr)
+        return None
+    except subprocess.TimeoutExpired:
+        if verbose:
+            print("TS scanner timed out after 120s", file=sys.stderr)
+        return None
+    except (json.JSONDecodeError, OSError) as e:
+        if verbose:
+            print(f"TS scanner output error: {e}", file=sys.stderr)
+        return None
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _augment_with_git(results: Dict[str, Any], target: str, analyses: List[str], verbose: bool) -> Dict[str, Any]:
+    """Add git analysis to TS scanner results (git signals are language-agnostic)."""
+    from git_analysis import (
+        analyze_risk, analyze_coupling, analyze_freshness,
+        analyze_commit_sizes, get_tracked_files,
+        analyze_function_churn, analyze_coupling_clusters, analyze_velocity,
+        _TS_EXTENSIONS
+    )
+
+    if "git" in analyses:
+        if verbose:
+            print("Running git analysis...", file=sys.stderr)
+        try:
+            lang = results.get("metadata", {}).get("language", "python")
+            exts = _TS_EXTENSIONS if lang == "typescript" else (".py",)
+            tracked_files = get_tracked_files(target, extensions=exts)
+            risk = analyze_risk(target, tracked_files, verbose=verbose, extensions=exts)
+            coupling = analyze_coupling(target, verbose=verbose, extensions=exts)
+            freshness = analyze_freshness(target, tracked_files, verbose=verbose, extensions=exts)
+            function_churn = analyze_function_churn(target, tracked_files, verbose=verbose, extensions=exts)
+            coupling_clusters = analyze_coupling_clusters(coupling)
+            velocity = analyze_velocity(target, tracked_files, verbose=verbose, extensions=exts)
+
+            results["git"] = {
+                "risk": risk,
+                "coupling": coupling,
+                "freshness": freshness,
+                "function_churn": function_churn,
+                "coupling_clusters": coupling_clusters,
+                "velocity": velocity,
+            }
+        except Exception as e:
+            if verbose:
+                print(f"  Git analysis failed: {e}", file=sys.stderr)
+            results["git"] = {"error": str(e)}
+
+    return results
+
+
 def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dict[str, Any]:
     """
     Run the specified analyses on the target directory.
 
     This is the main orchestration function that calls individual analysis modules.
+    Supports Python, TypeScript, and mixed-language projects.
     """
     from file_discovery import discover_python_files, load_ignore_patterns
     from ast_analysis import analyze_codebase
@@ -268,6 +425,47 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
         print(f"Analyzing: {target}", file=sys.stderr)
         print(f"Analyses: {', '.join(analyses)}", file=sys.stderr)
 
+    # Detect project language
+    language = detect_language(target)
+    if verbose:
+        print(f"Detected language: {language}", file=sys.stderr)
+
+    # For pure TypeScript projects, delegate entirely to the TS scanner
+    if language == "typescript":
+        ts_results = invoke_ts_scanner(target, verbose=verbose)
+        if ts_results:
+            # Run git analysis on top of TS scanner results (git is language-agnostic)
+            ts_results = _augment_with_git(ts_results, target, analyses, verbose)
+
+            # Compute investigation targets for TS results
+            try:
+                from investigation_targets import compute_investigation_targets
+                from gap_features import detect_entry_points, extract_data_models
+
+                ast_results_ts = {"files": ts_results.get("structure", {}).get("files", {})}
+
+                gap_results = {}
+                gap_results["entry_points"] = detect_entry_points(ts_results, target)
+
+                gap_results["data_models"] = extract_data_models(ts_results)
+
+                ts_results["investigation_targets"] = compute_investigation_targets(
+                    ast_results=ast_results_ts,
+                    import_results=ts_results.get("imports", {}),
+                    call_results=ts_results.get("calls", {}),
+                    git_results=ts_results.get("git", {}),
+                    gap_results=gap_results,
+                    root_dir=target, verbose=verbose,
+                )
+            except Exception as e:
+                if verbose:
+                    print(f"  Investigation targets failed: {e}", file=sys.stderr)
+
+            return ts_results
+        # Fall through to Python pipeline if TS scanner not available
+        if verbose:
+            print("TS scanner unavailable, falling back to Python pipeline", file=sys.stderr)
+
     # Load ignore patterns
     ignore_dirs, ignore_exts, ignore_files = load_ignore_patterns()
 
@@ -280,6 +478,13 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
         print(f"Found {len(files)} Python files", file=sys.stderr)
 
     if not files:
+        # Last resort: try TS scanner for mixed projects where no .py files found
+        if language == "mixed":
+            ts_results = invoke_ts_scanner(target, verbose=verbose)
+            if ts_results:
+                ts_results = _augment_with_git(ts_results, target, analyses, verbose)
+                return ts_results
+
         return {
             "metadata": {
                 "tool_version": VERSION,

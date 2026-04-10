@@ -105,7 +105,7 @@ def get_github_about(target_dir: str) -> Dict[str, Any]:
             topics = []
             # repositoryTopics is a list of {"name": "topic"} objects
             if "repositoryTopics" in data:
-                for topic in data.get("repositoryTopics", []):
+                for topic in (data.get("repositoryTopics") or []):
                     if isinstance(topic, dict) and "name" in topic:
                         topics.append(topic["name"])
                     elif isinstance(topic, str):
@@ -170,6 +170,39 @@ def normalize_values(values: Dict[str, float]) -> Dict[str, float]:
     return {k: (v - min_val) / (max_val - min_val) for k, v in values.items()}
 
 
+def _short_name(mod_name: str) -> str:
+    """Extract short display name from module identifier.
+    Handles both Python dotted names and TS file paths."""
+    if "/" in mod_name or "\\" in mod_name:
+        return Path(mod_name).stem
+    return mod_name.split(".")[-1] if "." in mod_name else mod_name
+
+
+def _safe_mermaid_id(name: str) -> str:
+    """Create a mermaid-safe node ID from a module name."""
+    return re.sub(r'[^a-zA-Z0-9_]', '_', name)
+
+
+_TS_LAYER_MAP = {
+    "api": "orchestration", "components": "orchestration", "pages": "orchestration", "hooks": "orchestration",
+    "services": "core", "middleware": "core", "state": "core", "models": "core",
+    "types": "foundation", "utils": "foundation", "config": "foundation", "other": "foundation",
+    "tests": None,
+}
+
+
+def _normalize_layers(layers):
+    """Map TS-style layer names to Python-style orchestration/core/foundation."""
+    if any(k in ("foundation", "core", "orchestration") for k in layers):
+        return layers  # Already Python-style
+    normalized = defaultdict(list)
+    for layer_name, modules in layers.items():
+        target = _TS_LAYER_MAP.get(layer_name)
+        if target:
+            normalized[target].extend(modules)
+    return dict(normalized)
+
+
 def get_architectural_pillars(results: Dict[str, Any], n: int = 10) -> List[Dict[str, Any]]:
     """
     Get top N files ranked by architectural importance (import weight).
@@ -200,7 +233,7 @@ def get_architectural_pillars(results: Dict[str, Any], n: int = 10) -> List[Dict
             continue
 
         # Get short name for deduplication
-        short_name = mod_name.split(".")[-1] if "." in mod_name else mod_name
+        short_name = _short_name(mod_name)
         if short_name in seen_names:
             continue
         seen_names.add(short_name)
@@ -485,8 +518,7 @@ def _infer_data_flow(call_data: Dict[str, Any], layers: Dict[str, List]) -> str:
                 mod = mod.get("module", mod.get("name", str(mod)))
             result.add(mod)
             # Also add short name
-            if "." in mod:
-                result.add(mod.split(".")[-1])
+            result.add(_short_name(mod))
         return result
 
     orch_mods = get_layer_modules("orchestration")
@@ -502,11 +534,11 @@ def _infer_data_flow(call_data: Dict[str, Any], layers: Dict[str, List]) -> str:
     found_to_core = 0
 
     for caller, callees in cross_module.items():
-        caller_short = caller.split(".")[-1] if "." in caller else caller
+        caller_short = _short_name(caller)
 
         for callee_info in callees:
             callee = callee_info.get("callee", "") if isinstance(callee_info, dict) else str(callee_info)
-            callee_short = callee.split(".")[-1] if "." in callee else callee
+            callee_short = _short_name(callee)
 
             # Orchestration → Core
             if (caller in orch_mods or caller_short in orch_mods) and \
@@ -551,7 +583,11 @@ def generate_mermaid_diagram(
     Creates subgraphs for ORCHESTRATION, CORE, and FOUNDATION layers.
     Optionally includes data flow annotations based on call analysis.
     """
-    layers = import_data.get("layers", {})
+    raw_tiers = import_data.get("tiers", {})
+    if raw_tiers and any(raw_tiers.get(k) for k in ("foundation", "core", "orchestration")):
+        layers = raw_tiers
+    else:
+        layers = _normalize_layers(import_data.get("layers", {}))
     graph = import_data.get("graph", {})
 
     lines = ["```mermaid", "graph TD"]
@@ -573,8 +609,8 @@ def generate_mermaid_diagram(
             # Shorten module name for display
             if isinstance(mod, dict):
                 mod = mod.get("module", mod.get("name", str(mod)))
-            short_name = mod.split(".")[-1] if "." in mod else mod
-            safe_id = mod.replace(".", "_").replace("-", "_")
+            short_name = _short_name(mod)
+            safe_id = _safe_mermaid_id(mod)
             lines.append(f"        {safe_id}[{short_name}]")
             added_nodes.add(mod)
         lines.append("    end")
@@ -586,7 +622,7 @@ def generate_mermaid_diagram(
     for mod in orch_modules:
         if isinstance(mod, dict):
             mod = mod.get("module", mod.get("name", str(mod)))
-        mod_id = mod.replace(".", "_").replace("-", "_")
+        mod_id = _safe_mermaid_id(mod)
 
         # Get imports for this module from graph
         # Handle both formats: list of imports or dict with 'imports' key
@@ -598,7 +634,7 @@ def generate_mermaid_diagram(
 
         for imp in imports[:3]:  # Limit edges per module
             if imp in added_nodes:
-                imp_id = imp.replace(".", "_").replace("-", "_")
+                imp_id = _safe_mermaid_id(imp)
                 edge = (mod_id, imp_id)
                 if edge not in edges_added:
                     lines.append(f"    {mod_id} --> {imp_id}")
@@ -609,8 +645,8 @@ def generate_mermaid_diagram(
     for pair in circular[:5]:
         if len(pair) >= 2:
             a, b = pair[0], pair[1]
-            a_id = a.replace(".", "_").replace("-", "_")
-            b_id = b.replace(".", "_").replace("-", "_")
+            a_id = _safe_mermaid_id(a)
+            b_id = _safe_mermaid_id(b)
             lines.append(f"    {a_id} <-.-> {b_id}")
 
     lines.append("```")
@@ -924,6 +960,59 @@ def extract_data_models(results: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "domain": domain
                 })
 
+    # TS-specific: interfaces and type aliases as data models
+    result_lang = results.get("metadata", {}).get("language", "python")
+    if result_lang in ("typescript", "mixed"):
+        for filepath, fdata in files.items():
+            for iface in fdata.get("ts_interfaces", []):
+                name = iface.get("name", "")
+                key = f"{filepath}:{name}"
+                if key in seen_models:
+                    continue
+                seen_models.add(key)
+                fields = [{"name": m["name"], "type": m.get("type", ""), "required": not m.get("optional", False)}
+                          for m in iface.get("members", [])]
+                # Determine domain from filepath
+                path_lower = filepath.lower()
+                name_lower = name.lower()
+                if "api" in path_lower or "handler" in path_lower or "controller" in path_lower:
+                    domain = "API"
+                elif "model" in path_lower or "schema" in path_lower or "entity" in path_lower:
+                    domain = "Models"
+                elif "config" in name_lower or "settings" in name_lower or "options" in name_lower:
+                    domain = "Config"
+                elif "request" in name_lower or "response" in name_lower:
+                    domain = "API"
+                else:
+                    parts = filepath.replace("\\", "/").split("/")
+                    domain = parts[-2].title() if len(parts) >= 2 else "Other"
+                models.append({
+                    "name": name,
+                    "type": "interface",
+                    "file": filepath,
+                    "line": iface.get("line", 0),
+                    "fields": fields,
+                    "bases": iface.get("extends", []),
+                    "domain": domain,
+                })
+            for ta in fdata.get("ts_type_aliases", []):
+                if ta.get("type_kind") == "object":
+                    name = ta.get("name", "")
+                    key = f"{filepath}:{name}"
+                    if key in seen_models:
+                        continue
+                    seen_models.add(key)
+                    parts = filepath.replace("\\", "/").split("/")
+                    domain = parts[-2].title() if len(parts) >= 2 else "Other"
+                    models.append({
+                        "name": name,
+                        "type": "type_alias",
+                        "file": filepath,
+                        "line": ta.get("line", 0),
+                        "fields": [],
+                        "domain": domain,
+                    })
+
     # Sort by domain, then by name
     models.sort(key=lambda x: (x["domain"], x["name"]))
 
@@ -934,8 +1023,9 @@ def extract_data_models(results: Dict[str, Any]) -> List[Dict[str, Any]]:
 # Entry Point Detection
 # =============================================================================
 
-ENTRY_POINT_FILES = {"main.py", "cli.py", "__main__.py", "app.py", "run.py", "server.py"}
-ENTRY_POINT_FUNCTIONS = {"main", "cli", "run", "app", "serve"}
+ENTRY_POINT_FILES_PY = {"main.py", "cli.py", "__main__.py", "app.py", "run.py", "server.py"}
+ENTRY_POINT_FILES_TS = {"index.ts", "main.ts", "cli.ts", "app.ts", "run.ts", "server.ts", "index.js", "main.js", "cli.js", "app.js", "server.js"}
+ENTRY_POINT_FUNCTIONS = {"main", "cli", "run", "app", "serve", "bootstrap", "start"}
 
 
 def detect_entry_points(results: Dict[str, Any], target_dir: str = ".") -> List[Dict[str, Any]]:
@@ -943,34 +1033,41 @@ def detect_entry_points(results: Dict[str, Any], target_dir: str = ".") -> List[
     Detect entry points in the codebase.
 
     Looks for:
-    - Files named main.py, cli.py, __main__.py, etc.
-    - Functions named main(), cli(), run()
-    - if __name__ == "__main__" blocks
+    - Files named main.py, cli.py, index.ts, etc.
+    - Functions named main(), cli(), run(), bootstrap()
+    - if __name__ == "__main__" blocks (Python)
     """
     entry_points = []
     seen_files = set()
 
     structure = results.get("structure", {})
     files = structure.get("files", {})
+    lang = results.get("metadata", {}).get("language", "python")
+    is_ts = lang in ("typescript", "mixed")
+
+    entry_point_files = ENTRY_POINT_FILES_TS if is_ts else ENTRY_POINT_FILES_PY
 
     # Get project name from target directory
     project_name = Path(target_dir).name
+
+    def make_usage(filepath, filename):
+        if is_ts:
+            return f"npx tsx {filepath}"
+        if filename == "__main__.py":
+            return f"python -m {project_name}"
+        if filename == "cli.py":
+            return f"python -m {project_name}" if "__main__.py" in [Path(f).name for f in files] else f"python {filepath}"
+        return f"python {filepath}"
 
     for filepath, data in files.items():
         filename = Path(filepath).name
 
         # Check if file is an entry point by name
-        if filename in ENTRY_POINT_FILES:
-            usage = f"python {filepath}"
-            if filename == "__main__.py":
-                usage = f"python -m {project_name}"
-            elif filename == "cli.py":
-                usage = f"python -m {project_name}" if "__main__.py" in [Path(f).name for f in files] else f"python {filepath}"
-
+        if filename in entry_point_files:
             entry_points.append({
                 "entry_point": filename,
                 "file": filepath,
-                "usage": usage,
+                "usage": make_usage(filepath, filename),
                 "type": "file"
             })
             seen_files.add(filepath)
@@ -983,9 +1080,95 @@ def detect_entry_points(results: Dict[str, Any], target_dir: str = ".") -> List[
                 entry_points.append({
                     "entry_point": f"{func_name}()",
                     "file": filepath,
-                    "usage": f"python {filepath}",
+                    "usage": make_usage(filepath, filename),
                     "type": "function"
                 })
+
+    # TS-specific: detect entry points from package.json bin field
+    if is_ts:
+        try:
+            pkg_path = Path(target_dir) / "package.json"
+            if pkg_path.exists():
+                import json
+                pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+                bin_field = pkg.get("bin")
+                if isinstance(bin_field, str):
+                    entry_points.append({
+                        "entry_point": "bin",
+                        "file": bin_field,
+                        "usage": f"npx {pkg.get('name', project_name)}",
+                        "type": "package.json bin"
+                    })
+                elif isinstance(bin_field, dict):
+                    for cmd, cmd_path in bin_field.items():
+                        entry_points.append({
+                            "entry_point": cmd,
+                            "file": cmd_path,
+                            "usage": f"npx {cmd}",
+                            "type": "package.json bin"
+                        })
+                # Also check scripts.start
+                scripts = pkg.get("scripts", {})
+                if "start" in scripts and not any(ep.get("entry_point") == "start" for ep in entry_points):
+                    entry_points.append({
+                        "entry_point": "start",
+                        "file": "package.json",
+                        "usage": f"npm start ({scripts['start']})",
+                        "type": "npm script"
+                    })
+        except Exception:
+            pass
+
+        # Detect CLI framework entry from xray results
+        cli_info = results.get("cli")
+        if cli_info and isinstance(cli_info, dict):
+            framework = cli_info.get("framework", "")
+            if framework and not any(ep.get("type") == "cli_framework" for ep in entry_points):
+                entry_points.append({
+                    "entry_point": f"{framework} CLI",
+                    "file": "",
+                    "usage": f"CLI framework: {framework}",
+                    "type": "cli_framework"
+                })
+
+        # Detect routes as entry points (from TS scanner route analysis)
+        routes_data = results.get("routes", {})
+        if routes_data and isinstance(routes_data, dict):
+            for route in routes_data.get("routes", []):
+                rf = route.get("file", "")
+                if rf and rf not in seen_files:
+                    method = route.get("method", "?")
+                    rpath = route.get("path", "/")
+                    entry_points.append({
+                        "entry_point": f"{method} {rpath}",
+                        "file": rf,
+                        "usage": f"HTTP {method} {rpath}",
+                        "type": "api_route"
+                    })
+                    seen_files.add(rf)
+
+        # Fallback: detect App Router routes directly from file paths
+        if not routes_data:
+            import re
+            structure = results.get("structure", {})
+            files_dict = structure.get("files", {}) if isinstance(structure, dict) else {}
+            for filepath in files_dict:
+                if filepath in seen_files:
+                    continue
+                m = re.search(r'(?:^|/)app/(.*/)?(route\.(?:ts|tsx|js|jsx))$', filepath)
+                if m:
+                    segments = m.group(1) or ""
+                    url_path = "/" + "/".join(
+                        seg for seg in segments.split("/")
+                        if seg and not seg.startswith("(")
+                    )
+                    entry_points.append({
+                        "entry_point": f"* {url_path}",
+                        "file": filepath,
+                        "usage": f"HTTP route {url_path}",
+                        "type": "api_route"
+                    })
+                    seen_files.add(filepath)
 
     return entry_points
 
@@ -1484,6 +1667,16 @@ def generate_logic_maps(results: Dict[str, Any], n: int = 10) -> List[Dict[str, 
 
     Returns list of logic maps for hotspot functions.
     """
+    # If pre-generated by TS scanner, return directly
+    pre = results.get("logic_maps")
+    if pre:
+        return pre[:n]
+
+    # For TS projects without pre-computed logic maps, return empty (don't try ast.parse)
+    lang = results.get("metadata", {}).get("language", "python")
+    if lang in ("typescript", "javascript", "mixed"):
+        return []
+
     logic_maps = []
     seen = set()  # Track to avoid duplicates
 
@@ -1589,7 +1782,11 @@ def get_layer_details(results: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]
     Returns layers with modules and their import metrics.
     """
     imports = results.get("imports", {})
-    layers = imports.get("layers", {})
+    raw_tiers = imports.get("tiers", {})
+    if raw_tiers and any(raw_tiers.get(k) for k in ("foundation", "core", "orchestration")):
+        layers = raw_tiers
+    else:
+        layers = _normalize_layers(imports.get("layers", {}))
     graph = imports.get("graph", {})
 
     detailed_layers = {}
@@ -1637,7 +1834,11 @@ def generate_prose(results: Dict[str, Any], project_name: str = "Project") -> st
     """
     summary = results.get("summary", {})
     imports = results.get("imports", {})
-    layers = imports.get("layers", {})
+    raw_tiers = imports.get("tiers", {})
+    if raw_tiers and any(raw_tiers.get(k) for k in ("foundation", "core", "orchestration")):
+        layers = raw_tiers
+    else:
+        layers = _normalize_layers(imports.get("layers", {}))
 
     # Detect architecture patterns
     patterns = []
@@ -1680,8 +1881,13 @@ def generate_prose(results: Dict[str, Any], project_name: str = "Project") -> st
         model_count = len(model_files)
         pattern_details.append(f"**{model_count} data model definitions**")
 
-    # Check for tests
-    test_files = [f for f in files if "test" in f.lower()]
+    # Check for tests (actual test files, not configs)
+    test_extensions = ('.test.ts', '.test.js', '.test.tsx', '.test.jsx',
+                       '.spec.ts', '.spec.js', '.spec.tsx', '.spec.jsx')
+    test_files = [f for f in files
+                  if (any(f.lower().endswith(ext) for ext in test_extensions)
+                      or '/test_' in f or '/tests/' in f.lower() or '\\test_' in f
+                      or f.lower().endswith('_test.py'))]
     if test_files:
         test_count = len(test_files)
         pattern_details.append(f"**{test_count} test modules** for validation")
@@ -1693,12 +1899,16 @@ def generate_prose(results: Dict[str, Any], project_name: str = "Project") -> st
 
     layer_counts = {name: len(mods) for name, mods in layers.items()}
 
-    prose_parts = [f"**{project_name}** is a Python application"]
+    lang = results.get("metadata", {}).get("language", "python")
+    lang_label = {"typescript": "TypeScript", "mixed": "multi-language"}.get(lang, "Python")
+    file_label = "source" if lang != "python" else "Python"
+
+    prose_parts = [f"**{project_name}** is a {lang_label} application"]
 
     if patterns:
         prose_parts.append(f" with {', '.join(patterns[:3])}")
 
-    prose_parts.append(f". The codebase contains **{total_files}** Python files")
+    prose_parts.append(f". The codebase contains **{total_files}** {file_label} files")
     prose_parts.append(f" with **{total_functions}** functions and **{total_classes}** classes")
 
     if layer_counts:
@@ -1729,6 +1939,25 @@ def extract_state_mutations(results: Dict[str, Any]) -> Dict[str, List[str]]:
     Returns dict mapping function names to list of mutated attributes.
     """
     mutations = {}
+
+    # TS fallback: read pre-computed state_mutations from class data
+    lang = results.get("metadata", {}).get("language", "python")
+    if lang in ("typescript", "javascript", "mixed"):
+        structure = results.get("structure", {})
+        for cls_info in structure.get("classes", []):
+            cls_name = cls_info.get("name", "")
+            filepath = cls_info.get("file", "")
+            basename = Path(filepath).name if filepath else ""
+            for mut in cls_info.get("state_mutations", []):
+                prop = mut.get("property", "")
+                method = mut.get("method", "")
+                key = f"{basename}:{cls_name}.{method}" if method else f"{basename}:{cls_name}"
+                if key not in mutations:
+                    mutations[key] = []
+                mutation_str = f"this.{prop}"
+                if mutation_str not in mutations[key]:
+                    mutations[key].append(mutation_str)
+        return mutations
 
     hotspots = results.get("hotspots", [])[:20]
     structure = results.get("structure", {})
@@ -1781,24 +2010,37 @@ def generate_verify_commands(results: Dict[str, Any], project_name: str = "proje
     Template-based generation based on detected features.
     """
     commands = []
+    lang = results.get("metadata", {}).get("language", "python")
+    is_ts = lang in ("typescript", "mixed")
 
     # Import check
     commands.append(f"# Check import health")
-    commands.append(f"python -c \"import {project_name}; print('OK')\"")
+    if is_ts:
+        commands.append(f"npx tsx -e 'console.log(\"OK\")'")
+    else:
+        safe_name = project_name.replace("-", "_")
+        commands.append(f"python -c \"import {safe_name}; print('OK')\"")
     commands.append("")
 
     # Test command
     tests = results.get("tests", {})
     if tests.get("test_file_count", 0) > 0:
         commands.append("# Run tests")
-        commands.append("pytest tests/ -x -q")
+        commands.append("npm test" if is_ts else "pytest tests/ -x -q")
         commands.append("")
 
-    # CLI help
+    # CLI help — use detected entry point's usage command when available
     entry_points = detect_entry_points(results)
-    if any(ep.get("entry_point") in ("cli.py", "__main__.py") for ep in entry_points):
+    ts_entry_names = {"cli.ts", "index.ts", "cli.js"}
+    py_entry_names = {"cli.py", "__main__.py"}
+    check_names = ts_entry_names if is_ts else py_entry_names
+    cli_ep = next((ep for ep in entry_points if ep.get("entry_point") in check_names), None)
+    if cli_ep:
         commands.append("# CLI help")
-        commands.append(f"python -m {project_name} --help")
+        if is_ts:
+            commands.append(cli_ep.get("usage", "npx tsx src/index.ts --help"))
+        else:
+            commands.append(cli_ep.get("usage", f"python -m {project_name} --help"))
 
     return commands
 
@@ -2371,6 +2613,33 @@ def get_environment_variables(results: Dict[str, Any]) -> List[Dict[str, Any]]:
     structure = results.get("structure", {})
     files = structure.get("files", {})
 
+    # TS fallback: read pre-computed env_vars from per-file data
+    lang = results.get("metadata", {}).get("language", "python")
+    if lang in ("typescript", "javascript", "mixed"):
+        for filepath, file_data in files.items():
+            for ev in file_data.get("env_vars", []):
+                var_name = ev.get("variable", "")
+                key = (var_name, filepath)
+                if key not in seen:
+                    seen.add(key)
+                    env_vars.append({
+                        "variable": var_name,
+                        "default": ev.get("default"),
+                        "fallback_type": ev.get("fallback_type", "none"),
+                        "required": ev.get("required", False),
+                        "file": filepath,
+                        "line": ev.get("line", 0),
+                    })
+        # Deduplicate by variable name, keep first with most info
+        final_vars = {}
+        for ev in env_vars:
+            vn = ev["variable"]
+            if vn not in final_vars:
+                final_vars[vn] = ev
+            elif final_vars[vn]["default"] is None and ev["default"] is not None:
+                final_vars[vn] = ev
+        return sorted(final_vars.values(), key=lambda x: (not x.get("required"), x["variable"]))
+
     # Prioritize config files, then scan all files
     priority_files = []
     other_files = []
@@ -2788,6 +3057,12 @@ DIRECTORY_HAZARDS = {
     ".tox": "Tox environments - skip",
     "htmlcov": "Coverage reports - skip",
     ".coverage": "Coverage data - skip",
+    ".next": "Next.js build output - skip",
+    ".nuxt": "Nuxt.js build output - skip",
+    "coverage": "Test coverage reports - skip",
+    ".nyc_output": "NYC coverage data - skip",
+    ".turbo": "Turborepo cache - skip",
+    ".parcel-cache": "Parcel bundler cache - skip",
 }
 
 
@@ -2863,7 +3138,8 @@ def find_agent_prompts(target_dir: str, results: Dict[str, Any]) -> List[Dict[st
     target_path = Path(target_dir)
 
     # Method 1: Scan for prompt files
-    prompt_dirs = ["prompts", "prompt", "templates", "agents/prompts"]
+    prompt_dirs = ["prompts", "prompt", "templates", "agents/prompts",
+                    ".claude/commands", ".claude/skills", ".claude/agents"]
     for prompt_dir in prompt_dirs:
         prompt_path = target_path / prompt_dir
         if prompt_path.exists():
@@ -2871,10 +3147,25 @@ def find_agent_prompts(target_dir: str, results: Dict[str, Any]) -> List[Dict[st
                 if file.suffix in (".txt", ".prompt", ".md") and file.is_file():
                     try:
                         content = file.read_text(encoding="utf-8")[:2000]
-                        # Extract first paragraph as summary
-                        first_para = content.split("\n\n")[0].strip()
-                        if len(first_para) > 50:
+                        # Try to extract name from YAML frontmatter
+                        agent_name = None
+                        summary_content = content
+                        if content.startswith("---"):
+                            end = content.find("---", 3)
+                            if end != -1:
+                                frontmatter = content[3:end]
+                                summary_content = content[end + 3:].strip()
+                                for fm_line in frontmatter.split("\n"):
+                                    if fm_line.strip().startswith("name:"):
+                                        extracted = fm_line.split(":", 1)[1].strip().strip("'\"")
+                                        if extracted:
+                                            agent_name = extracted.replace("-", " ").replace("_", " ").title()
+                                        break
+                        if not agent_name:
                             agent_name = file.stem.replace("_", " ").title()
+                        # Extract first paragraph as summary (from body, not frontmatter)
+                        first_para = summary_content.split("\n\n")[0].strip()
+                        if len(first_para) > 50:
                             if agent_name not in seen_agents:
                                 seen_agents.add(agent_name)
                                 personas.append({

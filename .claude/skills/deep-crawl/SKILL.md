@@ -60,7 +60,7 @@ evidence standards, and validation — the entire pipeline is identical.
 
 | Tag | Standard | Example |
 |-----|----------|---------|
-| [FACT] | Read specific code, cite file:line | "3x retry with backoff [FACT] (stripe.py:89)" |
+| [FACT] | Read specific code, cite file:line | "3x retry with backoff [FACT] (payments.ts:89 / stripe.py:89)" |
 | [PATTERN] | Observed in >=3 examples, state count | "DI via __init__ [PATTERN: 12/14 services]" |
 | [ABSENCE] | Searched and confirmed non-existence | "No rate limiting [ABSENCE: grep — 0 hits]" |
 
@@ -157,6 +157,17 @@ mkdir -p /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impa
 # Verify xray output exists
 test -f /tmp/xray/xray.json && echo "READY" || echo "Run: python xray.py $DEEP_CRAWL_ROOT --output both --out /tmp/xray"
 
+# Clean stale data from previous crawl
+if [ -f /tmp/deep_crawl/CRAWL_PLAN.md ]; then
+    PREV_HASH=$(head -1 /tmp/deep_crawl/CRAWL_PLAN.md | grep -oP '[a-f0-9]{7,}' || echo "unknown")
+    echo "⚠️ PREVIOUS CRAWL FOUND (hash: $PREV_HASH)"
+    echo "Cleaning stale data for fresh crawl..."
+    rm -rf /tmp/deep_crawl/findings/* /tmp/deep_crawl/batch_status/* /tmp/deep_crawl/sections/*
+    rm -f /tmp/deep_crawl/CRAWL_PLAN.md /tmp/deep_crawl/SYNTHESIS_INPUT.md
+    rm -f /tmp/deep_crawl/DRAFT_ONBOARD.md /tmp/deep_crawl/DEEP_ONBOARD.md
+    rm -f /tmp/deep_crawl/VALIDATION_REPORT.md /tmp/deep_crawl/REFINE_LOG.md
+fi
+
 # Check for existing crawl state (resumability)
 if [ -f /tmp/deep_crawl/CRAWL_PLAN.md ]; then
     echo "PREVIOUS CRAWL FOUND"
@@ -212,17 +223,35 @@ else
     [ "$XRAY_HASH" = "?" ] && echo "WARNING: Xray has no git_commit field. Proceeding without freshness check."
 fi
 
-# Repo characteristics
-FILE_COUNT=$(find "$DEEP_CRAWL_ROOT" -name "*.py" -not -path "*/.git/*" | wc -l)
-TEST_COUNT=$(find "$DEEP_CRAWL_ROOT" -name "test_*.py" -o -name "*_test.py" | wc -l)
-echo "Python files: $FILE_COUNT | Test files: $TEST_COUNT"
+# Repo characteristics — detect language
+PY_COUNT=$(find "$DEEP_CRAWL_ROOT" -name "*.py" -not -path "*/.git/*" -not -path "*/node_modules/*" 2>/dev/null | wc -l)
+TS_COUNT=$(find "$DEEP_CRAWL_ROOT" \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \) -not -path "*/.git/*" -not -path "*/node_modules/*" -not -path "*/dist/*" 2>/dev/null | wc -l)
+
+if [ "$TS_COUNT" -gt "$PY_COUNT" ]; then
+    CODE_LANG="typescript"
+    FILE_COUNT=$TS_COUNT
+    TEST_COUNT=$(find "$DEEP_CRAWL_ROOT" \( -name "*.test.ts" -o -name "*.spec.ts" -o -name "*.test.js" -o -name "*.test.tsx" \) -not -path "*/node_modules/*" 2>/dev/null | wc -l)
+    echo "Language: TypeScript/JavaScript | Files: $FILE_COUNT | Test files: $TEST_COUNT"
+else
+    CODE_LANG="python"
+    FILE_COUNT=$PY_COUNT
+    TEST_COUNT=$(find "$DEEP_CRAWL_ROOT" -name "test_*.py" -o -name "*_test.py" | wc -l)
+    echo "Language: Python | Files: $FILE_COUNT | Test files: $TEST_COUNT"
+fi
+echo "CODE_LANG=$CODE_LANG"
 [ "$FILE_COUNT" -gt 5000 ] && echo "WARNING: Very large repo. Consider focused crawl."
-[ "$TEST_COUNT" -eq 0 ] && echo "WARNING: No test files. Testing section will be thin."
+[ "$TEST_COUNT" -eq 0 ] && echo "WARNING: No test files detected. Testing section may be thin. (Note: in-source testing via import.meta.vitest won't be detected by file naming.)"
 
 # Framework detection
-for fw in fastapi flask django click typer torch tensorflow airflow dagster numpy scipy asyncio aiohttp paramiko boto3 pluggy stevedore; do
-    grep -rl "$fw" --include="*.py" "$DEEP_CRAWL_ROOT" 2>/dev/null | head -1 >/dev/null 2>&1 && echo "Framework: $fw"
-done
+if [ "$CODE_LANG" = "typescript" ]; then
+    for fw in express next nestjs fastify koa hapi commander yargs oclif react vue angular jest vitest mocha prisma typeorm sequelize mongoose graphql trpc zod valibot; do
+        grep -rl "\"$fw\"" --include="*.json" "$DEEP_CRAWL_ROOT" 2>/dev/null | grep -v node_modules | head -1 >/dev/null 2>&1 && echo "Framework: $fw"
+    done
+else
+    for fw in fastapi flask django click typer torch tensorflow airflow dagster numpy scipy asyncio aiohttp paramiko boto3 pluggy stevedore; do
+        grep -rl "$fw" --include="*.py" "$DEEP_CRAWL_ROOT" 2>/dev/null | head -1 >/dev/null 2>&1 && echo "Framework: $fw"
+    done
+fi
 ```
 
 **Halt condition:** If xray hash doesn't match HEAD, stop and tell user to re-run xray. Other warnings are logged to `/tmp/deep_crawl/PREFLIGHT.md` for context during investigation planning.
@@ -238,29 +267,7 @@ Save all pre-flight output to `/tmp/deep_crawl/PREFLIGHT.md` for Phase 1 consump
 1. Read `/tmp/xray/xray.md` for orientation
 2. Read `investigation_targets` from `/tmp/xray/xray.json`
 3. Read `git.function_churn` and `git.velocity` from `/tmp/xray/xray.json`. Files with accelerating velocity or high function-level churn should be prioritized for investigation.
-2b. Read `investigation_targets.import_time_side_effects` from `/tmp/xray/xray.json`.
-    If non-empty, add a P4 cross-cutting task: "Investigate import-time side effects —
-    verify each flagged call, determine if intentional or accidental, document consequences."
-    These are high-value gotcha candidates.
-2c. Read `security_concerns` from `/tmp/xray/xray.json`. This is a dict keyed by
-    filepath, where each value is a list of concern objects with a `category` field.
-    Iterate all values: if any concern has `category == "unsafe_deserialization"`,
-    add a P4 cross-cutting task:
-    "Investigate unsafe deserialization — trace data source for each pickle.loads/
-    yaml.load call. Determine if untrusted data can reach these calls."
-    Example path: `security_concerns["app/serializer.py"][0].category`
 4. Detect all applicable domain facets using indicators from `.claude/skills/deep-crawl/configs/domain_profiles.json`. A repo can match multiple facets (e.g., a Django app with Celery workers and a CLI gets `web_api` + `async_service` + `cli_tool`). Union their `additional_investigation` tasks into the crawl plan. If no facet matches, use `library` as default. Read `/tmp/deep_crawl/PREFLIGHT.md` for framework detection results to guide facet matching.
-4b. If `routes.routes` exists and is non-empty in `/tmp/xray/xray.json`, automatically
-    activate the `web_api` facet (even if no other web_api indicators matched). The
-    presence of detected HTTP routes is a deterministic signal that supersedes heuristic
-    framework detection.
-4c. When `routes.routes` exists, seed P1 trace tasks from routes instead of
-    generic entry_to_side_effect_paths. Group routes by handler file, then select
-    one representative route per file (prefer routes with side_effects > 0). For each
-    selected route, create a P1 trace task:
-      "Trace {METHOD} {path} → {handler} (side effects: {list})"
-    This produces richer traces than generic entry point tracing because each trace
-    starts with HTTP method context.
 
 For each matched facet:
 1. Add its `additional_investigation` tasks to the crawl plan at P4 priority (cross-cutting concerns)
@@ -271,11 +278,7 @@ For each matched facet:
 If facet investigation tasks push any batch beyond its max agent limit, split into sub-batches.
 Use the facet's `primary_entity` to determine the adversarial simulation scenario in Phase 5.
 If multiple facets match, the adversarial simulation should use the primary facet's entity.
-5. Read `blast_radius` from `/tmp/xray/xray.json`. Use `blast_radius.files` (filtered to
-   risk "critical" or "high") to seed P7 change-impact tasks instead of hub_modules alone.
-   blast_radius combines import AND call graph traversal — it is strictly richer than
-   hub_modules. Order P7 tasks by affected_count descending.
-6. Produce a prioritized crawl plan using the template at `.claude/skills/deep-crawl/templates/CRAWL_PLAN.md.template`
+4. Produce a prioritized crawl plan using the template at `.claude/skills/deep-crawl/templates/CRAWL_PLAN.md.template`
 5. Save to `/tmp/deep_crawl/CRAWL_PLAN.md`
 6. **Module coverage pre-check (mandatory).** After saving the plan, verify P2+P3 task count meets the coverage target:
 
@@ -298,6 +301,12 @@ If P23_COUNT < TARGET:
    d. **Hop promotion:** Any module that appears as an intermediate hop in a P1 trace task description AND does not already have a P2/P3 task gets added as a P3 task (these are modules the traces pass through — they deserve deep-reads)
    e. Update the Progress table's P3 total
    f. Log: `Coverage pre-check: {P23_COUNT} tasks → {new_count} (added {added} modules, target {TARGET})`
+   g. **Barrel file analysis (TypeScript only):** If CODE_LANG is typescript, identify `index.ts` files that are mostly re-exports (high export count, low logic). These are architectural chokepoints — if they create circular imports, many modules break. Add the top 3 barrel files as P3 tasks if not already present.
+
+7. **TypeScript-specific prioritization signals:** If CODE_LANG is typescript:
+   - Modules with high `as any` / `@ts-ignore` density should be prioritized (type safety gaps indicate under-documented behavior)
+   - Files listed in `ts_specific.module_augmentations` are coupling risks — add as P3 tasks
+   - Check for `ts_specific.any_density` in xray.json — if `explicit_any + as_any_assertions > 20`, add a P4 cross-cutting task: "Audit type safety escape hatches and document which are intentional vs technical debt"
 
 **Prioritization logic (by information density):**
 
@@ -437,7 +446,7 @@ You are investigating [CODEBASE] at [ROOT_PATH] for an onboarding document.
 [Full text of the relevant protocol (A, B, C, or D) copied verbatim from below]
 
 ## Evidence Standards
-- [FACT]: Read specific code, cite file:line. Example: "retries 3x (stripe.py:89)"
+- [FACT]: Read specific code, cite file:line. Example: "retries 3x (payments.ts:89)" or "retries 3x (stripe.py:89)"
 - [PATTERN]: Observed in >=3 examples, state count. Example: "DI via __init__ (12/14 services)"
 - [ABSENCE]: Searched and confirmed non-existence. Example: "No rate limiting (grep — 0 hits)"
 - Gotchas must be [FACT] claims with file:line.
@@ -532,11 +541,16 @@ Sub-agents receive these protocol instructions verbatim:
 6. Note branching (error paths, conditional logic) at each hop
 7. Note data transformations between hops
 8. Note gotchas discovered during tracing
-9. If this trace starts from an HTTP route (method + path provided):
-   - Note the HTTP method and path in the trace header
-   - Look for middleware/dependency injection before the handler (auth, validation, rate limiting)
-   - Note request body parsing and response serialization
-   - Tag side effects with their HTTP context: "POST creates resource" vs "GET reads"
+
+**TypeScript-specific trace guidance:**
+
+When tracing through TypeScript/JavaScript codebases:
+- **Async boundaries:** Note where sync→async transitions occur (missing `await`, `.then()` chains). Flag any function that starts a Promise chain without error handling.
+- **Middleware chains:** In Express/Fastify/Koa, trace through the middleware stack in order. Note where `next()` is called, where it's skipped (early return), and where error middleware breaks the chain.
+- **DI resolution:** In NestJS/Angular, trace from `@Injectable()` declaration through `@Inject()` sites. Note lifecycle hooks (`onModuleInit`, `onApplicationBootstrap`) that run at startup.
+- **Barrel file hops:** When a trace passes through an `index.ts` that only re-exports, note this but don't count it as a meaningful hop. The real target is the source module.
+- **Type narrowing at branches:** Note where `if (x instanceof Foo)` or discriminated union checks (`if (x.type === 'bar')`) gate code paths — these are the real branching points.
+- **Event-driven flows:** When the trace reaches `emit()`, `on()`, or `subscribe()`, follow the event to ALL listeners. Note if multiple handlers exist for the same event.
 ```
 
 #### Protocol B: Module Deep Read
@@ -554,45 +568,27 @@ Sub-agents receive these protocol instructions verbatim:
      - Side effects
      - Error behavior
 2b. Check for corresponding test files:
-    - Look for tests/test_{module_name}.py, tests/unit/**/test_{module_name}.py,
+    - Python: Look for tests/test_{module_name}.py, tests/unit/**/test_{module_name}.py,
       tests/{module_name}_test.py, and any test file importing from this module
-    - If found, scan test function names and docstrings
+    - TypeScript/JavaScript: Look for {module_name}.test.ts, {module_name}.spec.ts,
+      __tests__/{module_name}.ts, and in-source tests via `import.meta.vitest` blocks
+      within the module itself (colocated testing pattern)
+    - If found, scan test function names and docstrings/descriptions
     - Note which public functions have test coverage and which don't
     - Add to findings:
       Test coverage: {tested_count}/{total_public} public functions tested.
       Tested: {list}. Untested: {list}.
       Test file: {path} ({N} test functions)
-2c. Check if this module appears in `investigation_targets.import_time_side_effects`
-    from `/tmp/xray/xray.json`. If it does, investigate each flagged call:
-    - Is this intentional (e.g., module-level singleton, registry pattern)?
-    - What happens if the side effect fails at import time?
-    - What modules import this one (from imports.graph) and are affected?
-    Note in findings: "⚠ Import-time: {call} at line {N} — {consequence}"
-2d. For classes with magic methods beyond __init__, check xray.json. Magic methods
-    have `is_dunder: true` in the method info at:
-    `structure.<filepath>.classes[].methods[]` — look for methods where `is_dunder`
-    is true and the name is NOT `__init__` or `__repr__`. Document each:
-    - What the magic method does (read the actual implementation)
-    - Behavioral implications: __getattr__ = hidden attribute interception,
-      __eq__ without __hash__ = unhashable, __call__ = instances are callable,
-      __enter__/__exit__ = context manager protocol
-    - Whether consumers rely on these behaviors
-3. For each public function, note decorator arguments that affect behavior.
-   Decorator args are in xray.json at `structure.<filepath>.functions[].decorators[]`
-   and `structure.<filepath>.classes[].methods[].decorators[]` — each decorator has
-   `name`, `args` (positional list), and `kwargs` (key-value dict). Look for:
-   - Retry decorators: max_attempts, backoff strategy, which exceptions are retried
-   - Cache decorators: TTL, cache key strategy, invalidation
-   - Auth decorators: required role, permission level
-   - Rate limit decorators: limits, window, key function
-   These are behavioral contracts — downstream agents need to know them.
-3b. Check `resource_leaks` in `/tmp/xray/xray.json` — this is a dict keyed by
-    filepath (e.g., `resource_leaks["app/utils.py"]`), where each value is a list
-    of leak objects with `line`, `call`, and context. If this module's filepath
-    has entries, verify each: is there a close() call elsewhere? Is it inside a
-    finally block? Is it a real leak or does the caller manage the lifecycle?
-    Note confirmed leaks as [MEDIUM] gotchas.
-4. Record any gotchas
+3. Record any gotchas
+
+**TypeScript-specific module investigation:**
+
+When deep-reading a TypeScript module, also document:
+- **Exported types:** List all `export interface`, `export type`, `export enum` — these are the module's contract. Note which are used externally (via xray import graph).
+- **Decorator metadata:** For classes with decorators (`@Entity`, `@Injectable`, `@Controller`), extract the decorator arguments — they encode runtime configuration that isn't visible from the type signature alone.
+- **Generic constraints:** Note generic type parameters with constraints (`T extends SomeBase`) — these restrict what callers can pass and are a common source of type errors when changed.
+- **`any` escape hatches:** Count `as any`, `@ts-ignore`, `@ts-expect-error` in the module. Each is a place where the type system has been deliberately bypassed — potential bug hiding spots.
+- **Re-export surface:** If the module is a barrel file (mostly re-exports), note what it re-exports and whether it adds any transformation.
 ```
 
 #### Protocol C: Cross-Cutting Concern
@@ -606,82 +602,121 @@ Sub-agents receive these protocol instructions verbatim:
 6. Write to /tmp/deep_crawl/findings/cross_cutting/{concern_name}.md
 ```
 
-**Grep patterns for common concerns:**
+**Grep patterns for common concerns (language-adaptive):**
+
+Use `$CODE_LANG` from Phase 0b pre-flight to select patterns. All grep commands should target `$DEEP_CRAWL_ROOT`.
+
+**Python patterns** (use when `CODE_LANG=python`):
 
 ```bash
-# Error handling
-grep -rn "except " --include="*.py" | head -40
-grep -rn "except.*pass" --include="*.py"  # swallowed exceptions — high value
-grep -rn "retry\|backoff\|fallback" --include="*.py"
+grep -rn "except " --include="*.py" "$DEEP_CRAWL_ROOT" | head -40
+grep -rn "except.*pass" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "retry\|backoff\|fallback" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "os.getenv\|os.environ" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "config\[" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "^[a-z_].*= " --include="*.py" "$DEEP_CRAWL_ROOT" | grep -v "def \|class \|#\|import " | head -30
+grep -rn "_instance\|_cache\|_registry\|_pool" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "global " --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "asyncio\.run\|loop\.run_until_complete" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "async def " --include="*.py" "$DEEP_CRAWL_ROOT" | wc -l
+grep -rn "pickle\.loads\|pickle\.load\|yaml\.load\|marshal\.loads" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "class.*Exception\|class.*Error" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "except.*pass\|except:$" --include="*.py" "$DEEP_CRAWL_ROOT"
+grep -rn "raise " --include="*.py" "$DEEP_CRAWL_ROOT" | head -40
+```
 
-# Configuration
-grep -rn "os.getenv\|os.environ" --include="*.py"
-grep -rn "config\[" --include="*.py"
+**TypeScript/JavaScript patterns** (use when `CODE_LANG=typescript`):
 
-# Shared mutable state
-grep -rn "^[a-z_].*= " --include="*.py" | grep -v "def \|class \|#\|import " | head -30
-grep -rn "_instance\|_cache\|_registry\|_pool" --include="*.py"
-grep -rn "global " --include="*.py"
+```bash
+grep -rn "catch" --include="*.ts" --include="*.tsx" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -40
+grep -rn "catch\s*{}" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules  # empty catch — high value
+grep -rn "retry\|backoff\|fallback" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules
+grep -rn "process\.env" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -30
+grep -rn "config\.\|getConfig\|loadConfig" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+grep -rn "^let \|^var " --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -30
+grep -rn "cache\|singleton\|_instance\|getInstance" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+grep -rn "async function\|async (" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | wc -l
+grep -rn "new Promise\|Promise\.all" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+grep -rn "eval(\|new Function(" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules
+grep -rn "JSON\.parse" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+grep -rn "as any\|@ts-ignore\|@ts-expect-error" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+grep -rn "extends Error" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules
+grep -rn "throw " --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -40
+grep -rn "process\.exit" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules
+grep -rn "readFile\|readdir\|createReadStream" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -20
+```
 
-# Async/sync boundaries
-grep -rn "asyncio\.run\|loop\.run_until_complete\|run_coroutine_threadsafe" --include="*.py"
-grep -rn "async def " --include="*.py" | wc -l
+**TypeScript deep patterns** (run after the basic patterns above when time allows):
 
-# Unsafe deserialization
-grep -rn "pickle\.loads\|pickle\.load\|yaml\.load\|marshal\.loads" --include="*.py"
+```bash
+# Promise error handling gaps
+grep -rn "\.then(" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | grep -v "\.catch" | head -20  # .then() without .catch()
+grep -rn "Promise\.all\b" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules  # bulk operations — check error handling
+grep -rn "new Promise" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -15  # manual Promise construction — often buggy
 
-# Exception taxonomy (for exception_taxonomy investigations)
-grep -rn "class.*Exception\|class.*Error" --include="*.py"  # custom exception classes
-grep -rn "except.*pass\|except:$" --include="*.py"  # silent failures
-grep -rn "except.*:\s*$\|except Exception" --include="*.py" | head -30  # bare/broad catches
-grep -rn "raise " --include="*.py" | head -40  # raise sites
+# Barrel file analysis (circular import risk)
+for f in $(find "$DEEP_CRAWL_ROOT" -name "index.ts" -not -path "*/node_modules/*" 2>/dev/null); do
+  EXPORTS=$(grep -c "^export" "$f" 2>/dev/null || echo 0)
+  LOGIC=$(grep -cvE "^export|^import|^$|^//" "$f" 2>/dev/null || echo 0)
+  if [ "$EXPORTS" -gt 3 ] && [ "$LOGIC" -lt 5 ]; then echo "BARREL: $f ($EXPORTS re-exports)"; fi
+done
+
+# Type safety escape hatches (aggregate)
+echo "=== Type safety signals ==="
+echo "as any: $(grep -rn 'as any' --include='*.ts' "$DEEP_CRAWL_ROOT" | grep -v node_modules | wc -l)"
+echo "@ts-ignore: $(grep -rn '@ts-ignore' --include='*.ts' "$DEEP_CRAWL_ROOT" | grep -v node_modules | wc -l)"
+echo "@ts-expect-error: $(grep -rn '@ts-expect-error' --include='*.ts' "$DEEP_CRAWL_ROOT" | grep -v node_modules | wc -l)"
+echo "non-null assertion (!.): $(grep -rn '\!\.' --include='*.ts' "$DEEP_CRAWL_ROOT" | grep -v node_modules | wc -l)"
+
+# AbortController / cancellation patterns
+grep -rn "AbortController\|AbortSignal\|signal:" --include="*.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules | head -10
+
+# Module augmentation (global type patching — coupling risk)
+grep -rn "declare module\|declare global" --include="*.ts" --include="*.d.ts" "$DEEP_CRAWL_ROOT" | grep -v node_modules
+
+# Workspace/monorepo structure
+ls "$DEEP_CRAWL_ROOT"/packages/*/package.json 2>/dev/null && echo "MONOREPO: packages/* detected"
+ls "$DEEP_CRAWL_ROOT"/apps/*/package.json 2>/dev/null && echo "MONOREPO: apps/* detected"
+cat "$DEEP_CRAWL_ROOT/package.json" 2>/dev/null | grep -A5 '"workspaces"' | head -8
 ```
 
 **Exception taxonomy investigations (Protocol C):**
 
 When the crawl plan includes an exception taxonomy task, Protocol C agents should:
-1. Find all classes inheriting from Exception or BaseException
-2. Build inheritance tree (which exceptions derive from which)
-3. For each custom exception: where it's raised, where it's caught, whether
+1. Find all classes inheriting from Exception/BaseException (Python) or Error (TypeScript)
+2. Build inheritance tree (which exceptions/errors derive from which)
+3. For each custom exception/error: where it's raised/thrown, where it's caught, whether
    it crosses module boundaries
-4. Identify uncaught exception paths (raise without corresponding catch in callers)
-5. Identify silent failure patterns: `except: pass`, `except Exception: log`,
-   bare except — these are high-value gotcha candidates
+4. Identify uncaught exception paths (raise/throw without corresponding catch in callers)
+5. Identify silent failure patterns: `except: pass` (Python), empty `catch {}` (TypeScript),
+   log-and-swallow — these are high-value gotcha candidates
 6. Write to findings/cross_cutting/exception_taxonomy.md
-
-**Unsafe deserialization investigations (Protocol C):**
-
-When the crawl plan includes an unsafe deserialization task, Protocol C agents should:
-1. Find all `pickle.loads`, `pickle.load`, `yaml.load`, `marshal.loads` calls
-2. For each call, read the full function containing it
-3. Trace the data parameter backward — where does the serialized data originate?
-4. Classify: user input (CRITICAL), file from disk (HIGH), internal wire format (MEDIUM)
-5. Check for SafeLoader usage with yaml.load — `yaml.safe_load` is safe, `yaml.load` is not
-6. Note in findings with severity based on data source classification
-7. Write to findings/cross_cutting/unsafe_deserialization.md
 
 #### Protocol D: Convention Documentation
 
 ```
 1. Read examples of the pattern from xray pillar/hotspot list — at least max(5, pillar_count / 3) examples, covering different architectural layers
-1b. When reading examples, note decorator PATTERNS including arguments.
-    "All endpoints use @require_auth(role=...)" is a more useful convention
-    than "@require_auth". The argument pattern is part of the convention.
 2. Identify the common structure
 3. State the convention as a directive ("always X", "never Y")
 4. Read each flagged deviation
 5. Assess: intentional variation or oversight?
 6. Write to /tmp/deep_crawl/findings/conventions/patterns.md
+
+**TypeScript-specific conventions to document:**
+
+When documenting conventions for TypeScript codebases, check for these patterns:
+- **Import organization:** Are imports grouped (external → internal → types)? Are path aliases used consistently? Are barrel files the standard import target?
+- **Null safety style:** Optional chaining (`?.`) vs explicit null checks? Non-null assertions (`!`) — banned or accepted?
+- **Error class hierarchy:** One base `AppError` or ad-hoc `throw new Error()`? Error codes or just messages?
+- **Async patterns:** Always `async/await` or mixed with `.then()`? Raw Promises or wrapped (e.g., `Result<T, E>` monads)?
+- **Type annotation style:** Return types always explicit or inferred? `interface` vs `type` preference? `unknown` vs `any` for untyped data?
+- **Component patterns (if React/Vue):** Function components vs class? Props interface naming (`FooProps`)? Hook extraction conventions?
+- **Decorator usage (if NestJS/Angular):** Custom decorator conventions? Metadata patterns?
 ```
 
 #### Protocol E: Reverse Dependency & Change Impact
 
 ```
-0. Read `blast_radius.files` from `/tmp/xray/xray.json` for this hub module.
-   Note the pre-computed affected_count, risk level, max_hops, and undertested_dependents.
-   This is your starting landscape — verify it, don't recompute it.
-   If undertested_dependents is non-empty, flag in findings: these modules depend
-   on the hub but have never been co-modified in git — potential test gap.
 1. Read xray reverse dependency data for the assigned hub module cluster:
    - .imports.graph[module]["imported_by"] — list of importer modules
    - .imports.distances.hub_modules — sorted by connection count
@@ -819,15 +854,6 @@ fi
 
 If state_diagrams.md has content, assembly agent S1 includes it at the top of the Critical Paths section.
 
-**S1 API Endpoint Index:** If route trace findings exist (traces starting with HTTP methods),
-S1 adds an `### API Endpoint Index` subsection at the end of Critical Paths. Format as a table:
-
-| Method | Path | Handler | Side Effects | Auth |
-|--------|------|---------|-------------|------|
-
-Populate from trace findings. This satisfies the web_api domain profile's
-"API endpoint index" `additional_output_section` requirement.
-
 #### Step 1b: Temporarily remove CLAUDE.md compression contamination
 
 Sub-agents spawn with fresh context and read CLAUDE.md files automatically. If the project's CLAUDE.md references "compressed intelligence" or similar framing, sub-agents absorb "my job is compression" before reading their task prompt. Temporarily rename CLAUDE.md files to prevent this:
@@ -940,70 +966,14 @@ Read /tmp/deep_crawl/sections/_skeleton.md for your section's prescribed ### hea
 - For other sections: no skeleton constraint — derive structure from content.
 - You MAY add additional ### subsections beyond the skeleton's prescriptions.
 
-## Section Hierarchy Rule — CRITICAL (violations are auto-corrected and logged)
-
-**YOUR OUTPUT HEADERS MUST FOLLOW THIS EXACT PATTERN:**
-
-| Level | Prefix | Usage | Example |
-|-------|--------|-------|---------|
-| `## `  | Two hashes | Section title (exactly ONE per assigned section) | `## Error Handling Strategy` |
-| `### ` | Three hashes | Subsections within your section | `### Retry Patterns` |
-| `#### ` | Four hashes | Sub-subsections | `#### Exponential Backoff` |
-
-**NEVER USE `# ` (single hash).** The `# ` level is reserved for the document title only. It does not appear in section files.
-
-**WRONG:**
-
-    # Error Handling Strategy        <-- WRONG: # is document title only
-    ## Retry Patterns                <-- WRONG: ## is for section titles only
-    ### Exponential Backoff
-
-**CORRECT:**
-
-    ## Error Handling Strategy       <-- section title: exactly one ## per section
-    ### Retry Patterns               <-- subsection: ###
-    #### Exponential Backoff         <-- sub-subsection: ####
-
-Header levels are mechanically validated and normalized after your output. If any `# ` header is found or `## ` count exceeds the number of template sections assigned to you, it will be logged as a violation.
+## Section Hierarchy Rule
+Your output MUST use exactly one `## ` header per template section assigned to you (e.g., `## Error Handling Strategy`, `## Module Behavioral Index`). All subdivisions within a section MUST use `### ` or deeper. Never promote subsection content to `## ` level — a flat document with many `## ` headers destroys navigability. If your template section has subsections, they are `### `. If those subsections have further divisions, they are `#### `.
 
 ## S2 Historical Risk Annotation
 If you are S2 (Module Behavioral Index): for each module ### being assembled, check if it appears in `git.risk`, `git.function_churn`, or `git.velocity` from `/tmp/xray/xray.json`. If it does, append a brief **Historical Risk** note at the end of that module's subsection with: risk score, most-volatile functions, and trend direction. Format: `> **Git risk:** 0.88 — volatile functions: load_config (8 commits, 2 hotfixes). Trend: stable.`
 
-## S2 Import-Time Side Effect Annotation
-If you are S2: for each module ### being assembled, check if it appears in
-`investigation_targets.import_time_side_effects` from `/tmp/xray/xray.json`.
-If it does, prepend a warning: `> ⚠ **Import-time side effect:** {call} at
-line {N} — executes on import. {consequence from findings}.`
-
 ## S3b Depth Directive
 If you are S3b (Error Handling, Shared State): the Error Handling Strategy section must document the dominant error pattern, per-subsystem deviations, retry strategies, exception hierarchies, and recovery paths. Target: >= 3,500 words for Error Handling alone. Read module findings for error/exception/retry patterns in addition to cross-cutting findings — every module's error handling deviations contribute to this section. If `findings/cross_cutting/exception_taxonomy.md` exists, include it as a subsection under Error Handling: inheritance tree of custom exceptions, raise/catch mapping, uncaught paths, and silent failure patterns (`except: pass`, bare except, log-and-swallow). Silent failures are high-value gotcha candidates — flag them in your gotchas output file.
-
-## S3a Magic Methods Directive
-If you are S3a (Key Interfaces): when documenting class interfaces, include magic methods
-that affect API behavior. Group by behavior type:
-- Attribute access: __getattr__, __setattr__, __getattribute__, __delattr__
-- Container: __getitem__, __setitem__, __len__, __contains__, __iter__
-- Callable: __call__
-- Context: __enter__, __exit__
-- Comparison: __eq__, __hash__, __lt__, __le__
-- Representation: __str__, __repr__, __format__
-Only document magic methods that investigation findings confirmed as behaviorally
-significant — don't list __init__ or trivial __repr__.
-
-## S4 Resource Leak Convention
-If you are S4 (Conventions): if investigation findings note resource leak deviations
-(open() without with), document as convention: "File I/O uses context managers
-(`with open(...)`) — {N} deviations found at {file:line list}."
-
-## S4 Decorator Configuration Surface
-If you are S4 (Configuration Surface): decorator arguments containing configuration
-values are part of the Configuration Surface. Extract from investigation findings:
-- Retry configuration: max_attempts, backoff multipliers
-- Cache TTLs and strategies
-- Rate limits and windows
-- Auth role requirements
-Document alongside env vars and config files. Format:
-"Retry: 3 attempts with exponential backoff (@retry in {module}, {module})"
 
 ## Rules
 - INCLUDE EVERY FINDING. The output context window is 1M tokens. Your section will consume less than 5% of available context. There is no reason to drop, summarize, or condense any finding.
@@ -1058,46 +1028,26 @@ S5's prompt follows the same template as S1-S4, with these additions for the **G
 
 Organize gotchas into domain-cluster ### subsections derived from the investigation's subsystem structure (e.g., "Agent System", "Data Models", "Execution Engine", "LLM Integration", "Configuration"). Derive cluster names from the module findings directory — group `findings/modules/*.md` by top-level package directory. Within each cluster, order entries by severity (critical first). Prefix each entry with severity tag: `[CRITICAL]`, `[HIGH]`, or `[MEDIUM]`. Target: one ### per 5-15 gotchas. Never put more than 15 gotchas under a single ### heading.
 
-S5's additional gotcha rules from xray signals:
-
-- **Import-time side effects** from investigation findings are [HIGH] severity gotchas.
-  Format: "[HIGH] Importing {module} executes {call} at module load ({file}:{line}).
-  {consequence}. Affected importers: {list from imports.graph}."
-
-- **Unsafe deserialization** findings are [CRITICAL] severity when data source is
-  user-controlled, [HIGH] when from external files, [MEDIUM] when internal.
-  Format: "[CRITICAL] pickle.loads at {file}:{line} — deserializes {data_source}.
-  Arbitrary code execution risk if {data_source} is attacker-controlled."
-
-- **Dangerous magic method combinations** are gotchas:
-  - __eq__ without __hash__ → class instances cannot be used in sets or as dict keys
-  - __getattr__ that catches all attributes → can mask real AttributeError bugs
-  - __del__ with side effects → unpredictable cleanup timing
-  - __bool__ returning non-obvious values → conditional checks behave unexpectedly
-
 S5's template sections remain: Gotchas, Hazards — Do Not Read, Extension Points, and Reading Order from DEEP_ONBOARD.md.template.
 
-S6's prompt for **Data Contracts**: extract all Pydantic models, dataclasses, TypedDicts, and NamedTuples from module findings + xray `investigation_targets.domain_entities`. Format as table with Model, File, Type, Key Fields, Serialization, Gotcha.
+**TypeScript-specific gotcha categories** (ensure these are checked during gotcha clustering):
+
+When organizing gotchas for TypeScript projects, ensure these categories are represented if evidence exists:
+- **Type safety escapes:** `as any` casts, `@ts-ignore` directives, non-null assertions (`!`) hiding potential null access
+- **Async error handling:** Missing `.catch()` on Promise chains, unhandled rejection paths, `try/catch` not wrapping `await`
+- **Circular imports:** Barrel files (`index.ts`) creating import cycles, runtime `undefined` from circular dependencies
+- **Build/runtime divergence:** Type-only imports stripped at build time, `const enum` inlining differences, path alias resolution mismatches between IDE and runtime
+- **State management:** Module-level `let` used as cache without invalidation, singleton services with mutable state, React `useState` without cleanup
+- **External boundary unsafety:** `JSON.parse()` returning `any`, API response types asserted but not validated at runtime, `process.env` values used without undefined checks
+
+S6's prompt for **Data Contracts**:
+- For Python: extract all Pydantic models, dataclasses, TypedDicts, and NamedTuples from module findings + xray `investigation_targets.domain_entities`.
+- For TypeScript: extract all interfaces, type aliases (especially discriminated unions), Zod schemas, class-validator decorated classes, and enums. Also check xray `ts_interfaces` and `ts_type_aliases` data.
+- Format as table with Model/Interface, File, Type (interface/class/enum/schema), Key Fields, Validation (Zod/class-validator/none), Gotcha.
 
 S6's prompt for **Change Impact Index**: organize impact findings by hub module cluster. Each cluster gets a table showing importers, high-impact functions, signature-change consequences, behavior-change consequences, safe vs dangerous changes. Also read `git.coupling_clusters` from `/tmp/xray/xray.json`. For each cluster, add a **Hidden Coupling** row to the relevant hub module's impact table. Format: `When modifying {file_a}, also verify {file_b} — {count} historical co-changes with no import relationship.`
 
-For each hub module cluster in impact findings, cross-reference with
-`blast_radius.files` from `/tmp/xray/xray.json`. Add a **Blast Radius** row to
-each hub module's table:
-- Affected modules: {affected_count} ({risk} risk)
-- Max propagation: {max_hops} hops
-- Undertested: {list of undertested_dependents, or "none"}
-
-If blast_radius shows a module at "critical" risk that Protocol E findings didn't
-cover, note it as a gap: "blast_radius flags {module} as critical ({N} affected)
-but investigation did not reach it."
-
 S6's prompt for **Change Playbooks**: organize playbook findings into step-by-step checklists with validation commands and common mistakes.
-
-If HTTP route traces exist in findings, include an "Add New API Endpoint" playbook.
-Reference the pattern from an existing route: "Follow the pattern of {METHOD} {path}
-in {handler_file}:{line}." Include middleware/auth setup, request validation, handler
-implementation, response serialization, and test creation steps.
 
 S6's prompt must include this **Playbook Quality Floor (mechanically checked after you finish)**:
 ```
@@ -1201,25 +1151,6 @@ fi
 
 Playbook thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json` under `playbooks`.
 
-#### Step 5b-hdr: HEADER LEVEL GATE (diagnostic)
-
-Check for header level violations in section files. This gate is diagnostic — it does NOT block the pipeline because Step 6b normalizes headers mechanically. Its value is tracking whether assembly agents are following the Section Hierarchy Rule.
-
-```bash
-# === HEADER LEVEL GATE (diagnostic — Step 6b fixes violations) ===
-for f in /tmp/deep_crawl/sections/*.md; do
-    [ -f "$f" ] || continue
-    FNAME=$(basename "$f")
-    case "$FNAME" in _skeleton.md|*.done) continue ;; esac
-
-    # Count h1 headers outside code blocks
-    H1_COUNT=$(awk '/^```/{c=!c;next} !c && /^# [^#]/{n++} END{print n+0}' "$f")
-    [ "$H1_COUNT" -gt 0 ] && echo "HDR WARN: $FNAME has $H1_COUNT h1 headers (will be auto-fixed in Step 6b)"
-done
-```
-
-Header level thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json` under `structural_navigability.header_levels`.
-
 #### Step 5c: TRACEABILITY GATE (mandatory before orchestrator sections)
 
 Mechanically verify every completed investigation task has content in at least one assembled section file:
@@ -1268,46 +1199,6 @@ The orchestrator writes these directly (no sub-agent needed — they are small, 
 
 Write to `/tmp/deep_crawl/sections/header.md`, `/tmp/deep_crawl/sections/identity.md`, `/tmp/deep_crawl/sections/gaps.md`, `/tmp/deep_crawl/sections/environment_bootstrap.md`, `/tmp/deep_crawl/sections/footer.md`.
 
-#### Step 6b: Normalize header levels in section files
-
-Mechanically fix header levels before concatenation. This corrects any agent that used `# ` instead of `## ` or `## ` instead of `### `. Assembly agents sometimes produce section files with `# SectionName` (h1) and `## Subsection` (h2) instead of the correct `## SectionName` (h2) and `### Subsection` (h3). This step detects and corrects that by shifting all headers in a file by a constant offset.
-
-```bash
-# === HEADER LEVEL NORMALIZATION ===
-NORM_COUNT=0
-for f in /tmp/deep_crawl/sections/*.md; do
-    [ -f "$f" ] || continue
-    FNAME=$(basename "$f")
-    case "$FNAME" in header.md|footer.md|_skeleton.md|*.done) continue ;; esac
-
-    # Find level of first markdown header outside code blocks
-    FIRST_LEVEL=$(awk '/^```/{c=!c;next} !c && /^#{1,6} /{match($0,/^#+/); print RLENGTH; exit}' "$f")
-    [ -z "$FIRST_LEVEL" ] && continue  # no headers in file
-    [ "$FIRST_LEVEL" -eq 2 ] && continue  # already correct
-
-    # Shift all headers so first header becomes ## (h2)
-    OFFSET=$((2 - FIRST_LEVEL))
-    awk -v offset="$OFFSET" '
-        /^```/ { c=!c; print; next }
-        !c && /^#{1,6} / {
-            match($0, /^#+/)
-            new = RLENGTH + offset
-            if (new < 2) new = 2
-            if (new > 6) new = 6
-            pfx = ""; for (i=1; i<=new; i++) pfx = pfx "#"
-            sub(/^#+/, pfx)
-        }
-        { print }
-    ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
-
-    echo "NORMALIZED: $FNAME (shifted headers by ${OFFSET})"
-    NORM_COUNT=$((NORM_COUNT + 1))
-done
-echo "Step 6b: Normalized $NORM_COUNT section files"
-```
-
-Log: `Step 6b: Normalized {N} section files`
-
 #### Step 7: Assemble DRAFT_ONBOARD.md
 
 Concatenate all section files in template order:
@@ -1334,12 +1225,6 @@ cat /tmp/deep_crawl/sections/header.md \
     /tmp/deep_crawl/sections/gaps.md \
     /tmp/deep_crawl/sections/footer.md \
     > /tmp/deep_crawl/DRAFT_ONBOARD.md
-
-# Fill {DOC_TOKENS} placeholder with actual token estimate
-DOC_WORDS=$(wc -w < /tmp/deep_crawl/DRAFT_ONBOARD.md)
-DOC_TOKENS=$((DOC_WORDS * 13 / 10))
-sed -i "s/{DOC_TOKENS}/~${DOC_TOKENS}/g" /tmp/deep_crawl/DRAFT_ONBOARD.md
-echo "Step 7: {DOC_TOKENS} filled — ~${DOC_TOKENS} tokens (${DOC_WORDS} words)"
 ```
 
 #### Step 8: Verify retention
@@ -1357,11 +1242,11 @@ This is a mechanical step — no LLM needed. Extract all file:line citations tha
 ```bash
 # Extract unique file:line citations from [FACT]-tagged lines in findings
 grep '\[FACT' /tmp/deep_crawl/SYNTHESIS_INPUT.md \
-  | grep -oP '[\w/]+\.py:\d+' | sort -u \
+  | grep -oP '[\w/.-]+\.(py|ts|tsx|js|jsx):\d+' | sort -u \
   > /tmp/deep_crawl/_synthesis_fact_citations.txt
 
 # Extract unique file:line citations from assembled draft
-grep -oP '[\w/]+\.py:\d+' /tmp/deep_crawl/DRAFT_ONBOARD.md \
+grep -oP '[\w/.-]+\.(py|ts|tsx|js|jsx):\d+' /tmp/deep_crawl/DRAFT_ONBOARD.md \
   | sort -u > /tmp/deep_crawl/_draft_citations.txt
 
 # Find dropped citations
@@ -1442,11 +1327,6 @@ test -f /tmp/deep_crawl/DEEP_ONBOARD.md && test -f /tmp/deep_crawl/REFINE_LOG.md
 # Cross-referencing is strictly additive — final must be >= draft
 wc -w /tmp/deep_crawl/DRAFT_ONBOARD.md /tmp/deep_crawl/DEEP_ONBOARD.md
 # If DEEP_ONBOARD word count < DRAFT_ONBOARD, re-spawn with: "Your output lost words. Cross-referencing is additive only — you may NOT delete content. Re-execute all 4 steps."
-
-# Re-fill {DOC_TOKENS} in final document (cross-referencing may have changed word count)
-FINAL_WORDS=$(wc -w < /tmp/deep_crawl/DEEP_ONBOARD.md)
-FINAL_TOKENS=$((FINAL_WORDS * 13 / 10))
-sed -i "s/~[0-9,]*\( tokens\)/~${FINAL_TOKENS}\1/g" /tmp/deep_crawl/DEEP_ONBOARD.md
 ```
 
 **Sub-agent 2: Validator**
@@ -1518,11 +1398,11 @@ If any standard question is NO or PARTIAL, or if the adversarial simulation is P
 | Q5 ERRORS incomplete | C | Error handling patterns | findings/cross_cutting/gap_errors.md |
 | Q6 EXTERNAL missing systems | C | External system patterns (grep: requests, httpx, boto, redis) | findings/cross_cutting/gap_external.md |
 | Q7 STATE incomplete | C | Shared state patterns (grep: global, _instance, _cache) | findings/cross_cutting/gap_state.md |
-| Q8 TESTING thin | D | Testing conventions (read conftest.py, sample test files) | findings/conventions/gap_testing.md |
+| Q8 TESTING thin | D | Testing conventions (Python: conftest.py, pytest.ini; TypeScript: jest.config, vitest.config, in-source import.meta.vitest) | findings/conventions/gap_testing.md |
 | Q9 GOTCHAS insufficient | (review) | Re-scan existing findings for uncollected gotchas | findings/cross_cutting/gap_gotchas.md |
 | Q10 EXTENSION missing | B | Primary entity base class + extension patterns | findings/modules/gap_extension.md |
 | Q11 IMPACT missing | E | Hub modules from xray | findings/impact/gap_impact.md |
-| Q12 BOOTSTRAP missing | C | Setup patterns (requirements.txt, Dockerfile, Makefile) | findings/cross_cutting/gap_bootstrap.md |
+| Q12 BOOTSTRAP missing | C | Setup patterns (Python: requirements.txt, Dockerfile, Makefile; TypeScript: package.json, tsconfig.json, Dockerfile) | findings/cross_cutting/gap_bootstrap.md |
 | Adversarial step N failed | B | Module referenced in failing step | findings/modules/gap_adversarial_{N}.md |
 
 **Step R2: Spawn targeted investigation agents.** For each gap, spawn one sub-agent with the appropriate protocol. Use `run_in_background: true` for parallel execution. Sub-agent prompts follow the standard Phase 2 format:
@@ -1537,10 +1417,12 @@ You are investigating {CODEBASE} at {ROOT_PATH} to fill a specific gap in the on
 {Protocol A/B/C/D text, copied verbatim}
 
 ## Specific Target
-{What to investigate — e.g., "Read conftest.py, 3 representative test files, pytest.ini. Document fixture patterns, mocking strategies, coverage configuration, marker usage."}
+{What to investigate — e.g.:
+  Python: "Read conftest.py, 3 representative test files, pytest.ini. Document fixture patterns, mocking strategies, coverage configuration, marker usage."
+  TypeScript: "Read jest.config.ts/vitest.config.ts, 3 representative .test.ts files, test setup files. Document test runner config, mocking patterns, fixture strategies."}
 
 ## Evidence Standards
-- [FACT]: Read specific code, cite file:line. Example: "retries 3x (stripe.py:89)"
+- [FACT]: Read specific code, cite file:line. Example: "retries 3x (payments.ts:89)" or "retries 3x (stripe.py:89)"
 - [PATTERN]: Observed in >=3 examples, state count. Example: "DI via __init__ (12/14 services)"
 - [ABSENCE]: Searched and confirmed non-existence. Example: "No rate limiting (grep — 0 hits)"
 
@@ -1719,6 +1601,17 @@ Example:
 **Gap:** Fixture patterns and mocking strategies are surface-level only. No examples of how conftest.py layers fixtures or how tests mock LLM calls.
 **Investigation needed:** Protocol D targeting conftest.py, tests/unit/agents/test_research_director.py, tests/unit/core/test_llm.py
 **Expected output:** Detailed testing conventions with fixture hierarchy, LLM mocking patterns, database isolation strategies
+```
+
+TypeScript example:
+```
+### Q8. TESTING: What are the testing conventions?
+**Rating:** PARTIAL
+**Answer:** Testing section covers test runner, file patterns, and basic structure, but lacks fixture/mock detail.
+**Source section:** Testing Conventions
+**Gap:** Test setup patterns and mocking strategies are surface-level only. No examples of vitest/jest configuration or how tests mock external services.
+**Investigation needed:** Protocol D targeting vitest.config.ts or jest.config.ts, 3 representative *.test.ts files, test setup files
+**Expected output:** Detailed testing conventions with mock patterns, fixture strategies, test isolation approach
 ```
 
 The 12 standard questions:
@@ -1916,7 +1809,7 @@ Not all claims have the same epistemological status. Use these tags:
 
 | Level | Tag | Standard | Example |
 |-------|-----|----------|---------|
-| Verified Fact | `[FACT]` | Read the specific code, confirmed at cited file:line | "payment_service retries 3x with exponential backoff (providers/stripe.py:89)" |
+| Verified Fact | `[FACT]` | Read the specific code, confirmed at cited file:line | "payment_service retries 3x with exponential backoff (providers/stripe.py:89 or payments.ts:89)" |
 | Verified Pattern | `[PATTERN]` | Observed in >=3 independent examples, state the count | "All service classes use DI via __init__ (observed in 12/14 services)" |
 | Verified Absence | `[ABSENCE]` | Searched for something expected, confirmed it doesn't exist | "No rate limiting found (grepped for rate_limit, throttle, slowapi — zero hits)" |
 
