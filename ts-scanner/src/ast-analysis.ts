@@ -75,6 +75,15 @@ export function analyzeFile(filePath: string): FileAnalysis {
   result.line_count = source.split("\n").length;
   result.tokens.original = estimateTokens(source);
 
+  // Detect @ts-ignore and @ts-expect-error directives (comments, not AST nodes)
+  const tsIgnoreCount = (source.match(/@ts-ignore\b/g) ?? []).length;
+  const tsExpectErrorCount = (source.match(/@ts-expect-error\b/g) ?? []).length;
+  if (tsIgnoreCount > 0 || tsExpectErrorCount > 0) {
+    if (!result.ts_any_counts) result.ts_any_counts = { explicit_any: 0, as_any_assertions: 0, ts_ignore_count: 0, ts_expect_error_count: 0 };
+    result.ts_any_counts.ts_ignore_count = tsIgnoreCount;
+    result.ts_any_counts.ts_expect_error_count = tsExpectErrorCount;
+  }
+
   const ctx: WalkContext = {
     currentFunction: null,
     currentClass: null,
@@ -88,6 +97,80 @@ export function analyzeFile(filePath: string): FileAnalysis {
   const classMutations = new Map<string, StateMutation[]>();
 
   walkPass1(sourceFile, ctx, result, classMutations);
+
+  // Phase 1: Populate internal_calls — function-level intra-file call chains
+  const localNames = new Set<string>();
+  for (const fn of result.functions) localNames.add(fn.name);
+  for (const cls of result.classes) {
+    for (const m of cls.methods) {
+      localNames.add(m.name);
+      localNames.add(`${cls.name}.${m.name}`);
+    }
+  }
+  function collectInternalCalls(node: ts.Node): void {
+    if (ts.isCallExpression(node)) {
+      const text = node.expression.getText(sourceFile);
+      const callName = text.startsWith("this.") ? text.slice(5) : text;
+      if (localNames.has(callName)) {
+        const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+        result.internal_calls.push({ call: callName, line });
+      }
+    }
+    ts.forEachChild(node, collectInternalCalls);
+  }
+  ts.forEachChild(sourceFile, collectInternalCalls);
+
+  // Phase 2b: Detect "use client" / "use server" directive
+  const firstStmt = sourceFile.statements[0];
+  if (firstStmt && ts.isExpressionStatement(firstStmt) && ts.isStringLiteral(firstStmt.expression)) {
+    const text = firstStmt.expression.text;
+    if (text === "use client" || text === "use server") {
+      result.ts_directive = text;
+    }
+  }
+
+  // Phase 2d: Derive framework_role from directive or class decorators
+  if (result.ts_directive === "use client") {
+    result.framework_role = "react_client_component";
+  } else if (result.ts_directive === "use server") {
+    result.framework_role = "react_server_action";
+  } else {
+    // NestJS decorator classification
+    for (const cls of result.classes) {
+      for (const dec of cls.decorators) {
+        if (dec === "Controller") { result.framework_role = "nestjs_controller"; break; }
+        if (dec === "Injectable") { result.framework_role = "nestjs_service"; break; }
+        if (dec === "Module") { result.framework_role = "nestjs_module"; break; }
+        if (dec === "Guard" || dec === "UseGuards") { result.framework_role = "nestjs_guard"; break; }
+      }
+      if (result.framework_role) break;
+    }
+  }
+
+  // Phase 2c: React hooks inventory
+  const reactHooks: Array<{ name: string; line: number }> = [];
+  function collectReactHooks(node: ts.Node): void {
+    if (ts.isCallExpression(node)) {
+      const text = node.expression.getText(sourceFile);
+      const baseName = text.includes(".") ? text.split(".").pop()! : text;
+      if (/^use[A-Z]/.test(baseName)) {
+        const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+        reactHooks.push({ name: baseName, line });
+      }
+    }
+    ts.forEachChild(node, collectReactHooks);
+  }
+  ts.forEachChild(sourceFile, collectReactHooks);
+  if (reactHooks.length > 0) result.react_hooks = reactHooks;
+
+  // Phase 2a: Set is_component for PascalCase functions in .tsx/.jsx files
+  const isJsx = filePath.endsWith(".tsx") || filePath.endsWith(".jsx");
+  if (isJsx) {
+    const pascalRe = /^[A-Z][a-zA-Z0-9]+$/;
+    for (const fn of result.functions) {
+      if (pascalRe.test(fn.name)) fn.is_component = true;
+    }
+  }
 
   // Compute type coverage percentage
   if (result.type_coverage.total_functions > 0) {
@@ -107,6 +190,28 @@ export function analyzeFile(filePath: string): FileAnalysis {
 // =============================================================================
 
 function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis, classMutations: Map<string, StateMutation[]>): void {
+  if (!node) return;
+
+  // --- Module system detection (before any early returns) ---
+  if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node) || ts.isExportAssignment(node)) {
+    if (!result.ts_module_style || result.ts_module_style === "commonjs") {
+      result.ts_module_style = result.ts_module_style === "commonjs" ? "mixed" : "esm";
+    }
+  }
+  if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require") {
+    if (!result.ts_module_style || result.ts_module_style === "esm") {
+      result.ts_module_style = result.ts_module_style === "esm" ? "mixed" : "commonjs";
+    }
+  }
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isPropertyAccessExpression(node.left) &&
+      ts.isIdentifier(node.left.expression) && node.left.expression.text === "module" &&
+      node.left.name.text === "exports") {
+    if (!result.ts_module_style || result.ts_module_style === "esm") {
+      result.ts_module_style = result.ts_module_style === "esm" ? "mixed" : "commonjs";
+    }
+  }
+
   // --- Function declarations ---
   if (ts.isFunctionDeclaration(node)) {
     const info = extractFunctionInfo(node, ctx);
@@ -220,6 +325,33 @@ function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis, classM
     return;
   }
 
+  // --- Module declarations (namespace, declare module) ---
+  if (ts.isModuleDeclaration(node) && ctx.depth === 0) {
+    const name = node.name;
+    const line = getLineNumber(node, ctx.sourceFile);
+    const exported = hasModifier(node, ts.SyntaxKind.ExportKeyword);
+
+    if (ts.isStringLiteral(name)) {
+      // declare module "express" { ... } — module augmentation
+      if (!result.ts_module_augmentations) result.ts_module_augmentations = [];
+      result.ts_module_augmentations.push({ target_module: name.text, line });
+    } else if (ts.isIdentifier(name) && name.text === "global") {
+      // declare global { ... }
+      if (!result.ts_module_augmentations) result.ts_module_augmentations = [];
+      result.ts_module_augmentations.push({ target_module: "(global)", line });
+    } else if (ts.isIdentifier(name)) {
+      // namespace Foo { ... }
+      if (!result.ts_namespaces) result.ts_namespaces = [];
+      result.ts_namespaces.push({ name: name.text, line, exported });
+    }
+
+    // Walk body for nested declarations
+    if (node.body) {
+      ts.forEachChild(node.body, child => walkPass1(child, { ...ctx, depth: ctx.depth + 1 }, result, classMutations));
+    }
+    return;
+  }
+
   // --- Async for-of loops ---
   if (ts.isForOfStatement(node) && node.awaitModifier) {
     result.async_patterns.async_for_loops++;
@@ -313,6 +445,16 @@ function walkPass1(node: ts.Node, ctx: WalkContext, result: FileAnalysis, classM
   if (ts.isTemplateExpression(node)) {
     const sq = detectSqlTemplate(node, ctx.sourceFile);
     if (sq) result.sql_strings.push(sq);
+  }
+
+  // any type annotations → ts_any_counts
+  if (ts.isAsExpression(node) && node.type.kind === ts.SyntaxKind.AnyKeyword) {
+    if (!result.ts_any_counts) result.ts_any_counts = { explicit_any: 0, as_any_assertions: 0, ts_ignore_count: 0, ts_expect_error_count: 0 };
+    result.ts_any_counts.as_any_assertions++;
+  }
+  if (node.kind === ts.SyntaxKind.AnyKeyword && (!node.parent || !ts.isAsExpression(node.parent))) {
+    if (!result.ts_any_counts) result.ts_any_counts = { explicit_any: 0, as_any_assertions: 0, ts_ignore_count: 0, ts_expect_error_count: 0 };
+    result.ts_any_counts.explicit_any++;
   }
 
   // PropertyAccess/ElementAccess → env vars

@@ -71,6 +71,7 @@ export function analyzeCallGraph(
     const currentFunction = { name: "(module)" };
 
     function visit(node: ts.Node): void {
+      if (!node) return;
       // Track function context
       if (ts.isFunctionDeclaration(node) && node.name) {
         const prev = currentFunction.name;

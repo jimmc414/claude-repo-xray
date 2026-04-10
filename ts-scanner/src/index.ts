@@ -29,7 +29,7 @@ import type {
   DecoratorInventory, AsyncPatterns, Hotspot, FileAnalysis, ClassInfo, FunctionInfo,
   ImportAnalysis, CallAnalysis, SideEffects, SideEffectEntry, SecurityConcern, SilentFailure,
   SqlString, DeprecationMarker, AsyncViolation, EnvVar, TestAnalysis, LogicMap,
-  CliAnalysis, ConfigRules, ResourceLeak, GitAnalysis, TechDebt,
+  CliAnalysis, ConfigRules, ResourceLeak, GitAnalysis, TechDebt, TsSpecific,
 } from "./types.js";
 
 const VERSION = "0.1.0";
@@ -173,6 +173,10 @@ function main(): void {
   }
   if (Object.keys(resourceLeaks).length > 0) results.resource_leaks = resourceLeaks;
 
+  // Aggregate ts_specific
+  const tsSpecific = aggregateTsSpecific(fileResults, discovery.declarationFiles.length, targetDir);
+  if (tsSpecific) results.ts_specific = tsSpecific;
+
   // Output JSON
   process.stdout.write(JSON.stringify(results, null, 2));
   process.stdout.write("\n");
@@ -275,9 +279,8 @@ function aggregateResults(
     for (const v of fa.async_violations) asyncViolations.push(v);
   }
 
-  // Sort hotspots by complexity descending, take top 20
+  // Sort hotspots by complexity descending
   allHotspots.sort((a, b) => b.complexity - a.complexity);
-  const topHotspots = allHotspots.slice(0, 20);
 
   const typeCoverage = totalTypeFunctions > 0
     ? Math.round((typedFunctions / totalTypeFunctions) * 1000) / 10
@@ -305,7 +308,7 @@ function aggregateResults(
   };
 
   const complexity: Complexity = {
-    hotspots: topHotspots,
+    hotspots: allHotspots.slice(0, 20),
     average_cc: averageCC,
     total_cc: totalCC,
   };
@@ -330,7 +333,7 @@ function aggregateResults(
     imports: importResults,
     calls: callResults,
     async_patterns: { ...globalAsync, violations: asyncViolations },
-    hotspots: topHotspots,
+    hotspots: allHotspots,
     side_effects: { by_type: sideEffectsByType, by_file: sideEffectsByFile },
     security_concerns: securityConcerns,
     silent_failures: silentFailures,
@@ -343,6 +346,61 @@ function aggregateResults(
 // =============================================================================
 // Helpers
 // =============================================================================
+
+function aggregateTsSpecific(
+  fileResults: Record<string, FileAnalysis>,
+  declarationFileCount: number,
+  targetDir: string,
+): TsSpecific | null {
+  let explicitAny = 0;
+  let asAnyAssertions = 0;
+  let tsIgnoreCount = 0;
+  let tsExpectErrorCount = 0;
+  let esmCount = 0;
+  let cjsCount = 0;
+  const moduleAugmentations: TsSpecific["module_augmentations"] = [];
+  const namespaces: TsSpecific["namespaces"] = [];
+
+  for (const [fp, fa] of Object.entries(fileResults)) {
+    const rel = path.relative(targetDir, fp).replace(/\\/g, "/");
+    if (fa.ts_any_counts) {
+      explicitAny += fa.ts_any_counts.explicit_any;
+      asAnyAssertions += fa.ts_any_counts.as_any_assertions;
+      tsIgnoreCount += fa.ts_any_counts.ts_ignore_count;
+      tsExpectErrorCount += fa.ts_any_counts.ts_expect_error_count;
+    }
+    if (fa.ts_module_style === "esm" || fa.ts_module_style === "mixed") esmCount++;
+    if (fa.ts_module_style === "commonjs" || fa.ts_module_style === "mixed") cjsCount++;
+    if (fa.ts_module_augmentations) {
+      for (const aug of fa.ts_module_augmentations) {
+        moduleAugmentations.push({ target_module: aug.target_module, file: rel, line: aug.line });
+      }
+    }
+    if (fa.ts_namespaces) {
+      for (const ns of fa.ts_namespaces) {
+        namespaces.push({ name: ns.name, file: rel, line: ns.line, exported: ns.exported });
+      }
+    }
+  }
+
+  let moduleSystem: TsSpecific["module_system"];
+  if (esmCount > 0 && cjsCount > 0) moduleSystem = "mixed";
+  else if (cjsCount > 0) moduleSystem = "commonjs";
+  else moduleSystem = "esm";
+
+  const hasAnyCounts = explicitAny > 0 || asAnyAssertions > 0 || tsIgnoreCount > 0 || tsExpectErrorCount > 0;
+  if (!hasAnyCounts && moduleAugmentations.length === 0 && namespaces.length === 0 && declarationFileCount === 0) {
+    return null;
+  }
+
+  return {
+    any_density: { explicit_any: explicitAny, as_any_assertions: asAnyAssertions, ts_ignore_count: tsIgnoreCount, ts_expect_error_count: tsExpectErrorCount },
+    module_system: moduleSystem,
+    declaration_file_count: declarationFileCount,
+    module_augmentations: moduleAugmentations,
+    namespaces: namespaces,
+  };
+}
 
 function buildMetadata(targetDir: string, fileCount: number, tsconfigPath: string | null) {
   return {

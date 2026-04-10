@@ -35,7 +35,7 @@ describe("integration", () => {
     expect(result.metadata.tool_version).toBe("0.1.0");
     expect(result.metadata.language).toBe("typescript");
     expect(result.metadata.parser_tier).toBe("syntax");
-    expect(result.metadata.file_count).toBe(10);
+    expect(result.metadata.file_count).toBe(14);
     expect(result.metadata.generated_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -43,7 +43,7 @@ describe("integration", () => {
     const output = execSync(`node ${SCANNER_PATH} ${FIXTURE_PATH}`, { encoding: "utf-8" });
     const result = JSON.parse(output);
 
-    expect(result.summary.total_files).toBe(10);
+    expect(result.summary.total_files).toBe(14);
     expect(result.summary.total_lines).toBeGreaterThan(0);
     expect(result.summary.total_tokens).toBeGreaterThan(0);
     expect(result.summary.total_functions).toBeGreaterThan(0);
@@ -55,7 +55,7 @@ describe("integration", () => {
     const result = JSON.parse(output);
     const filePaths = Object.keys(result.structure.files);
 
-    expect(filePaths.length).toBe(10);
+    expect(filePaths.length).toBe(14);
     expect(filePaths.some((f: string) => f.endsWith("index.ts"))).toBe(true);
     expect(filePaths.some((f: string) => f.endsWith("user.service.ts"))).toBe(true);
     expect(filePaths.some((f: string) => f.endsWith("utils.ts"))).toBe(true);

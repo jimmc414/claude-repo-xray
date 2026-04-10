@@ -15,13 +15,19 @@ import type {
 // 2B-1: Silent failure detection
 // =============================================================================
 
-function isConsoleCall(stmt: ts.Statement): boolean {
+const LOG_PREFIXES = new Set([
+  "console", "logger", "log", "logging",
+  "winston", "pino", "bunyan",
+  "sentry", "Sentry",
+]);
+
+function isLogOnlyCall(stmt: ts.Statement): boolean {
   if (!ts.isExpressionStatement(stmt)) return false;
   const expr = stmt.expression;
   if (!ts.isCallExpression(expr)) return false;
   const callee = expr.expression;
   if (!ts.isPropertyAccessExpression(callee)) return false;
-  return callee.expression.getText() === "console";
+  return LOG_PREFIXES.has(callee.expression.getText());
 }
 
 export function detectSilentFailure(node: ts.CatchClause, sourceFile: ts.SourceFile): SilentFailure | null {
@@ -33,7 +39,7 @@ export function detectSilentFailure(node: ts.CatchClause, sourceFile: ts.SourceF
     return { type: "empty_catch", line, context: "catch with empty block" };
   }
 
-  if (stmts.length <= 2 && stmts.every(s => isConsoleCall(s))) {
+  if (stmts.length <= 2 && stmts.every(s => isLogOnlyCall(s))) {
     return { type: "logged_catch", line, context: "catch only logs, does not rethrow" };
   }
 

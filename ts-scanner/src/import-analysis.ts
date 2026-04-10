@@ -201,6 +201,9 @@ export function analyzeImports(
 
   const externalList = [...externalDeps].sort();
 
+  // Step 7: Barrel file detection
+  const barrelFiles = detectBarrelFiles(files, fileImports, fileSet, absRoot);
+
   return {
     graph: graphOutput,
     layers: layersOutput,
@@ -210,6 +213,7 @@ export function analyzeImports(
     orphans: orphans.map(f => relativePath(f, absRoot)),
     circular: circular.map(pair => pair.map(f => relativePath(f, absRoot))),
     external_deps: externalList,
+    barrel_files: barrelFiles.length > 0 ? barrelFiles : undefined,
     distances: {
       max_depth: distances.maxDepth,
       avg_depth: distances.avgDepth,
@@ -233,6 +237,76 @@ export function analyzeImports(
 }
 
 // =============================================================================
+// Barrel file detection
+// =============================================================================
+
+function detectBarrelFiles(
+  files: string[],
+  fileImports: Map<string, RawImport[]>,
+  fileSet: Set<string>,
+  absRoot: string,
+): Array<{ file: string; reexport_count: number; logic_lines: number; reexported_from: string[] }> {
+  const barrels: Array<{ file: string; reexport_count: number; logic_lines: number; reexported_from: string[] }> = [];
+
+  for (const filePath of files) {
+    const basename = path.basename(filePath).replace(/\.[^.]+$/, "");
+    if (basename !== "index") continue;
+
+    // Read source to count re-export lines vs logic lines
+    let source: string;
+    try {
+      source = fs.readFileSync(filePath, "utf-8");
+    } catch {
+      continue;
+    }
+
+    const lines = source.split("\n");
+    let reexportCount = 0;
+    let importCount = 0;
+    let logicLines = 0;
+    const reexportedFrom: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) continue;
+
+      if (/^export\s+.*\bfrom\b/.test(trimmed)) {
+        reexportCount++;
+        const match = trimmed.match(/from\s+['"]([^'"]+)['"]/);
+        if (match) reexportedFrom.push(match[1]);
+      } else if (/^import\b/.test(trimmed)) {
+        importCount++;
+      } else {
+        logicLines++;
+      }
+    }
+
+    // A barrel file has: 3+ re-exports AND more re-exports than logic lines
+    if (reexportCount >= 3 && reexportCount > logicLines) {
+      // Resolve re-export targets to relative paths
+      const resolvedFrom = reexportedFrom.map(spec => {
+        if (spec.startsWith(".")) {
+          const resolved = resolveRelativeImport(filePath, spec, fileSet);
+          return resolved ? relativePath(resolved, absRoot) : spec;
+        }
+        return spec;
+      });
+
+      barrels.push({
+        file: relativePath(filePath, absRoot),
+        reexport_count: reexportCount,
+        logic_lines: logicLines,
+        reexported_from: resolvedFrom,
+      });
+    }
+  }
+
+  // Sort by re-export count descending (most connected barrels first)
+  barrels.sort((a, b) => b.reexport_count - a.reexport_count);
+  return barrels;
+}
+
+// =============================================================================
 // Import parsing
 // =============================================================================
 
@@ -247,7 +321,7 @@ function parseImports(filePath: string): RawImport[] {
   const scriptKind = getScriptKind(filePath);
   let sourceFile: ts.SourceFile;
   try {
-    sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, false, scriptKind);
+    sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind);
   } catch {
     return [];
   }
@@ -255,6 +329,7 @@ function parseImports(filePath: string): RawImport[] {
   const imports: RawImport[] = [];
 
   function visit(node: ts.Node): void {
+    if (!node) return;
     // import ... from "specifier"
     if (ts.isImportDeclaration(node)) {
       const specNode = node.moduleSpecifier;

@@ -124,10 +124,24 @@ export interface FileAnalysis {
   route_registrations?: RouteRegistration[];
   parse_error: string | null;
   shared_mutable_state?: SharedMutableState[];
+  // Framework detection
+  ts_directive?: "use client" | "use server";
+  framework_role?: string;
+  react_hooks?: Array<{ name: string; line: number }>;
   // TS-specific optional fields
   ts_interfaces?: TsInterfaceInfo[];
   ts_type_aliases?: TsTypeAliasInfo[];
   ts_enums?: TsEnumInfo[];
+  // Per-file ts_specific counters (aggregated into TsSpecific at top level)
+  ts_any_counts?: {
+    explicit_any: number;
+    as_any_assertions: number;
+    ts_ignore_count: number;
+    ts_expect_error_count: number;
+  };
+  ts_module_style?: "esm" | "commonjs" | "mixed";
+  ts_module_augmentations?: Array<{ target_module: string; line: number }>;
+  ts_namespaces?: Array<{ name: string; line: number; exported: boolean }>;
 }
 
 // =============================================================================
@@ -349,6 +363,12 @@ export interface ImportAnalysis {
     tightly_coupled: Array<{ modules: string[]; score: number }>;
     hub_modules: Array<{ module: string; connections: number }>;
   };
+  barrel_files?: Array<{
+    file: string;
+    reexport_count: number;
+    logic_lines: number;
+    reexported_from: string[];
+  }>;
   summary: {
     total_modules: number;
     internal_edges: number;
@@ -386,6 +406,14 @@ export interface TestAnalysis {
   test_function_count: number;
   coverage_by_type: Record<string, number>;
   test_files: Array<{ path: string; tests: number }>;
+  setup_teardown_count?: number;
+  mocking_patterns?: string[];
+  test_example?: {
+    file: string;
+    content: string;
+    line_count: number;
+    patterns: string[];
+  };
 }
 
 export interface InstanceVar {

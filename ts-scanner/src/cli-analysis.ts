@@ -81,6 +81,7 @@ function extractCommander(source: string, filePath: string, framework: string): 
   const options: CliAnalysis["options"] = [];
 
   function walk(node: ts.Node): void {
+    if (!node) return;
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
       const methodName = node.expression.name.text;
 
@@ -135,6 +136,7 @@ function extractYargs(source: string, filePath: string, framework: string): CliA
   const options: CliAnalysis["options"] = [];
 
   function walk(node: ts.Node): void {
+    if (!node) return;
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
       const methodName = node.expression.name.text;
 
@@ -205,6 +207,7 @@ function extractGunshi(files: string[]): CliAnalysis {
     const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind);
 
     function walk(node: ts.Node): void {
+      if (!node) return;
       // Match: define({ name: '...', description: '...', args: { ... } })
       if (
         ts.isCallExpression(node) &&

@@ -246,11 +246,12 @@ function computeEntryToSideEffectPaths(
         }
       }
 
-      // Follow call graph
-      const callInfo = calls.cross_module[name];
-      if (callInfo) {
-        for (const site of callInfo.call_sites) {
-          queue.push({ name: site.caller, hops: hops + 1 });
+      // Follow call graph: look up functions that this function calls (callees)
+      // cross_module is keyed by callee → call_sites, so we need the reverse:
+      // find entries where this function appears as a caller
+      for (const [callee, info] of Object.entries(calls.cross_module)) {
+        if (info.call_sites.some(site => site.caller === name)) {
+          queue.push({ name: callee, hops: hops + 1 });
         }
       }
     }

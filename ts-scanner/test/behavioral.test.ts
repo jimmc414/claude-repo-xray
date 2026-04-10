@@ -3,6 +3,8 @@ import * as path from "path";
 import { analyzeFile } from "../src/ast-analysis.js";
 
 const FIXTURE_PATH = path.resolve(__dirname, "fixtures/minimal/src/behavioral.ts");
+const INTERNAL_CALLS_PATH = path.resolve(__dirname, "fixtures/minimal/src/internal-calls-target.ts");
+const REACT_COMPONENT_PATH = path.resolve(__dirname, "fixtures/minimal/src/react-component.tsx");
 
 describe("behavioral signals", () => {
   const result = analyzeFile(FIXTURE_PATH);
@@ -18,6 +20,11 @@ describe("behavioral signals", () => {
       const loggedCatch = result.silent_failures.find(f => f.type === "logged_catch");
       expect(loggedCatch).toBeDefined();
       expect(loggedCatch!.context).toContain("does not rethrow");
+    });
+
+    it("detects logger.error catch as logged_catch", () => {
+      const loggerCatches = result.silent_failures.filter(f => f.type === "logged_catch");
+      expect(loggerCatches.length).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -108,6 +115,53 @@ describe("behavioral signals", () => {
       expect(dep).toBeDefined();
       expect(dep!.source).toBe("jsdoc");
       expect(dep!.reason).toContain("newMethod");
+    });
+  });
+
+  describe("internal calls", () => {
+    const icResult = analyzeFile(INTERNAL_CALLS_PATH);
+
+    it("detects calls to local functions", () => {
+      const callNames = icResult.internal_calls.map(c => c.call);
+      expect(callNames).toContain("validateInput");
+      expect(callNames).toContain("formatResult");
+    });
+
+    it("records correct line numbers", () => {
+      const validate = icResult.internal_calls.find(c => c.call === "validateInput");
+      expect(validate).toBeDefined();
+      expect(validate!.line).toBeGreaterThan(0);
+    });
+  });
+
+  describe("framework detection", () => {
+    const rxResult = analyzeFile(REACT_COMPONENT_PATH);
+
+    it("detects 'use client' directive", () => {
+      expect(rxResult.ts_directive).toBe("use client");
+    });
+
+    it("sets framework_role for client component", () => {
+      expect(rxResult.framework_role).toBe("react_client_component");
+    });
+
+    it("marks PascalCase functions as components in .tsx", () => {
+      const counter = rxResult.functions.find(f => f.name === "Counter");
+      expect(counter).toBeDefined();
+      expect(counter!.is_component).toBe(true);
+    });
+
+    it("does not mark non-PascalCase functions as components", () => {
+      const fmt = rxResult.functions.find(f => f.name === "formatLabel");
+      expect(fmt).toBeDefined();
+      expect(fmt!.is_component).toBeUndefined();
+    });
+
+    it("detects React hooks", () => {
+      expect(rxResult.react_hooks).toBeDefined();
+      const hookNames = rxResult.react_hooks!.map(h => h.name);
+      expect(hookNames).toContain("useState");
+      expect(hookNames).toContain("useEffect");
     });
   });
 

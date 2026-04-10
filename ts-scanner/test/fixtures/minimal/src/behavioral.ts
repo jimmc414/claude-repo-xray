@@ -22,6 +22,14 @@ function loggedOnly(): void {
   }
 }
 
+function loggerOnly(): void {
+  try {
+    JSON.parse("bad");
+  } catch (e) {
+    logger.error("something failed", e);
+  }
+}
+
 // --- Security concerns ---
 function dangerousEval(code: string): unknown {
   return eval(code);
@@ -78,4 +86,6 @@ class ConfigService {
   }
 }
 
-export { riskyOperation, loggedOnly, dangerousEval, dynamicFn, readConfig, fetchData, runCommand, dbHost, port, secret, query, insert, loadConfig, oldMethod, ConfigService };
+declare const logger: { error: (...args: unknown[]) => void };
+
+export { riskyOperation, loggedOnly, loggerOnly, dangerousEval, dynamicFn, readConfig, fetchData, runCommand, dbHost, port, secret, query, insert, loadConfig, oldMethod, ConfigService };

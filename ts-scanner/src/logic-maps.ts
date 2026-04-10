@@ -120,7 +120,7 @@ function findFunction(sourceFile: ts.SourceFile, name: string): ts.Node | null {
   let found: ts.Node | null = null;
 
   function walk(node: ts.Node): void {
-    if (found) return;
+    if (!node || found) return;
 
     // Top-level function declaration
     if (!isMethod && ts.isFunctionDeclaration(node) && node.name?.text === funcName) {
@@ -305,6 +305,34 @@ function walkBody(
       walkBody(arg, sf, indent, flow, sideEffects, stateMutations, conditions);
     }
     return;
+  }
+
+  // Ternary expression (a ? b : c)
+  if (ts.isConditionalExpression(node)) {
+    const cond = truncateText(node.condition.getText(sf), 60);
+    flow.push(`${prefix}-> ${cond}?`);
+    conditions.push(cond);
+    flow.push(`${prefix}  THEN:`);
+    walkBody(node.whenTrue, sf, indent + 1, flow, sideEffects, stateMutations, conditions);
+    flow.push(`${prefix}  ELSE:`);
+    walkBody(node.whenFalse, sf, indent + 1, flow, sideEffects, stateMutations, conditions);
+    return;
+  }
+
+  // Short-circuit && / || with non-trivial right side
+  if (ts.isBinaryExpression(node) &&
+      (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+       node.operatorToken.kind === ts.SyntaxKind.BarBarToken)) {
+    const op = node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ? "&&" : "||";
+    const left = truncateText(node.left.getText(sf), 50);
+    // Only emit if right side is non-trivial (not just an identifier/literal)
+    if (!ts.isIdentifier(node.right) && !ts.isStringLiteral(node.right) &&
+        !ts.isNumericLiteral(node.right) && !ts.isNoSubstitutionTemplateLiteral(node.right)) {
+      flow.push(`${prefix}-> ${left} ${op} ...`);
+      conditions.push(`${left} ${op}`);
+      walkBody(node.right, sf, indent + 1, flow, sideEffects, stateMutations, conditions);
+      return;
+    }
   }
 
   // this.prop = value → state mutation

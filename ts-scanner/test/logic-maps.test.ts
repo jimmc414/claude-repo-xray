@@ -89,4 +89,31 @@ describe("generateLogicMaps", () => {
 
     expect(maps[0].conditions.length).toBeGreaterThan(0);
   });
+
+  describe("ternary and short-circuit patterns", () => {
+    it("generates flow entries for ternary expressions", () => {
+      const hotspots = [{ file: TARGET_FILE, function: "renderComponent", complexity: 3 }];
+      const maps = generateLogicMaps(hotspots, fileResults, 10);
+
+      expect(maps.length).toBe(1);
+      const flow = maps[0].flow;
+      expect(flow.some(l => l.includes("THEN:"))).toBe(true);
+      expect(flow.some(l => l.includes("ELSE:"))).toBe(true);
+    });
+
+    it("generates flow entries for && short-circuit", () => {
+      const hotspots = [{ file: TARGET_FILE, function: "renderComponent", complexity: 3 }];
+      const maps = generateLogicMaps(hotspots, fileResults, 10);
+
+      const flow = maps[0].flow;
+      expect(flow.some(l => l.includes("&&"))).toBe(true);
+    });
+
+    it("populates conditions for ternary/short-circuit", () => {
+      const hotspots = [{ file: TARGET_FILE, function: "renderComponent", complexity: 3 }];
+      const maps = generateLogicMaps(hotspots, fileResults, 10);
+
+      expect(maps[0].conditions.length).toBeGreaterThanOrEqual(2);
+    });
+  });
 });
