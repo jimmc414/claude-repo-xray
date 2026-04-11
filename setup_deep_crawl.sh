@@ -37,5 +37,5 @@ fi
 echo ""
 echo "Deep crawl is now available in all Claude Code sessions."
 echo "Usage: cd /path/to/any/python/repo && claude"
-echo "  Then: python $SCRIPT_DIR/xray.py . --output both --out /tmp/xray"
+echo "  Then: python $SCRIPT_DIR/xray.py . --output both"
 echo "  Then: /deep-crawl full"

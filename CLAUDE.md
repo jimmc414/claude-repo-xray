@@ -10,7 +10,8 @@ A deterministic codebase analyzer for Python and TypeScript/JavaScript projects.
 
 ```bash
 python xray.py .                              # Full analysis, stdout
-python xray.py . --output both --out ./out    # Both formats to files
+python xray.py . --output both                # Both formats to output/<repo-name>/
+python xray.py . --output both --out ./out    # Both formats to custom path (backward compat)
 python xray.py . --preset minimal             # ~2K token output
 python xray.py . --verbose                    # Progress to stderr
 ```

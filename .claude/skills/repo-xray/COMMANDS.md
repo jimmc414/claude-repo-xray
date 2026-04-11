@@ -12,8 +12,8 @@ python xray.py <target> [options]
 
 ```bash
 # Full analysis (agent workflow) — auto-detects Python or TypeScript
-python xray.py . --output both --out /tmp/xray
-# Creates: xray.md (summary) + xray.json (reference)
+python xray.py . --output both
+# Creates: output/<repo>/xray.md (summary) + output/<repo>/data/xray.json (reference)
 
 # Quick survey
 python xray.py . --preset minimal
@@ -40,7 +40,8 @@ Language is auto-detected. No flags needed.
 | `--output markdown` | Markdown only |
 | `--output json` | JSON only |
 | `--output both` | Both formats (recommended) |
-| `--out PATH` | Write to PATH.md / PATH.json |
+| `--out PATH` | Write to PATH.md / PATH.json (overrides default layout) |
+| `--repo-name NAME` | Override auto-detected repo name for output dir |
 
 ## Presets
 
@@ -66,10 +67,10 @@ Language is auto-detected. No flags needed.
 
 ```bash
 # Phase 1: Generate X-Ray
-python xray.py . --output both --out /tmp/xray
+python xray.py . --output both
 
-# Phase 2: Agent reads /tmp/xray.md (orientation)
-# Phase 2: Agent queries /tmp/xray.json (specifics)
+# Phase 2: Agent reads output/<repo>/xray.md (orientation)
+# Phase 2: Agent queries output/<repo>/data/xray.json (specifics)
 # Phase 2: Agent uses Read/Grep/Glob (investigation)
 
 # Phase 3: Agent synthesizes onboarding document

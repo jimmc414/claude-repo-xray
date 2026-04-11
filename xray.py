@@ -224,7 +224,13 @@ Examples:
     output.add_argument(
         "--out",
         metavar="PATH",
-        help="Output file path (without extension). Default: ./analysis"
+        help="Output file path (without extension). Overrides default output/<repo-name>/ layout"
+    )
+    output.add_argument(
+        "--repo-name",
+        metavar="NAME",
+        dest="repo_name",
+        help="Repository name for output directory (auto-detected from git remote or directory name if omitted)"
     )
 
     # Verbosity
@@ -431,7 +437,7 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
         print(f"Detected language: {language}", file=sys.stderr)
 
     # For pure TypeScript projects, delegate entirely to the TS scanner
-    if language == "typescript":
+    if language in ("typescript", "mixed"):
         ts_results = invoke_ts_scanner(target, verbose=verbose)
         if ts_results:
             # Run git analysis on top of TS scanner results (git is language-agnostic)
@@ -716,6 +722,24 @@ def run_analysis(target: str, analyses: List[str], verbose: bool = False) -> Dic
     return result
 
 
+def detect_repo_name(target: str) -> str:
+    """Auto-detect repository name from git remote URL or directory basename."""
+    try:
+        url = subprocess.check_output(
+            ["git", "-C", target, "remote", "get-url", "origin"],
+            stderr=subprocess.DEVNULL, text=True
+        ).strip()
+        # Extract repo name from URL (handles both HTTPS and SSH)
+        name = url.rstrip("/").rsplit("/", 1)[-1]
+        if name.endswith(".git"):
+            name = name[:-4]
+        if name:
+            return name
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    return Path(target).resolve().name
+
+
 def output_json(result: Dict[str, Any], output_path: Optional[str] = None):
     """Write JSON output."""
     # Add formatters to path
@@ -726,6 +750,7 @@ def output_json(result: Dict[str, Any], output_path: Optional[str] = None):
 
     if output_path:
         path = Path(output_path).with_suffix(".json")
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json_str)
         print(f"JSON output written to: {path}", file=sys.stderr)
     else:
@@ -745,6 +770,7 @@ def output_markdown(
 
     if output_path:
         path = Path(output_path).with_suffix(".md")
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(md_str)
         print(f"Markdown output written to: {path}", file=sys.stderr)
     else:
@@ -919,15 +945,28 @@ def main():
     gap_features = config_to_gap_features(config, args.target)
 
     # Output results
-    output_path = args.out or "./analysis"
-
-    if args.output == "json":
-        output_json(result, args.out)
-    elif args.output == "markdown":
-        output_markdown(result, args.out, gap_features)
-    elif args.output == "both":
-        output_json(result, output_path)
-        output_markdown(result, output_path, gap_features)
+    if args.out:
+        # Explicit --out: backward-compatible behavior
+        output_path = args.out
+        if args.output == "json":
+            output_json(result, output_path)
+        elif args.output == "markdown":
+            output_markdown(result, output_path, gap_features)
+        elif args.output == "both":
+            output_json(result, output_path)
+            output_markdown(result, output_path, gap_features)
+    elif args.output in ("json", "both"):
+        # Structured output to output/<repo-name>/
+        repo_name = args.repo_name or detect_repo_name(args.target)
+        out_dir = Path("output") / repo_name
+        if args.output == "json":
+            output_json(result, str(out_dir / "data" / "xray"))
+        elif args.output == "both":
+            output_json(result, str(out_dir / "data" / "xray"))
+            output_markdown(result, str(out_dir / "xray"), gap_features)
+    else:
+        # Default: markdown to stdout (no --out, no --output or --output markdown)
+        output_markdown(result, None, gap_features)
 
 
 if __name__ == "__main__":

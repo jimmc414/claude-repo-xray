@@ -34,11 +34,11 @@ Together, they compress a multi-million token codebase into actionable intellige
 
 ```bash
 # Full analysis with both outputs
-python xray.py /path/to/project --output both --out ./analysis
+python xray.py /path/to/project --output both
 
 # This creates:
-#   analysis.md   — Curated summary for orientation
-#   analysis.json — Complete data for reference
+#   output/<repo-name>/xray.md        — Curated summary for orientation
+#   output/<repo-name>/data/xray.json — Complete data for reference
 ```
 
 ## X-Ray Presets
@@ -58,7 +58,7 @@ python xray.py . --preset full      # ~15K tokens — comprehensive (default)
 --output both         # Both formats (recommended for agent)
 
 # Output location
---out ./analysis      # Write to analysis.md and/or analysis.json
+--out ./analysis      # Write to analysis.md and/or analysis.json (overrides default output/<repo>/ layout)
 
 # Disable sections
 --no-logic-maps       # Skip complex function analysis
@@ -124,7 +124,7 @@ The `repo_xray` agent uses this skill in four phases:
 
 ### Phase 1: ORIENT
 ```bash
-python xray.py . --output both --out /tmp/xray
+python xray.py . --output both
 ```
 Agent reads markdown summary for quick orientation. Builds mental model of codebase shape.
 

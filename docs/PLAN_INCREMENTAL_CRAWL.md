@@ -24,7 +24,7 @@ These already exist and are ready to use:
 | `imported_by` field | `lib/import_analysis.py:257` | Reverse dependency lookup per module |
 | `build_reverse_lookup()` | `lib/call_analysis.py:321` | "Who calls this function?" |
 | `compute_investigation_targets()` | `lib/investigation_targets.py:765` | Priority computation (can filter by file set) |
-| Findings on disk | `/tmp/deep_crawl/findings/{type}/{name}.md` | Individual per-module markdown files |
+| Findings on disk | `.deep_crawl/findings/{type}/{name}.md` | Individual per-module markdown files |
 | CRAWL_PLAN.md checkboxes | Phase 2 orchestration | `[ ]`/`[x]` task completion tracking |
 | Assembly from disk | Phase 3 | Reads findings directory → section files → DRAFT_ONBOARD.md |
 
@@ -42,7 +42,7 @@ Phase 0b: DIFF ANALYSIS (new)
     │   └── returns: changed + 1-hop importers + 2-hop importers
     │               + affected_impact_clusters + affected_playbooks
     │               + hint_sections (from change log)
-    └── write /tmp/deep_crawl/DIFF_ANALYSIS.json
+    └── write .deep_crawl/DIFF_ANALYSIS.json
     │
     ▼
 Phase 1b: INCREMENTAL PLAN (modified)
@@ -57,7 +57,7 @@ Phase 2: CRAWL (unchanged — operates on filtered plan)
     ├── sub-agents execute only pending tasks (Batches 1-4)
     ├── Batch 5: P7 impact re-analysis for affected hub clusters (Protocol E)
     ├── Batch 6: change scenario re-generation for affected playbooks (Protocol F)
-    ├── write findings to /tmp/deep_crawl/findings_new/{type}/{name}.md
+    ├── write findings to .deep_crawl/findings_new/{type}/{name}.md
     └── batch_status sentinels as usual
     │
     ▼
@@ -67,7 +67,7 @@ Phase 2b: MERGE FINDINGS (new)
     ├── for deleted files: remove corresponding finding
     ├── merge all 7 directories: traces, modules, cross_cutting, conventions,
     │   impact, playbooks, calibration
-    └── write /tmp/deep_crawl/FINDINGS_INDEX.json (source + age per file)
+    └── write .deep_crawl/FINDINGS_INDEX.json (source + age per file)
     │
     ▼
 Phase 2c: IMPACT REFRESH (new, incremental only)
@@ -348,7 +348,7 @@ fi
 
 ```bash
 # Read previous crawl's git hash
-PREV_HASH=$(grep "Git commit:" /tmp/deep_crawl/CRAWL_PLAN.md | awk '{print $NF}')
+PREV_HASH=$(grep "Git commit:" .deep_crawl/CRAWL_PLAN.md | awk '{print $NF}')
 CURRENT_HASH=$(git rev-parse --short HEAD)
 
 if [ "$PREV_HASH" = "$CURRENT_HASH" ]; then
@@ -357,7 +357,7 @@ if [ "$PREV_HASH" = "$CURRENT_HASH" ]; then
 fi
 
 # Run xray on current state (needed for import graph)
-python xray.py . --output json --out /tmp/xray
+python xray.py . --output json
 
 # Compute diff analysis
 python -c "
@@ -367,7 +367,7 @@ from lib.crawl_diff import analyze_diff
 import json
 
 diff = analyze_diff('.', since_ref='$PREV_HASH', ...)
-with open('/tmp/deep_crawl/DIFF_ANALYSIS.json', 'w') as f:
+with open('.deep_crawl/DIFF_ANALYSIS.json', 'w') as f:
     json.dump(diff, f, indent=2, default=str)
 print(f'Changed: {len(diff[\"changed_files\"])} files')
 print(f'Scope: {len(diff[\"impact_scope\"][\"total_scope\"])} modules')
@@ -410,20 +410,20 @@ python -c "
 from lib.crawl_diff import merge_findings
 import json
 
-with open('/tmp/deep_crawl/DIFF_ANALYSIS.json') as f:
+with open('.deep_crawl/DIFF_ANALYSIS.json') as f:
     diff = json.load(f)
 
 result = merge_findings(
-    previous_findings_dir='/tmp/deep_crawl/findings_previous',
-    new_findings_dir='/tmp/deep_crawl/findings',
+    previous_findings_dir='.deep_crawl/findings_previous',
+    new_findings_dir='.deep_crawl/findings',
     diff_analysis=diff,
-    output_dir='/tmp/deep_crawl/findings_merged',
+    output_dir='.deep_crawl/findings_merged',
 )
 
 # Replace findings/ with merged version
 import shutil
-shutil.rmtree('/tmp/deep_crawl/findings')
-shutil.move('/tmp/deep_crawl/findings_merged', '/tmp/deep_crawl/findings')
+shutil.rmtree('.deep_crawl/findings')
+shutil.move('.deep_crawl/findings_merged', '.deep_crawl/findings')
 
 print(json.dumps({k: sum(1 for v in result.values() if v == k) for k in ['new', 'reused', 'deleted']}, indent=2))
 "
@@ -431,7 +431,7 @@ print(json.dumps({k: sum(1 for v in result.values() if v == k) for k in ['new', 
 
 Verify merge:
 ```bash
-ls /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks,calibration}/*.md | wc -l
+ls .deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks,calibration}/*.md | wc -l
 # Should equal: previous count - deleted + added
 ```
 
@@ -476,9 +476,9 @@ For incremental mode, before Phase 2 investigation:
 
 ```bash
 # Preserve previous findings for merge
-if [ -d /tmp/deep_crawl/findings ] && [ -f /tmp/deep_crawl/DIFF_ANALYSIS.json ]; then
-    mv /tmp/deep_crawl/findings /tmp/deep_crawl/findings_previous
-    mkdir -p /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks,calibration}
+if [ -d .deep_crawl/findings ] && [ -f .deep_crawl/DIFF_ANALYSIS.json ]; then
+    mv .deep_crawl/findings .deep_crawl/findings_previous
+    mkdir -p .deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks,calibration}
 fi
 ```
 
@@ -580,8 +580,8 @@ Test cases:
 
 ```
 1. Phase 0: Setup
-   ├── Verify /tmp/deep_crawl/ exists with previous crawl
-   ├── Verify /tmp/xray/ exists (or re-run xray)
+   ├── Verify .deep_crawl/ exists with previous crawl
+   ├── Verify output/<repo>/data/xray.json exists (or re-run xray)
    └── Check git hash match
 
 2. Phase 0b: Diff Analysis (NEW)
@@ -658,7 +658,7 @@ Test cases:
 cd /path/to/any/python/project
 
 # Full crawl first
-python /path/to/xray.py . --output both --out /tmp/xray
+python /path/to/xray.py . --output both
 @deep_crawl full
 
 # Make a small change
@@ -668,12 +668,12 @@ echo "# test comment" >> some_module.py
 @deep_crawl refresh
 
 # Verify:
-cat /tmp/deep_crawl/DIFF_ANALYSIS.json | jq '.changed_files | length'  # Should be 1
-cat /tmp/deep_crawl/DIFF_ANALYSIS.json | jq '.recommendation'          # Should be "incremental"
-cat /tmp/deep_crawl/CRAWL_PLAN.md | grep -c "\[skip\]"                 # Should be > 0
-cat /tmp/deep_crawl/CRAWL_PLAN.md | grep -c "\[ \]"                    # Should be small
-wc -w /tmp/deep_crawl/DEEP_ONBOARD.md                                  # Should be similar to previous
-diff /tmp/deep_crawl/DEEP_ONBOARD.md docs/DEEP_ONBOARD.md              # Should show targeted changes
+cat .deep_crawl/DIFF_ANALYSIS.json | jq '.changed_files | length'  # Should be 1
+cat .deep_crawl/DIFF_ANALYSIS.json | jq '.recommendation'          # Should be "incremental"
+cat .deep_crawl/CRAWL_PLAN.md | grep -c "\[skip\]"                 # Should be > 0
+cat .deep_crawl/CRAWL_PLAN.md | grep -c "\[ \]"                    # Should be small
+wc -w .deep_crawl/DEEP_ONBOARD.md                                  # Should be similar to previous
+diff .deep_crawl/DEEP_ONBOARD.md docs/DEEP_ONBOARD.md              # Should show targeted changes
 ```
 
 ## What This Enables

@@ -45,13 +45,13 @@ the skill clones the repository to a local temp directory and runs the full pipe
 - `git@github.com:owner/repo.git`
 
 **Key differences from local crawl:**
-- Repository is cloned with full history (for git log/blame) to `/tmp/deep_crawl/repo/`
+- Repository is cloned with full history (for git log/blame) to `.deep_crawl/repo/`
 - Xray is run automatically — no manual prerequisite step
 - `DEEP_CRAWL_ROOT` points to the clone directory instead of `$(pwd)`
 - Sub-agent `{ROOT_PATH}` is set to the clone directory
-- Phase 6 delivers output to `/tmp/deep_crawl/output/` instead of the project's `docs/`
+- Phase 6 delivers output to `output/{repo-name}/` (same structure as local crawls)
 - CLAUDE.md in the clone is not modified (read-only analysis of external repo)
-- Cleanup is manual: `rm -rf /tmp/deep_crawl/repo/` when done
+- Cleanup is manual: `rm -rf .deep_crawl/repo/` when done
 
 **What stays the same:** All six phases, quality gates, investigation protocols,
 evidence standards, and validation — the entire pipeline is identical.
@@ -76,16 +76,17 @@ Investigation findings (raw) should target >= 5.0 per 100 words.
 
 | File | Purpose | Location |
 |------|---------|----------|
-| DEEP_ONBOARD.md | Onboarding document (unrestricted, value-driven) | docs/ |
-| CLAUDE.md update | Auto-delivery to all sessions | project root |
-| .onboard_feedback.log | Usage tracking from downstream agents | docs/ |
-| VALIDATION_REPORT.md | QA results | docs/ |
+| DEEP_ONBOARD.md | Onboarding document (unrestricted, value-driven) | `output/{repo-name}/` |
+| xray.md | Structural analysis companion | `output/{repo-name}/` |
+| CLAUDE.md update | Auto-delivery to all sessions (local only) | project root |
+| crawl.log | Full pipeline debug log (gates, spawns, re-spawns, stats) | `output/{repo-name}/data/` |
+| All intermediate data | Findings, sections, plans, validation | `output/{repo-name}/data/` |
 
 ## Prerequisites
 
 Before starting, verify:
-1. X-Ray output exists at `/tmp/xray/xray.json` and `/tmp/xray/xray.md`
-2. If missing, tell the user: "Run `python xray.py . --output both --out /tmp/xray` first."
+1. X-Ray output exists at `output/$REPO_NAME/data/xray.json` and `output/$REPO_NAME/xray.md`
+2. If missing, tell the user: "Run `python xray.py . --output both` first."
 
 ## Six-Phase Workflow
 
@@ -103,7 +104,7 @@ DEEP_CRAWL_REMOTE="${1:-}"  # first argument, if any
 DEEP_CRAWL_ROOT="$(pwd)"
 
 if [[ "$DEEP_CRAWL_REMOTE" =~ ^(https://github\.com/|git@github\.com:|gh:) ]]; then
-    REPO_DIR="/tmp/deep_crawl/repo"
+    REPO_DIR=".deep_crawl/repo"
 
     # Clean previous clone
     [ -d "$REPO_DIR" ] && rm -rf "$REPO_DIR"
@@ -139,39 +140,62 @@ if [[ "$DEEP_CRAWL_REMOTE" =~ ^(https://github\.com/|git@github\.com:|gh:) ]]; t
     fi
 
     if [ -n "$XRAY_PY" ]; then
-        echo "Running xray: python $XRAY_PY $DEEP_CRAWL_ROOT --output both --out /tmp/xray"
-        python "$XRAY_PY" "$DEEP_CRAWL_ROOT" --output both --out /tmp/xray
+        echo "Running xray: python $XRAY_PY $DEEP_CRAWL_ROOT --output both --repo-name $REPO_NAME"
+        python "$XRAY_PY" "$DEEP_CRAWL_ROOT" --output both --repo-name "$REPO_NAME"
     else
         echo "HALT: Cannot find xray.py. Provide its path or run manually:"
-        echo "  python /path/to/xray.py $DEEP_CRAWL_ROOT --output both --out /tmp/xray"
+        echo "  python /path/to/xray.py $DEEP_CRAWL_ROOT --output both"
     fi
 else
     echo "DEEP_CRAWL_MODE=local"
 fi
 
+# Determine repo name and output directory
+REPO_NAME=$(cd "$DEEP_CRAWL_ROOT" && git remote get-url origin 2>/dev/null | sed 's|.*/||; s|\.git$||' || basename "$DEEP_CRAWL_ROOT")
+OUTPUT_DIR="output/$REPO_NAME"
+echo "REPO_NAME=$REPO_NAME"
+echo "OUTPUT_DIR=$OUTPUT_DIR"
+
 # Create working directory structure
-mkdir -p /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks,calibration} \
-         /tmp/deep_crawl/batch_status \
-         /tmp/deep_crawl/sections
+mkdir -p .deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks,calibration} \
+         .deep_crawl/batch_status \
+         .deep_crawl/sections \
+         .deep_crawl/agent_logs/prompts \
+         .deep_crawl/agent_logs/results \
+         "$OUTPUT_DIR/data"
+
+# Initialize crawl log
+CRAWL_LOG="$OUTPUT_DIR/data/crawl.log"
+echo "=== Deep Crawl Log ===" > "$CRAWL_LOG"
+echo "Started: $(date -Iseconds)" >> "$CRAWL_LOG"
+echo "Repo: $REPO_NAME" >> "$CRAWL_LOG"
+echo "Root: $DEEP_CRAWL_ROOT" >> "$CRAWL_LOG"
+echo "Mode: ${DEEP_CRAWL_MODE:-local}" >> "$CRAWL_LOG"
+echo "" >> "$CRAWL_LOG"
+
+# Initialize orchestrator event log
+ORCH_LOG=".deep_crawl/agent_logs/orchestrator.log"
+FILE_COUNT=$(find "$DEEP_CRAWL_ROOT" -type f -not -path "*/.git/*" -not -path "*/node_modules/*" -not -path "*/dist/*" 2>/dev/null | wc -l)
+echo "$(date -Iseconds) PHASE 0 SETUP repo=$REPO_NAME files=$FILE_COUNT" > "$ORCH_LOG"
 
 # Verify xray output exists
-test -f /tmp/xray/xray.json && echo "READY" || echo "Run: python xray.py $DEEP_CRAWL_ROOT --output both --out /tmp/xray"
+test -f "$OUTPUT_DIR/data/xray.json" && echo "READY" || echo "Run: python xray.py $DEEP_CRAWL_ROOT --output both"
 
 # Clean stale data from previous crawl
-if [ -f /tmp/deep_crawl/CRAWL_PLAN.md ]; then
-    PREV_HASH=$(head -1 /tmp/deep_crawl/CRAWL_PLAN.md | grep -oP '[a-f0-9]{7,}' || echo "unknown")
+if [ -f .deep_crawl/CRAWL_PLAN.md ]; then
+    PREV_HASH=$(head -1 .deep_crawl/CRAWL_PLAN.md | grep -oP '[a-f0-9]{7,}' || echo "unknown")
     echo "⚠️ PREVIOUS CRAWL FOUND (hash: $PREV_HASH)"
     echo "Cleaning stale data for fresh crawl..."
-    rm -rf /tmp/deep_crawl/findings/* /tmp/deep_crawl/batch_status/* /tmp/deep_crawl/sections/*
-    rm -f /tmp/deep_crawl/CRAWL_PLAN.md /tmp/deep_crawl/SYNTHESIS_INPUT.md
-    rm -f /tmp/deep_crawl/DRAFT_ONBOARD.md /tmp/deep_crawl/DEEP_ONBOARD.md
-    rm -f /tmp/deep_crawl/VALIDATION_REPORT.md /tmp/deep_crawl/REFINE_LOG.md
+    rm -rf .deep_crawl/findings/* .deep_crawl/batch_status/* .deep_crawl/sections/*
+    rm -f .deep_crawl/CRAWL_PLAN.md .deep_crawl/SYNTHESIS_INPUT.md
+    rm -f .deep_crawl/DRAFT_ONBOARD.md .deep_crawl/DEEP_ONBOARD.md
+    rm -f .deep_crawl/VALIDATION_REPORT.md .deep_crawl/REFINE_LOG.md
 fi
 
 # Check for existing crawl state (resumability)
-if [ -f /tmp/deep_crawl/CRAWL_PLAN.md ]; then
+if [ -f .deep_crawl/CRAWL_PLAN.md ]; then
     echo "PREVIOUS CRAWL FOUND"
-    head -5 /tmp/deep_crawl/CRAWL_PLAN.md
+    head -5 .deep_crawl/CRAWL_PLAN.md
     git -C "$DEEP_CRAWL_ROOT" log --oneline -1
     echo "If hashes match, run @deep_crawl resume"
     echo "If not, this is a stale crawl — starting fresh"
@@ -180,7 +204,7 @@ fi
 
 **DEEP_CRAWL_ROOT usage:** All subsequent phases use `$DEEP_CRAWL_ROOT` wherever the codebase
 root is referenced. For local crawls this equals `$(pwd)` (backward compatible). For remote
-crawls it points to `/tmp/deep_crawl/repo/`. Sub-agent prompts must set `{ROOT_PATH}` to
+crawls it points to `.deep_crawl/repo/`. Sub-agent prompts must set `{ROOT_PATH}` to
 the value of `$DEEP_CRAWL_ROOT`.
 
 **Context management rules:**
@@ -191,8 +215,32 @@ the value of `$DEEP_CRAWL_ROOT`.
 5. If context gets full, checkpoint and suggest `@deep_crawl resume`
 6. Sub-agents write findings directly to disk; you never read findings content until Phase 3
 7. Between batches, check only batch_status/ sentinel files, not findings content
-8. In Phase 3, assembly sub-agents read findings and write section files to /tmp/deep_crawl/sections/.
+8. In Phase 3, assembly sub-agents read findings and write section files to .deep_crawl/sections/.
    The orchestrator reads only sentinel files until assembly. Gotchas extracted via bash pre-step.
+
+**Agent logging protocol (apply at every spawn point):**
+
+Before spawning any sub-agent:
+1. Write the exact prompt text to `.deep_crawl/agent_logs/prompts/{agent_id}.md`
+2. Append to orchestrator.log: `echo "$(date -Iseconds) SPAWN {agent_id} prompt=agent_logs/prompts/{agent_id}.md" >> "$ORCH_LOG"`
+
+After agent completion:
+1. Write the Agent tool's return text + output file stats to `.deep_crawl/agent_logs/results/{agent_id}.md`
+2. Append to orchestrator.log: `echo "$(date -Iseconds) DONE {agent_id} files={count} words={total} facts={total}" >> "$ORCH_LOG"`
+
+After any quality gate:
+1. Append to orchestrator.log: `echo "$(date -Iseconds) GATE {agent_id} {PASS|FAIL} {metrics}" >> "$ORCH_LOG"`
+
+After any re-spawn:
+1. Append to orchestrator.log: `echo "$(date -Iseconds) RESPAWN {agent_id} reason=\"{reason}\"" >> "$ORCH_LOG"`
+
+Agent IDs follow this naming convention:
+- Calibration: `cal_a`, `cal_b`, `cal_c`
+- Investigation: task ID from CRAWL_PLAN.md (e.g., `P1.1`, `P2.3`, `P4.2`)
+- Assembly: `S1`, `S2`, `S3a`, `S3b`, `S4`, `S5`, `S6`
+- Cross-reference: `phase4_crossref`
+- Validation: `phase5_validate`
+- Gap investigation: `gap_{name}`
 
 ---
 
@@ -207,7 +255,7 @@ echo "=== Pre-Flight ==="
 # Xray freshness — robust hash comparison
 XRAY_HASH=$(python3 -c "
 import json
-d = json.load(open('/tmp/xray/xray.json'))
+d = json.load(open('$OUTPUT_DIR/data/xray.json'))
 print(d.get('git_commit', d.get('commit_hash', '?')))
 " 2>/dev/null)
 HEAD=$(git -C "$DEEP_CRAWL_ROOT" rev-parse HEAD 2>/dev/null || echo "no-git")
@@ -254,20 +302,25 @@ else
 fi
 ```
 
-**Halt condition:** If xray hash doesn't match HEAD, stop and tell user to re-run xray. Other warnings are logged to `/tmp/deep_crawl/PREFLIGHT.md` for context during investigation planning.
+**Halt condition:** If xray hash doesn't match HEAD, stop and tell user to re-run xray. Other warnings are logged to `.deep_crawl/PREFLIGHT.md` for context during investigation planning.
 
-Save all pre-flight output to `/tmp/deep_crawl/PREFLIGHT.md` for Phase 1 consumption.
+Save all pre-flight output to `.deep_crawl/PREFLIGHT.md` for Phase 1 consumption. Also append pre-flight output to `$CRAWL_LOG` under a `## Pre-flight` header.
 
 ---
 
 ### Phase 1: PLAN (Build the Crawl Agenda)
 
+```bash
+echo "## Phase 1: PLAN — $(date -Iseconds)" >> "$CRAWL_LOG"
+echo "$(date -Iseconds) PHASE 1 PLAN" >> "$ORCH_LOG"
+```
+
 **Input:** X-Ray JSON output including `investigation_targets`.
 
-1. Read `/tmp/xray/xray.md` for orientation
-2. Read `investigation_targets` from `/tmp/xray/xray.json`
-3. Read `git.function_churn` and `git.velocity` from `/tmp/xray/xray.json`. Files with accelerating velocity or high function-level churn should be prioritized for investigation.
-4. Detect all applicable domain facets using indicators from `.claude/skills/deep-crawl/configs/domain_profiles.json`. A repo can match multiple facets (e.g., a Django app with Celery workers and a CLI gets `web_api` + `async_service` + `cli_tool`). Union their `additional_investigation` tasks into the crawl plan. If no facet matches, use `library` as default. Read `/tmp/deep_crawl/PREFLIGHT.md` for framework detection results to guide facet matching.
+1. Read `output/$REPO_NAME/xray.md` for orientation
+2. Read `investigation_targets` from `output/$REPO_NAME/data/xray.json`
+3. Read `git.function_churn` and `git.velocity` from `output/$REPO_NAME/data/xray.json`. Files with accelerating velocity or high function-level churn should be prioritized for investigation.
+4. Detect all applicable domain facets using indicators from `.claude/skills/deep-crawl/configs/domain_profiles.json`. A repo can match multiple facets (e.g., a Django app with Celery workers and a CLI gets `web_api` + `async_service` + `cli_tool`). Union their `additional_investigation` tasks into the crawl plan. If no facet matches, use `library` as default. Read `.deep_crawl/PREFLIGHT.md` for framework detection results to guide facet matching.
 
 For each matched facet:
 1. Add its `additional_investigation` tasks to the crawl plan at P4 priority (cross-cutting concerns)
@@ -279,19 +332,22 @@ If facet investigation tasks push any batch beyond its max agent limit, split in
 Use the facet's `primary_entity` to determine the adversarial simulation scenario in Phase 5.
 If multiple facets match, the adversarial simulation should use the primary facet's entity.
 4. Produce a prioritized crawl plan using the template at `.claude/skills/deep-crawl/templates/CRAWL_PLAN.md.template`
-5. Save to `/tmp/deep_crawl/CRAWL_PLAN.md`
+5. Save to `.deep_crawl/CRAWL_PLAN.md`
 6. **Module coverage pre-check (mandatory).** After saving the plan, verify P2+P3 task count meets the coverage target:
 
 ```bash
 # === MODULE COVERAGE PRE-CHECK ===
-P23_COUNT=$(grep -c '^\- \[ \] P[23]\.' /tmp/deep_crawl/CRAWL_PLAN.md 2>/dev/null || echo 0)
+P23_COUNT=$(grep -c '^\- \[ \] P[23]\.' .deep_crawl/CRAWL_PLAN.md 2>/dev/null || echo 0)
 TARGET=$(python3 -c "
 import json
-d = json.load(open('/tmp/xray/xray.json'))
+d = json.load(open('$OUTPUT_DIR/data/xray.json'))
 file_count = len(d.get('files', d.get('file_list', [])))
 print(max(10, file_count // 40))
 " 2>/dev/null)
 echo "P2+P3 tasks: $P23_COUNT, coverage target: $TARGET"
+TOTAL_TASKS=$(grep -c '^\- \[ \]' .deep_crawl/CRAWL_PLAN.md 2>/dev/null || echo 0)
+FACETS=$(head -20 .deep_crawl/CRAWL_PLAN.md | grep -oP 'Domain Facets: .*' | sed 's/Domain Facets: //' || echo "none")
+echo "$(date -Iseconds) PHASE 1 PLAN tasks=$TOTAL_TASKS facets=$FACETS" >> "$ORCH_LOG"
 ```
 
 If P23_COUNT < TARGET:
@@ -351,19 +407,24 @@ Thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json`
 
 **Procedure:**
 
+```bash
+echo "$(date -Iseconds) PHASE 1b CALIBRATE" >> "$ORCH_LOG"
+```
+
 1. Parse CRAWL_PLAN.md and select targets per the rules above.
 2. Spawn calibration agents (1-3 depending on repo size). Each agent prompt follows the standard Phase 2 format with these modifications:
    - Quality floor references `calibration_findings` thresholds (400w, 10 FACT, 6.0/100w)
    - Format guidance references `.claude/skills/deep-crawl/configs/exemplar_templates.md` only (calibration findings don't exist yet)
-   - Output path: `/tmp/deep_crawl/findings/calibration/cal_{a|b|c}.md`
-   - Sentinel: `touch /tmp/deep_crawl/batch_status/cal_{a|b|c}.done`
-3. Wait for all calibration sentinels.
+   - Output path: `.deep_crawl/findings/calibration/cal_{a|b|c}.md`
+   - Sentinel: `touch .deep_crawl/batch_status/cal_{a|b|c}.done`
+   - **Before spawning each calibration agent**, apply the agent logging protocol: write the prompt to `.deep_crawl/agent_logs/prompts/cal_{a|b|c}.md` and log the SPAWN event.
+3. Wait for all calibration sentinels. **After each calibration agent completes**, write the Agent tool's return text to `.deep_crawl/agent_logs/results/cal_{a|b|c}.md` and log the DONE event.
 4. Run calibration quality gate:
 
 ```bash
 # === CALIBRATION QUALITY GATE ===
 CAL_GATE=true
-for f in /tmp/deep_crawl/findings/calibration/cal_*.md; do
+for f in .deep_crawl/findings/calibration/cal_*.md; do
     [ -f "$f" ] || continue
     WORDS=$(wc -w < "$f")
     FACTS=$(grep -c '\[FACT' "$f" 2>/dev/null || echo 0)
@@ -375,6 +436,23 @@ for f in /tmp/deep_crawl/findings/calibration/cal_*.md; do
         CAL_GATE=false
     fi
 done
+
+# Log calibration gate results
+echo "## Calibration Gate: $([ "$CAL_GATE" = true ] && echo PASS || echo FAIL)" >> "$CRAWL_LOG"
+for f in .deep_crawl/findings/calibration/cal_*.md; do
+    [ -f "$f" ] || continue
+    AGENT_ID=$(basename "$f" .md)
+    WORDS=$(wc -w < "$f"); FACTS=$(grep -c '\[FACT' "$f" 2>/dev/null || echo 0)
+    echo "  $(basename $f): ${WORDS}w, ${FACTS} FACT" >> "$CRAWL_LOG"
+    [ "$WORDS" -eq 0 ] && continue
+    DENSITY=$((FACTS * 100 / WORDS))
+    if [ "$WORDS" -ge 400 ] && [ "$FACTS" -ge 10 ] && [ "$DENSITY" -ge 6 ]; then
+        echo "$(date -Iseconds) GATE $AGENT_ID PASS words=$WORDS facts=$FACTS density=${DENSITY}/100w" >> "$ORCH_LOG"
+    else
+        echo "$(date -Iseconds) GATE $AGENT_ID FAIL words=$WORDS facts=$FACTS density=${DENSITY}/100w" >> "$ORCH_LOG"
+    fi
+done
+echo "" >> "$CRAWL_LOG"
 ```
 
 **Failure handling:**
@@ -385,19 +463,24 @@ done
 **Integration:**
 - Copy calibration findings into standard finding dirs so they are included in assembly:
   ```bash
-  [ -f /tmp/deep_crawl/findings/calibration/cal_a.md ] && \
-      cp /tmp/deep_crawl/findings/calibration/cal_a.md /tmp/deep_crawl/findings/traces/00_calibration.md
-  [ -f /tmp/deep_crawl/findings/calibration/cal_b.md ] && \
-      cp /tmp/deep_crawl/findings/calibration/cal_b.md /tmp/deep_crawl/findings/modules/00_calibration.md
-  [ -f /tmp/deep_crawl/findings/calibration/cal_c.md ] && \
-      cp /tmp/deep_crawl/findings/calibration/cal_c.md /tmp/deep_crawl/findings/cross_cutting/00_calibration.md
+  [ -f .deep_crawl/findings/calibration/cal_a.md ] && \
+      cp .deep_crawl/findings/calibration/cal_a.md .deep_crawl/findings/traces/00_calibration.md
+  [ -f .deep_crawl/findings/calibration/cal_b.md ] && \
+      cp .deep_crawl/findings/calibration/cal_b.md .deep_crawl/findings/modules/00_calibration.md
+  [ -f .deep_crawl/findings/calibration/cal_c.md ] && \
+      cp .deep_crawl/findings/calibration/cal_c.md .deep_crawl/findings/cross_cutting/00_calibration.md
   ```
 - Mark calibration targets as `[x]` in CRAWL_PLAN.md so Phase 2 doesn't re-investigate them
-- Phase 2 sub-agent prompts reference `/tmp/deep_crawl/findings/calibration/cal_{type}.md` as quality exemplars instead of static exemplars
+- Phase 2 sub-agent prompts reference `.deep_crawl/findings/calibration/cal_{type}.md` as quality exemplars instead of static exemplars
 
 ---
 
 ### Phase 2: CRAWL (Orchestrated Investigation)
+
+```bash
+echo "## Phase 2: CRAWL — $(date -Iseconds)" >> "$CRAWL_LOG"
+echo "$(date -Iseconds) PHASE 2 CRAWL" >> "$ORCH_LOG"
+```
 
 Phase 2 uses parallel sub-agents to investigate the codebase. You act as the **orchestrator** — spawn investigation agents, monitor completion, and verify coverage. Do NOT perform investigation yourself (except as fallback).
 
@@ -434,7 +517,7 @@ Facet investigation tasks have no dependencies on Batch 1-2 and can run in any
 Batch 3 sub-batch. The orchestrator must include the facet's grep_patterns in the
 Protocol C prompt for facet-specific cross-cutting investigations.
 
-**Step 2: Spawn sub-agents.** For each task in a batch, spawn a sub-agent using the Agent tool. Each sub-agent prompt must be **self-contained** with these sections:
+**Step 2: Spawn sub-agents.** For each task in a batch, spawn a sub-agent using the Agent tool. **Before spawning each agent**, apply the agent logging protocol: write the prompt to `.deep_crawl/agent_logs/prompts/{task_id}.md` and log the SPAWN event to orchestrator.log. **After each agent completes**, write the return text to `.deep_crawl/agent_logs/results/{task_id}.md` and log the DONE event. Each sub-agent prompt must be **self-contained** with these sections:
 
 ```
 You are investigating [CODEBASE] at [ROOT_PATH] for an onboarding document.
@@ -451,6 +534,7 @@ You are investigating [CODEBASE] at [ROOT_PATH] for an onboarding document.
 - [ABSENCE]: Searched and confirmed non-existence. Example: "No rate limiting (grep — 0 hits)"
 - Gotchas must be [FACT] claims with file:line.
 - Never include inferences or unverified signals.
+- ACTIVELY SEARCH for [ABSENCE] evidence. At each investigation step, ask: "what should exist here but doesn't?" Missing error handling, missing validation, missing tests, missing docs — these are high-value findings. Target: at least 1 [ABSENCE] per 5 [FACT] citations.
 
 ## Quality Floor (mechanically checked after you finish)
 - Minimum 200 words
@@ -458,40 +542,46 @@ You are investigating [CODEBASE] at [ROOT_PATH] for an onboarding document.
 - Target density: >= 5.0 [FACT] per 100 words
 If your file fails the check, you will be re-spawned to investigate deeper.
 For format guidance, see .claude/skills/deep-crawl/configs/exemplar_templates.md.
-For quality reference from this repo, see /tmp/deep_crawl/findings/calibration/cal_{type}.md.
+For quality reference from this repo, see .deep_crawl/findings/calibration/cal_{type}.md.
 
 ## Output
-Write findings to: [EXACT PATH — e.g., /tmp/deep_crawl/findings/traces/01_cli_run.md]
-When done, write a sentinel: touch /tmp/deep_crawl/batch_status/[TASK_ID].done
+Write findings to: [EXACT PATH — e.g., .deep_crawl/findings/traces/01_cli_run.md]
+When done, write a sentinel: touch .deep_crawl/batch_status/[TASK_ID].done
 
 ## Constraints
 - Read-only: never modify source code
 - Do NOT spawn sub-agents yourself
-- X-Ray output available at /tmp/xray/xray.json and /tmp/xray/xray.md for reference
+- X-Ray output available at output/$REPO_NAME/data/xray.json and output/$REPO_NAME/xray.md for reference
 ```
 
 Use `run_in_background: true` for all sub-agents within a batch to maximize parallelism. **Note:** If sub-agents run sequentially despite `run_in_background: true`, each sub-agent still gets a full context window for its investigation task, which is strictly better than sequential investigation in a single context.
 
 **Step 3: Monitor completion.** After launching a batch, check for sentinel files:
 ```bash
-ls /tmp/deep_crawl/batch_status/*.done 2>/dev/null | wc -l
+ls .deep_crawl/batch_status/*.done 2>/dev/null | wc -l
 ```
 When all expected sentinels exist, the batch is complete.
 
-**Step 3a: SNAPSHOT (before spawning batch).** Record existing findings files so the quality gate only checks new ones:
+**Step 3a: SNAPSHOT (before spawning batch).** Record existing findings files so the quality gate only checks new ones. Log the batch spawn event:
 
 ```bash
 # === FINDINGS SNAPSHOT (before spawning batch) ===
-ls /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks}/*.md \
-    2>/dev/null | sort > /tmp/deep_crawl/_pre_batch_files.txt
+ls .deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks}/*.md \
+    2>/dev/null | sort > .deep_crawl/_pre_batch_files.txt
+
+# Log batch spawn
+BATCH_AGENT_COUNT=$(echo "$BATCH_TASKS" | wc -w)  # set BATCH_TASKS to the task list for this batch
+echo "## Batch $BATCH_NUM: Spawning $BATCH_AGENT_COUNT agents" >> "$CRAWL_LOG"
+echo "  Tasks: $BATCH_TASKS" >> "$CRAWL_LOG"
+echo "  Time: $(date -Iseconds)" >> "$CRAWL_LOG"
 ```
 
 **Step 3b: FINDINGS QUALITY GATE (batch-scoped, mandatory after each batch).** After confirming all sentinel files exist, check only files produced in this batch:
 
 ```bash
 # === FINDINGS QUALITY GATE (batch-scoped) ===
-ls /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks}/*.md \
-    2>/dev/null | sort > /tmp/deep_crawl/_post_batch_files.txt
+ls .deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks}/*.md \
+    2>/dev/null | sort > .deep_crawl/_post_batch_files.txt
 
 GATE_PASS=true
 while IFS= read -r f; do
@@ -501,14 +591,52 @@ while IFS= read -r f; do
         echo "FAIL: $(basename $f) — ${WORDS}w, ${FACTS} FACT (min: 200w, 5 FACT)"
         GATE_PASS=false
     fi
-done < <(comm -13 /tmp/deep_crawl/_pre_batch_files.txt /tmp/deep_crawl/_post_batch_files.txt)
+done < <(comm -13 .deep_crawl/_pre_batch_files.txt .deep_crawl/_post_batch_files.txt)
+
+# Log batch completion and gate result
+echo "  Completed: $(date -Iseconds)" >> "$CRAWL_LOG"
+echo "## Findings Gate (Batch $BATCH_NUM): $([ "$GATE_PASS" = true ] && echo PASS || echo FAIL)" >> "$CRAWL_LOG"
+BATCH_PASSED=0; BATCH_TOTAL=0
+while IFS= read -r f; do
+    AGENT_ID=$(basename "$f" .md)
+    WORDS=$(wc -w < "$f"); FACTS=$(grep -c '\[FACT' "$f" 2>/dev/null || echo 0)
+    echo "  $(basename $f): ${WORDS}w, ${FACTS} FACT" >> "$CRAWL_LOG"
+    BATCH_TOTAL=$((BATCH_TOTAL + 1))
+    if [ "$WORDS" -ge 200 ] && [ "$FACTS" -ge 5 ]; then
+        echo "$(date -Iseconds) GATE $AGENT_ID PASS words=$WORDS facts=$FACTS" >> "$ORCH_LOG"
+        BATCH_PASSED=$((BATCH_PASSED + 1))
+    else
+        echo "$(date -Iseconds) GATE $AGENT_ID FAIL words=$WORDS facts=$FACTS" >> "$ORCH_LOG"
+    fi
+done < <(comm -13 .deep_crawl/_pre_batch_files.txt .deep_crawl/_post_batch_files.txt)
+echo "$(date -Iseconds) BATCH_DONE batch${BATCH_NUM} passed=${BATCH_PASSED}/${BATCH_TOTAL}" >> "$ORCH_LOG"
+echo "" >> "$CRAWL_LOG"
 # If any file fails: re-spawn the failing sub-agent with corrective instructions.
 # Do NOT proceed to next batch until all findings files pass.
 ```
 
-Thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json` under `investigation_findings`. If a file fails, re-spawn the sub-agent with: "Your output had {WORDS}w and {FACTS} [FACT] citations. Minimum is 200w and 5 [FACT]. Investigate deeper — read more source files, trace more hops, grep for more patterns."
+Thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json` under `investigation_findings`. If a file fails, log the re-spawn event and re-spawn the sub-agent:
 
-**Step 4: Checkpoint.** After each batch completes and passes the findings quality gate, update CRAWL_PLAN.md to mark completed tasks with `[x]`. Sub-agents never write to CRAWL_PLAN.md (concurrent writes would corrupt it).
+```bash
+echo "  RE-SPAWN: $(basename $f .md) — reason: findings gate failed (${WORDS}w < 200w min, ${FACTS} < 5 FACT min)" >> "$CRAWL_LOG"
+echo "$(date -Iseconds) RESPAWN $(basename $f .md) reason=\"density ${WORDS}w/${FACTS}FACT below floor\"" >> "$ORCH_LOG"
+```
+
+Re-spawn with: "Your output had {WORDS}w and {FACTS} [FACT] citations. Minimum is 200w and 5 [FACT]. Investigate deeper — read more source files, trace more hops, grep for more patterns."
+
+**Step 4: Checkpoint (mandatory).** After each batch completes and passes the findings quality gate, update CRAWL_PLAN.md to mark completed tasks with `[x]`. Sub-agents never write to CRAWL_PLAN.md (concurrent writes would corrupt it).
+
+```bash
+# Mark completed tasks for batch N — the orchestrator does this, never sub-agents
+# Replace P1/P2/P3/P4 with the actual priority prefix for the completed batch
+for sentinel in .deep_crawl/batch_status/*.done; do
+    TASK_ID=$(basename "$sentinel" .done)
+    sed -i "s/^- \[ \] ${TASK_ID}/- [x] ${TASK_ID}/" .deep_crawl/CRAWL_PLAN.md
+done
+COMPLETED=$(grep -c '^\- \[x\]' .deep_crawl/CRAWL_PLAN.md)
+echo "Checkpoint: $COMPLETED tasks completed"
+echo "## Checkpoint (Batch $BATCH_NUM): $COMPLETED total completed" >> "$CRAWL_LOG"
+```
 
 **Step 5: Handle failures.** After a batch completes:
 - Check which sentinel files are missing — those tasks failed
@@ -533,7 +661,7 @@ Sub-agents receive these protocol instructions verbatim:
 2. Identify the first call to another module
 3. Read that function (full source)
 4. Repeat until terminal side effect (no hop limit — follow the full chain)
-5. Record in /tmp/deep_crawl/findings/traces/{NN}_{name}.md:
+5. Record in .deep_crawl/findings/traces/{NN}_{name}.md:
    entry_function (file:line)
      → called_function (file:line) — what it does in 1 sentence
      → next_function (file:line) — what it does in 1 sentence
@@ -541,6 +669,7 @@ Sub-agents receive these protocol instructions verbatim:
 6. Note branching (error paths, conditional logic) at each hop
 7. Note data transformations between hops
 8. Note gotchas discovered during tracing
+9. [ABSENCE] check: at each hop, note expected-but-missing elements — missing error handling, missing validation, missing logging, missing auth checks, missing null checks. Tag each as [ABSENCE] with grep confirmation.
 
 **TypeScript-specific trace guidance:**
 
@@ -557,7 +686,7 @@ When tracing through TypeScript/JavaScript codebases:
 
 ```
 1. Read the entire module
-2. Write to /tmp/deep_crawl/findings/modules/{module_name}.md:
+2. Write to .deep_crawl/findings/modules/{module_name}.md:
    - What this module does (1-2 sentences of BEHAVIOR)
    - What's non-obvious about it
    - What breaks if you change it (blast radius)
@@ -567,7 +696,8 @@ When tracing through TypeScript/JavaScript codebases:
      - Preconditions
      - Side effects
      - Error behavior
-2b. Check for corresponding test files:
+2b. [ABSENCE] check: for each public function, note expected-but-missing elements — missing docstring on complex method, missing type hints on public API, missing validation on inputs from external boundaries, missing error handling on I/O operations. Tag each as [ABSENCE].
+2c. Check for corresponding test files:
     - Python: Look for tests/test_{module_name}.py, tests/unit/**/test_{module_name}.py,
       tests/{module_name}_test.py, and any test file importing from this module
     - TypeScript/JavaScript: Look for {module_name}.test.ts, {module_name}.spec.ts,
@@ -599,7 +729,8 @@ When deep-reading a TypeScript module, also document:
 3. Read representative examples in full — at least max(3, result_count / 5) examples, sampling from different subsystems
 4. Identify the dominant strategy
 5. Flag deviations from the dominant strategy
-6. Write to /tmp/deep_crawl/findings/cross_cutting/{concern_name}.md
+6. [ABSENCE] check: for the concern being investigated, grep for expected-but-missing implementations. E.g., for error handling: modules with no try/except around I/O; for config: env vars read without defaults; for auth: routes without auth middleware. Tag each as [ABSENCE] with grep evidence.
+7. Write to .deep_crawl/findings/cross_cutting/{concern_name}.md
 ```
 
 **Grep patterns for common concerns (language-adaptive):**
@@ -700,7 +831,8 @@ When the crawl plan includes an exception taxonomy task, Protocol C agents shoul
 3. State the convention as a directive ("always X", "never Y")
 4. Read each flagged deviation
 5. Assess: intentional variation or oversight?
-6. Write to /tmp/deep_crawl/findings/conventions/patterns.md
+6. [ABSENCE] check: for each convention identified, grep for expected adherence in untested modules. Note modules that should follow the convention but don't. Tag as [ABSENCE].
+7. Write to .deep_crawl/findings/conventions/patterns.md
 
 **TypeScript-specific conventions to document:**
 
@@ -730,7 +862,8 @@ When documenting conventions for TypeScript codebases, check for these patterns:
 4. Classify changes as safe vs dangerous:
    - Safe: internal refactoring, adding optional parameters, performance changes
    - Dangerous: signature changes, return type changes, side effect changes, exception changes
-5. Write to /tmp/deep_crawl/findings/impact/{cluster_name}.md:
+5. [ABSENCE] check: for each hub module, note missing safeguards — callers that don't handle the hub's error cases, importers with no tests covering their usage of the hub, type contracts that aren't enforced at the boundary. Tag as [ABSENCE].
+6. Write to .deep_crawl/findings/impact/{cluster_name}.md:
    For each hub module:
    - Module name and importer count
    - High-impact functions with caller counts and impact ratings
@@ -748,6 +881,8 @@ When documenting conventions for TypeScript codebases, check for these patterns:
 3. Read conventions findings for coding patterns to follow
 4. Derive scenarios from domain profile's primary_entity + Extension Points findings:
    - "Add new {primary_entity}" (always include this scenario)
+   - "Modify existing {primary_entity} behavior" (always include — traces the change path through existing wiring, identifies what to update vs what to leave alone)
+   - "Change a data model field" (always include if >=3 domain entities detected — shows the full propagation: model → serialization → consumers → tests → migrations)
    - "Modify {top hub module} behavior" (top 3 hub modules by connection count)
    - "Add new external dependency" (if >3 external deps detected)
 5. For each scenario, build a step-by-step checklist:
@@ -755,7 +890,8 @@ When documenting conventions for TypeScript codebases, check for these patterns:
    - What to create/modify at each step
    - Validation commands (test commands, grep checks)
    - Common mistakes (derived from gotchas and impact analysis)
-6. Write to /tmp/deep_crawl/findings/playbooks/{scenario_name}.md
+   - [ABSENCE] check: for each step, note missing safeguards — steps where there's no test to verify correctness, no migration script, no rollback path. Tag as [ABSENCE].
+6. Write to .deep_crawl/findings/playbooks/{scenario_name}.md
 ```
 
 **Checkpoint discipline:** After each batch completes, update CRAWL_PLAN.md to mark completed tasks. In sequential fallback mode, update after every 5 completed tasks.
@@ -784,6 +920,11 @@ When documenting conventions for TypeScript codebases, check for these patterns:
 
 ### Phase 3: ASSEMBLE (Orchestrated Section Production)
 
+```bash
+echo "## Phase 3: ASSEMBLE — $(date -Iseconds)" >> "$CRAWL_LOG"
+echo "$(date -Iseconds) PHASE 3 ASSEMBLE" >> "$ORCH_LOG"
+```
+
 Phase 3 delegates assembly to parallel sub-agents, each producing specific template sections from their assigned subset of findings. The orchestrator's role is: spawn agents, monitor sentinels, concatenate section files. Do NOT read findings content yourself.
 
 #### Value Hierarchy (shared with all assembly sub-agents)
@@ -798,15 +939,15 @@ Phase 4 may merge Tier 3-4 entries that describe the same fact, but must not dro
 #### Step 0: Concatenate findings (word count reference for retention check)
 
 ```bash
-cat /tmp/deep_crawl/findings/calibration/*.md \
-    /tmp/deep_crawl/findings/traces/*.md \
-    /tmp/deep_crawl/findings/modules/*.md \
-    /tmp/deep_crawl/findings/cross_cutting/*.md \
-    /tmp/deep_crawl/findings/conventions/*.md \
-    /tmp/deep_crawl/findings/impact/*.md \
-    /tmp/deep_crawl/findings/playbooks/*.md \
-    > /tmp/deep_crawl/SYNTHESIS_INPUT.md 2>/dev/null
-wc -w /tmp/deep_crawl/SYNTHESIS_INPUT.md
+cat .deep_crawl/findings/calibration/*.md \
+    .deep_crawl/findings/traces/*.md \
+    .deep_crawl/findings/modules/*.md \
+    .deep_crawl/findings/cross_cutting/*.md \
+    .deep_crawl/findings/conventions/*.md \
+    .deep_crawl/findings/impact/*.md \
+    .deep_crawl/findings/playbooks/*.md \
+    > .deep_crawl/SYNTHESIS_INPUT.md 2>/dev/null
+wc -w .deep_crawl/SYNTHESIS_INPUT.md
 ```
 
 Record the total word count — you will use it to verify retention in Step 8.
@@ -816,14 +957,14 @@ Record the total word count — you will use it to verify retention in Step 8.
 No sub-agent needed. Extract formal gotcha sections from all findings so S5 has them consolidated:
 
 ```bash
-for f in /tmp/deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks}/*.md; do
+for f in .deep_crawl/findings/{traces,modules,cross_cutting,conventions,impact,playbooks}/*.md; do
     gotcha_line=$(grep -n "^## Gotcha\|^### Gotcha" "$f" | head -1 | cut -d: -f1)
     if [ -n "$gotcha_line" ]; then
         echo "### From: $(basename "$f" .md)"
         tail -n +"$gotcha_line" "$f"
         echo ""
     fi
-done > /tmp/deep_crawl/sections/gotcha_extracts.md
+done > .deep_crawl/sections/gotcha_extracts.md
 ```
 
 #### Step 1a: Extract state diagrams from trace findings
@@ -833,22 +974,22 @@ No sub-agent needed. Mechanically grep trace findings for state transition patte
 ```bash
 # Look for state transition patterns in trace findings
 STATE_PATTERNS=$(grep -rn "state\|status\|phase\|stage\|transition\|→.*→" \
-    /tmp/deep_crawl/findings/traces/*.md 2>/dev/null | head -20)
+    .deep_crawl/findings/traces/*.md 2>/dev/null | head -20)
 
 if [ -n "$STATE_PATTERNS" ]; then
-    echo "## State Diagrams" > /tmp/deep_crawl/sections/state_diagrams.md
-    echo "" >> /tmp/deep_crawl/sections/state_diagrams.md
-    echo "State transitions extracted from request traces:" >> /tmp/deep_crawl/sections/state_diagrams.md
-    echo "" >> /tmp/deep_crawl/sections/state_diagrams.md
-    echo '```mermaid' >> /tmp/deep_crawl/sections/state_diagrams.md
-    echo "stateDiagram-v2" >> /tmp/deep_crawl/sections/state_diagrams.md
+    echo "## State Diagrams" > .deep_crawl/sections/state_diagrams.md
+    echo "" >> .deep_crawl/sections/state_diagrams.md
+    echo "State transitions extracted from request traces:" >> .deep_crawl/sections/state_diagrams.md
+    echo "" >> .deep_crawl/sections/state_diagrams.md
+    echo '```mermaid' >> .deep_crawl/sections/state_diagrams.md
+    echo "stateDiagram-v2" >> .deep_crawl/sections/state_diagrams.md
     # Assembly agent S1 will populate the actual transitions
-    echo "    [*] --> TODO_POPULATE_FROM_TRACES" >> /tmp/deep_crawl/sections/state_diagrams.md
-    echo '```' >> /tmp/deep_crawl/sections/state_diagrams.md
+    echo "    [*] --> TODO_POPULATE_FROM_TRACES" >> .deep_crawl/sections/state_diagrams.md
+    echo '```' >> .deep_crawl/sections/state_diagrams.md
     echo "State patterns found — S1 assembly agent will include in Critical Paths section header."
 else
     echo "No state transition patterns found in traces."
-    touch /tmp/deep_crawl/sections/state_diagrams.md  # empty file
+    touch .deep_crawl/sections/state_diagrams.md  # empty file
 fi
 ```
 
@@ -874,7 +1015,7 @@ Before spawning assembly agents, mechanically generate a skeleton of prescribed 
 
 ```bash
 # === STRUCTURAL SKELETON GENERATION ===
-SKEL="/tmp/deep_crawl/sections/_skeleton.md"
+SKEL=".deep_crawl/sections/_skeleton.md"
 echo "# Assembly Skeleton — Prescribed Section Structure" > $SKEL
 echo "# Assembly agents MUST produce every ### listed below for their section." >> $SKEL
 echo "" >> $SKEL
@@ -882,7 +1023,7 @@ echo "" >> $SKEL
 # S1: Critical Paths — one ### per trace finding
 echo "## S1: Critical Paths" >> $SKEL
 N=1
-for f in /tmp/deep_crawl/findings/traces/*.md; do
+for f in .deep_crawl/findings/traces/*.md; do
     [ -f "$f" ] || continue
     [[ "$(basename "$f")" == "00_calibration.md" ]] && continue
     TITLE=$(head -1 "$f" | sed 's/^#* *//' | cut -c1-80)
@@ -893,7 +1034,7 @@ echo "" >> $SKEL
 
 # S2: Module Behavioral Index — one ### per module finding
 echo "## S2: Module Behavioral Index" >> $SKEL
-for f in /tmp/deep_crawl/findings/modules/*.md; do
+for f in .deep_crawl/findings/modules/*.md; do
     [ -f "$f" ] || continue
     [[ "$(basename "$f")" == "00_calibration.md" ]] && continue
     # Extract module path from first line or filename
@@ -905,15 +1046,15 @@ echo "" >> $SKEL
 
 # S3b: Error Handling — one ### per strategy/pattern in cross-cutting findings
 echo "## S3b: Error Handling" >> $SKEL
-if [ -f /tmp/deep_crawl/findings/cross_cutting/error_handling.md ]; then
-    grep '^## \|^### ' /tmp/deep_crawl/findings/cross_cutting/error_handling.md \
+if [ -f .deep_crawl/findings/cross_cutting/error_handling.md ]; then
+    grep '^## \|^### ' .deep_crawl/findings/cross_cutting/error_handling.md \
         | sed 's/^## /### /' | sed 's/^### ### /### /' >> $SKEL
 fi
 echo "" >> $SKEL
 
 # S5: Gotchas — domain cluster headers from module directory groupings
 echo "## S5: Gotchas" >> $SKEL
-ls /tmp/deep_crawl/findings/modules/*.md 2>/dev/null \
+ls .deep_crawl/findings/modules/*.md 2>/dev/null \
     | xargs -I{} head -3 {} \
     | grep -oP '`[^`/]+/' \
     | sort -u | tr -d '`' \
@@ -931,19 +1072,32 @@ echo "Skeleton generated: $(grep -c '^### ' $SKEL) subsections prescribed"
 
 The skeleton is informational, not rigid for every section. S1 and S2 MUST follow it exactly (one ### per finding file). S3b and S5 use it as guidance — they may adjust ### headers based on content but should maintain similar granularity.
 
+#### Step 1d: Verify skeleton exists (blocking gate)
+
+```bash
+test -f .deep_crawl/sections/_skeleton.md || { echo "HALT: Skeleton not generated. Run Step 1c first."; exit 1; }
+SKEL_H3=$(grep -c "^### " .deep_crawl/sections/_skeleton.md)
+echo "Skeleton has $SKEL_H3 prescribed subsections (min: 25)"
+[ "$SKEL_H3" -lt 25 ] && echo "WARN: Skeleton has fewer than 25 subsections — investigation may be shallow"
+```
+
+Do NOT proceed to Step 2 if the skeleton is missing. This prevents assembly agents from producing unstructured output.
+
 #### Step 2: Spawn S1, S2, S3a, S3b, S4 in parallel
+
+**Before spawning each assembly agent**, apply the agent logging protocol: write the prompt to `.deep_crawl/agent_logs/prompts/S{N}.md` and log the SPAWN event. **After each assembly agent completes**, write the return text to `.deep_crawl/agent_logs/results/S{N}.md` and log the DONE event with output file stats.
 
 Launch 5 assembly sub-agents simultaneously (all with `run_in_background: true`):
 
 | Agent | Sections | Input Files | Est. Input |
 |-------|----------|-------------|-----------|
 | **S1** | Critical Paths | `findings/traces/*.md` | ~11K words |
-| **S2** | Module Behavioral Index, Domain Glossary | `findings/modules/*.md` | ~25K words |
+| **S2** | Module Behavioral Index, Domain Glossary | `findings/modules/*.md` | ~25K words (use chunked writes — see protocol below) |
 | **S3a** | Key Interfaces | `findings/modules/*.md` (public API extraction) + `findings/cross_cutting/agent_communication.md` | ~12K words |
 | **S3b** | Error Handling, Shared State | `findings/cross_cutting/{error_handling,initialization,shared_state,database_storage,async_boundaries,exception_taxonomy}.md` + `findings/modules/*.md` (grep for error/exception/retry patterns) | ~16K words |
 | **S4** | Configuration Surface, Conventions | `findings/cross_cutting/{configuration,env_dependencies,llm_providers}.md` + `findings/modules/config.md` + `findings/conventions/*.md` | ~16K words |
 
-**Note:** The file lists above are illustrative examples. Adjust filenames to match actual findings on disk. Use `ls /tmp/deep_crawl/findings/{category}/` to discover actual filenames before constructing prompts.
+**Note:** The file lists above are illustrative examples. Adjust filenames to match actual findings on disk. Use `ls .deep_crawl/findings/{category}/` to discover actual filenames before constructing prompts.
 
 Each sub-agent prompt must be self-contained:
 
@@ -960,7 +1114,7 @@ Read ONLY these files: [FILE PATHS]
 [Copy the relevant section templates verbatim from .claude/skills/deep-crawl/templates/DEEP_ONBOARD.md.template]
 
 ## Structural Contract
-Read /tmp/deep_crawl/sections/_skeleton.md for your section's prescribed ### headers.
+Read .deep_crawl/sections/_skeleton.md for your section's prescribed ### headers.
 - For Module Behavioral Index and Critical Paths: each prescribed ### MUST appear in your output exactly as listed. Each findings file maps to one ###. Do not merge.
 - For Error Handling and Gotchas: use the skeleton's ### headers as guidance. Maintain similar granularity but adjust header wording based on actual content.
 - For other sections: no skeleton constraint — derive structure from content.
@@ -970,7 +1124,7 @@ Read /tmp/deep_crawl/sections/_skeleton.md for your section's prescribed ### hea
 Your output MUST use exactly one `## ` header per template section assigned to you (e.g., `## Error Handling Strategy`, `## Module Behavioral Index`). All subdivisions within a section MUST use `### ` or deeper. Never promote subsection content to `## ` level — a flat document with many `## ` headers destroys navigability. If your template section has subsections, they are `### `. If those subsections have further divisions, they are `#### `.
 
 ## S2 Historical Risk Annotation
-If you are S2 (Module Behavioral Index): for each module ### being assembled, check if it appears in `git.risk`, `git.function_churn`, or `git.velocity` from `/tmp/xray/xray.json`. If it does, append a brief **Historical Risk** note at the end of that module's subsection with: risk score, most-volatile functions, and trend direction. Format: `> **Git risk:** 0.88 — volatile functions: load_config (8 commits, 2 hotfixes). Trend: stable.`
+If you are S2 (Module Behavioral Index): for each module ### being assembled, check if it appears in `git.risk`, `git.function_churn`, or `git.velocity` from `output/$REPO_NAME/data/xray.json`. If it does, append a brief **Historical Risk** note at the end of that module's subsection with: risk score, most-volatile functions, and trend direction. Format: `> **Git risk:** 0.88 — volatile functions: load_config (8 commits, 2 hotfixes). Trend: stable.`
 
 ## S3b Depth Directive
 If you are S3b (Error Handling, Shared State): the Error Handling Strategy section must document the dominant error pattern, per-subsystem deviations, retry strategies, exception hierarchies, and recovery paths. Target: >= 3,500 words for Error Handling alone. Read module findings for error/exception/retry patterns in addition to cross-cutting findings — every module's error handling deviations contribute to this section. If `findings/cross_cutting/exception_taxonomy.md` exists, include it as a subsection under Error Handling: inheritance tree of custom exceptions, raise/catch mapping, uncaught paths, and silent failure patterns (`except: pass`, bare except, log-and-swallow). Silent failures are high-value gotcha candidates — flag them in your gotchas output file.
@@ -992,16 +1146,43 @@ If you are S3b (Error Handling, Shared State): the Error Handling Strategy secti
 - Word count: >= 80% of your input findings word count
 If your section fails, you will be re-spawned.
 For format guidance, see .claude/skills/deep-crawl/configs/exemplar_templates.md.
-For quality reference from this repo, see /tmp/deep_crawl/findings/calibration/cal_{type}.md.
+For quality reference from this repo, see .deep_crawl/findings/calibration/cal_{type}.md.
 
 ## Secondary Output
 Collect every gotcha/warning/danger note encountered → write to:
-/tmp/deep_crawl/sections/gotchas_from_S{N}.md
+.deep_crawl/sections/gotchas_from_S{N}.md
 
 ## Output
-Write each section to its own file: /tmp/deep_crawl/sections/{section_name}.md
+Write each section to its own file: .deep_crawl/sections/{section_name}.md
   (e.g., critical_paths.md, module_index.md, domain_glossary.md)
-Sentinel: touch /tmp/deep_crawl/sections/S{N}.done
+Sentinel: touch .deep_crawl/sections/S{N}.done
+
+## Large Output — Chunked Write Protocol
+If your assembled section exceeds ~25,000 words, you MUST write it in chunks to avoid
+hitting output token limits:
+1. Write the first ~20,000 words to `.deep_crawl/sections/{section_name}.md` (creates the file)
+2. Write each subsequent ~20,000 word chunk by reading back the current file content's
+   last few lines, then appending via a Bash command:
+   `cat >> .deep_crawl/sections/{section_name}.md << 'CHUNK_EOF'`
+   followed by the chunk content and `CHUNK_EOF`
+3. After all chunks are written, touch the sentinel file
+This is critical for S2 (Module Behavioral Index) which often exceeds 25K words on large repos.
+Do NOT attempt to write the entire section in a single Write call if it exceeds 25K words.
+
+## Execution Log (assembly agents only)
+Before your FINAL CHECK, write a brief execution log to `.deep_crawl/agent_logs/results/S{N}.md`:
+- Input: {count} files read, {total_words} words of input
+- Output: {list of files written with word counts}
+- Sections produced: {list}
+- Key structural decisions (e.g., "merged 3 small modules into one ### subsection")
+- Issues encountered (e.g., "finding file X was empty", "skeleton prescribed ### for module not in findings")
+
+## FINAL CHECK (do this before writing sentinel)
+Before touching your sentinel file, verify your output:
+1. Run: `grep -c "^## " <your_output_file>` — MUST be exactly 1 per section you wrote
+2. Run: `grep -c "^# " <your_output_file>` — MUST be exactly 0
+If either check fails, fix your headers before writing the sentinel.
+A section with multiple `## ` headers or any `# ` headers will be rejected by the quality gate.
 
 ## Constraints
 - Read-only: never modify source code
@@ -1012,21 +1193,47 @@ Sentinel: touch /tmp/deep_crawl/sections/S{N}.done
 
 Check for sentinel files. All 5 must complete before proceeding:
 ```bash
-ls /tmp/deep_crawl/sections/S{1,2,3a,3b,4}.done 2>/dev/null | wc -l  # expect 5
+ls .deep_crawl/sections/S{1,2,3a,3b,4}.done 2>/dev/null | wc -l  # expect 5
 ```
 
+**S2 output-limit recovery:** If S2 fails with "exceeded output token maximum" or produces
+no sentinel after other agents complete, the module index is too large for a single agent.
+Split into S2a + S2b:
+- **S2a:** First half of `findings/modules/*.md` files (alphabetically) → `module_index.md`
+- **S2b:** Second half → append to `module_index.md` via `cat >> .deep_crawl/sections/module_index.md`
+- **S2b also writes:** `domain_glossary.md` (small, derived from all module findings)
+- Both use the same prompt template but with split file lists. S2b's prompt includes:
+  `"Append your output to the existing module_index.md file using: cat >> .deep_crawl/sections/module_index.md"`
+Re-spawn with `run_in_background: true`. Wait for both `S2a.done` and `S2b.done`.
+
 #### Step 4: Spawn S5 AND S6 in parallel (depend on S1-S3a-S3b-S4 gotcha outputs)
+
+**Before spawning S5 and S6**, apply the agent logging protocol: write prompts to `.deep_crawl/agent_logs/prompts/S5.md` and `.deep_crawl/agent_logs/prompts/S6.md`, log SPAWN events. **After completion**, write return text to results and log DONE events.
 
 Launch S5 and S6 simultaneously (both with `run_in_background: true`):
 
 | Agent | Sections | Input Files | Est. Input |
 |-------|----------|-------------|-----------|
 | **S5** | Gotchas, Hazards, Extension Points, Reading Order | `sections/gotcha_extracts.md` + `sections/gotchas_from_S{1,2,3a,3b,4}.md` + CRAWL_PLAN.md (for structure) | ~14K words |
-| **S6** | Change Impact Index, Data Contracts, Change Playbooks | `findings/impact/*.md` + `findings/playbooks/*.md` + `findings/modules/*.md` (grep for Pydantic/dataclass) + `sections/state_diagrams.md` | ~15K words |
+| **S6** | Change Impact Index, Data Contracts, Change Playbooks | `findings/impact/*.md` + `findings/playbooks/*.md` + `findings/modules/*.md` (grep for Pydantic/dataclass) + `sections/state_diagrams.md` | ~15K words (use chunked writes if output exceeds 25K words) |
 
 S5's prompt follows the same template as S1-S4, with these additions for the **Gotchas** section:
 
 Organize gotchas into domain-cluster ### subsections derived from the investigation's subsystem structure (e.g., "Agent System", "Data Models", "Execution Engine", "LLM Integration", "Configuration"). Derive cluster names from the module findings directory — group `findings/modules/*.md` by top-level package directory. Within each cluster, order entries by severity (critical first). Prefix each entry with severity tag: `[CRITICAL]`, `[HIGH]`, or `[MEDIUM]`. Target: one ### per 5-15 gotchas. Never put more than 15 gotchas under a single ### heading.
+
+**Severity calibration (mandatory):** Read `.claude/skills/deep-crawl/configs/quality_gates.json` field `gotcha_severity_criteria` before assigning severity tags. Apply these rules strictly:
+- **CRITICAL** = active data loss, security vulnerability, or silent corruption in production NOW. Not "could cause problems" — "is causing problems." Expect <=5% of all gotchas to be CRITICAL.
+- **HIGH** = behavioral surprise that causes bugs during common modification tasks. Dormant until code nearby is changed.
+- **MEDIUM** = confusing or misleading code that wastes time but doesn't break production.
+
+After tagging all gotchas, run a self-check: count CRITICAL gotchas. If CRITICAL count > total_gotchas * 0.05, review each CRITICAL and demote any that are "potential problem" rather than "active problem" to HIGH. Log: `Severity calibration: {N} CRITICAL, {M} HIGH, {K} MEDIUM ({N/total}% CRITICAL)`.
+
+**Root-cause clustering (mandatory):** After severity tagging, identify gotchas that share a common root cause — same design decision, same pattern, same underlying assumption. For each cluster of >=2 related gotchas:
+1. Add `*Root cause: {1-sentence description}*` after the cluster's ### heading
+2. Cross-link related gotchas: `(related: #{N} — same root cause)`
+3. If related gotchas span different domain clusters, add the cross-link across clusters
+
+This surfaces patterns like "these 5 gotchas all stem from the dual Pydantic/SQLAlchemy model pattern" rather than treating each as independent.
 
 S5's template sections remain: Gotchas, Hazards — Do Not Read, Extension Points, and Reading Order from DEEP_ONBOARD.md.template.
 
@@ -1045,9 +1252,18 @@ S6's prompt for **Data Contracts**:
 - For TypeScript: extract all interfaces, type aliases (especially discriminated unions), Zod schemas, class-validator decorated classes, and enums. Also check xray `ts_interfaces` and `ts_type_aliases` data.
 - Format as table with Model/Interface, File, Type (interface/class/enum/schema), Key Fields, Validation (Zod/class-validator/none), Gotcha.
 
-S6's prompt for **Change Impact Index**: organize impact findings by hub module cluster. Each cluster gets a table showing importers, high-impact functions, signature-change consequences, behavior-change consequences, safe vs dangerous changes. Also read `git.coupling_clusters` from `/tmp/xray/xray.json`. For each cluster, add a **Hidden Coupling** row to the relevant hub module's impact table. Format: `When modifying {file_a}, also verify {file_b} — {count} historical co-changes with no import relationship.`
+**Field-level deep trace (mandatory for top contracts):** For the top 3-5 contracts by importer count (from xray import graph), produce a **Cross-Boundary Flow Analysis** subsection with field-level specificity:
+1. Show the exact fields at creation (producer side) with types and defaults
+2. Show each transformation boundary — where fields are added, dropped, renamed, or re-typed
+3. Show the final shape at consumption (consumer side)
+4. Flag field divergence: where the same logical entity has different field sets in different representations (e.g., Pydantic model has 12 fields, SQLAlchemy model has 10, `to_dict()` emits 8)
+5. Include `[FACT]` citations at each boundary: `created at {file}:{line}, transformed at {file}:{line}, consumed at {file}:{line}`
 
-S6's prompt for **Change Playbooks**: organize playbook findings into step-by-step checklists with validation commands and common mistakes.
+This depth is what allows a downstream agent to implement a new consumer without reading source. Summary-level tables ("Model X has fields a, b, c") are insufficient — the value is in the boundary transformations.
+
+S6's prompt for **Change Impact Index**: organize impact findings by hub module cluster. Each cluster gets a table showing importers, high-impact functions, signature-change consequences, behavior-change consequences, safe vs dangerous changes. Also read `git.coupling_clusters` from `output/$REPO_NAME/data/xray.json`. For each cluster, add a **Hidden Coupling** row to the relevant hub module's impact table. Format: `When modifying {file_a}, also verify {file_b} — {count} historical co-changes with no import relationship.`
+
+S6's prompt for **Change Playbooks**: organize playbook findings into step-by-step checklists with validation commands and common mistakes. Protocol F now produces both "add new" and "modify existing" playbooks — ensure both types are assembled. Modification playbooks are especially valuable because they trace through existing wiring (what to change, what to leave alone, what breaks silently) rather than creating from scratch.
 
 S6's prompt must include this **Playbook Quality Floor (mechanically checked after you finish)**:
 ```
@@ -1058,7 +1274,7 @@ S6's prompt must include this **Playbook Quality Floor (mechanically checked aft
 - Citation density: >= 3.0 [FACT] per 100 words
 If any playbook fails, you will be re-spawned.
 For format guidance, see .claude/skills/deep-crawl/configs/exemplar_templates.md.
-For quality reference from this repo, see /tmp/deep_crawl/findings/calibration/cal_{type}.md.
+For quality reference from this repo, see .deep_crawl/findings/calibration/cal_{type}.md.
 ```
 Thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json` under `playbooks`.
 
@@ -1071,7 +1287,7 @@ S6's prompt for **Change Playbooks** quality checks:
 #### Step 5: Monitor S5+S6 completion
 
 ```bash
-ls /tmp/deep_crawl/sections/S{5,6}.done 2>/dev/null | wc -l  # expect 2
+ls .deep_crawl/sections/S{5,6}.done 2>/dev/null | wc -l  # expect 2
 ```
 
 #### Step 5b: SECTION QUALITY GATE (mandatory before concatenation)
@@ -1085,7 +1301,7 @@ MISSING=""
 for section in critical_paths module_index change_impact_index \
     key_interfaces data_contracts error_handling shared_state \
     config_surface conventions gotchas hazards extension_points; do
-    [ -f "/tmp/deep_crawl/sections/${section}.md" ] || MISSING="$MISSING $section"
+    [ -f ".deep_crawl/sections/${section}.md" ] || MISSING="$MISSING $section"
 done
 [ -n "$MISSING" ] && echo "GATE FAIL — missing sections:$MISSING"
 
@@ -1099,7 +1315,7 @@ get_density_floor() {
     esac
 }
 
-for f in /tmp/deep_crawl/sections/*.md; do
+for f in .deep_crawl/sections/*.md; do
     [ -f "$f" ] || continue
     SECTION=$(basename "$f" .md)
     WORDS=$(wc -w < "$f")
@@ -1110,6 +1326,27 @@ for f in /tmp/deep_crawl/sections/*.md; do
     DENSITY=$((FACTS * 100 / WORDS))
     [ "$DENSITY" -lt "$FLOOR" ] && echo "FAIL: $SECTION — density ${DENSITY}/100w (floor: ${FLOOR})"
 done
+
+# Log section quality gate results
+echo "## Section Quality Gate" >> "$CRAWL_LOG"
+[ -n "$MISSING" ] && echo "  Missing sections:$MISSING" >> "$CRAWL_LOG"
+for f in .deep_crawl/sections/*.md; do
+    [ -f "$f" ] || continue
+    SECTION=$(basename "$f" .md)
+    [[ "$SECTION" == _* || "$SECTION" == S* || "$SECTION" == gotchas_from_* || "$SECTION" == header || "$SECTION" == footer || "$SECTION" == document_map ]] && continue
+    WORDS=$(wc -w < "$f"); FACTS=$(grep -c '\[FACT' "$f" 2>/dev/null || echo 0)
+    echo "  $SECTION: ${WORDS}w, ${FACTS} FACT" >> "$CRAWL_LOG"
+    FLOOR=$(get_density_floor "$SECTION")
+    if [ "$FLOOR" -gt 0 ] && [ "$WORDS" -gt 0 ]; then
+        DENSITY=$((FACTS * 100 / WORDS))
+        if [ "$DENSITY" -ge "$FLOOR" ]; then
+            echo "$(date -Iseconds) GATE $SECTION PASS words=$WORDS facts=$FACTS density=${DENSITY}/100w" >> "$ORCH_LOG"
+        else
+            echo "$(date -Iseconds) GATE $SECTION FAIL words=$WORDS facts=$FACTS density=${DENSITY}/100w floor=${FLOOR}" >> "$ORCH_LOG"
+        fi
+    fi
+done
+echo "" >> "$CRAWL_LOG"
 ```
 
 Thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json` under `assembly_sections.density_tiers`.
@@ -1120,16 +1357,16 @@ If density fails: re-spawn the section agent with "Your section has {DENSITY} [F
 
 ```bash
 # === PLAYBOOK QUALITY GATE (mandatory after S6 — per playbook, not aggregate) ===
-if [ -f /tmp/deep_crawl/sections/change_playbooks.md ]; then
+if [ -f .deep_crawl/sections/change_playbooks.md ]; then
     # Split by ### headings into individual playbook files
-    mkdir -p /tmp/deep_crawl/_pb_check
-    csplit -z /tmp/deep_crawl/sections/change_playbooks.md \
+    mkdir -p .deep_crawl/_pb_check
+    csplit -z .deep_crawl/sections/change_playbooks.md \
         '/^### /' '{*}' \
-        --prefix=/tmp/deep_crawl/_pb_check/pb_ \
+        --prefix=.deep_crawl/_pb_check/pb_ \
         --suffix-format='%03d.md' 2>/dev/null
 
     PB_GATE=true
-    for pb in /tmp/deep_crawl/_pb_check/pb_*.md; do
+    for pb in .deep_crawl/_pb_check/pb_*.md; do
         [ -s "$pb" ] || continue
         TITLE=$(head -1 "$pb" | sed 's/^### //')
         WORDS=$(wc -w < "$pb")
@@ -1141,15 +1378,56 @@ if [ -f /tmp/deep_crawl/sections/change_playbooks.md ]; then
             PB_GATE=false
         fi
     done
-    rm -rf /tmp/deep_crawl/_pb_check
+
+    # Log playbook quality gate results
+    echo "## Playbook Quality Gate: $([ "$PB_GATE" = true ] && echo PASS || echo FAIL)" >> "$CRAWL_LOG"
+    for pb in .deep_crawl/_pb_check/pb_*.md; do
+        [ -s "$pb" ] || continue
+        TITLE=$(head -1 "$pb" | sed 's/^### //')
+        WORDS=$(wc -w < "$pb"); FACTS=$(grep -c '\[FACT' "$pb" 2>/dev/null || echo 0)
+        echo "  $TITLE: ${WORDS}w, ${FACTS} FACT" >> "$CRAWL_LOG"
+    done
+    echo "" >> "$CRAWL_LOG"
+
+    rm -rf .deep_crawl/_pb_check
 
     if [ "$PB_GATE" = false ]; then
         echo "Re-spawn S6 with corrective instructions for failing playbooks."
+        echo "  RE-SPAWN: S6 — reason: playbook quality gate failed" >> "$CRAWL_LOG"
     fi
 fi
 ```
 
 Playbook thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json` under `playbooks`.
+
+```bash
+# === SEVERITY CALIBRATION GATE (mandatory after S5 — prevents CRITICAL inflation) ===
+if [ -f .deep_crawl/sections/gotchas.md ]; then
+    TOTAL_GOTCHAS=$(grep -c '^\([0-9]\+\.\|[0-9]\+)\) \[' .deep_crawl/sections/gotchas.md 2>/dev/null || echo 0)
+    CRITICAL_COUNT=$(grep -c '\[CRITICAL\]' .deep_crawl/sections/gotchas.md 2>/dev/null || echo 0)
+    HIGH_COUNT=$(grep -c '\[HIGH\]' .deep_crawl/sections/gotchas.md 2>/dev/null || echo 0)
+    MEDIUM_COUNT=$(grep -c '\[MEDIUM\]' .deep_crawl/sections/gotchas.md 2>/dev/null || echo 0)
+
+    echo "Severity distribution: $CRITICAL_COUNT CRITICAL, $HIGH_COUNT HIGH, $MEDIUM_COUNT MEDIUM ($TOTAL_GOTCHAS total)"
+
+    # Log severity gate results
+    echo "## Severity Gate" >> "$CRAWL_LOG"
+    echo "  Distribution: $CRITICAL_COUNT CRITICAL, $HIGH_COUNT HIGH, $MEDIUM_COUNT MEDIUM ($TOTAL_GOTCHAS total)" >> "$CRAWL_LOG"
+
+    if [ "$TOTAL_GOTCHAS" -gt 0 ]; then
+        CRIT_PCT=$((CRITICAL_COUNT * 100 / TOTAL_GOTCHAS))
+        if [ "$CRIT_PCT" -gt 5 ]; then
+            echo "SEVERITY WARN: ${CRIT_PCT}% CRITICAL exceeds 5% ceiling. Re-spawn S5 with:"
+            echo "  'Review each [CRITICAL] against quality_gates.json gotcha_severity_criteria."
+            echo "   CRITICAL = active production problem NOW. Demote potential-but-dormant issues to HIGH.'"
+            echo "  RE-SPAWN: S5 — reason: severity gate failed (${CRIT_PCT}% CRITICAL > 5% ceiling)" >> "$CRAWL_LOG"
+        fi
+    fi
+    echo "" >> "$CRAWL_LOG"
+fi
+```
+
+Severity thresholds are defined in `.claude/skills/deep-crawl/configs/quality_gates.json` under `gotcha_severity_criteria`.
 
 #### Step 5c: TRACEABILITY GATE (mandatory before orchestrator sections)
 
@@ -1161,16 +1439,21 @@ TRACE_FAILS=0
 while IFS= read -r task; do
     KEY=$(echo "$task" | grep -oP '`[^`]+`' | head -1 | tr -d '`')
     [ -z "$KEY" ] && continue
-    if ! grep -ql "$KEY" /tmp/deep_crawl/sections/*.md 2>/dev/null; then
+    if ! grep -ql "$KEY" .deep_crawl/sections/*.md 2>/dev/null; then
         echo "TRACE FAIL: $KEY not found in assembled sections"
         # Identify the source finding
-        FINDING=$(grep -rl "$KEY" /tmp/deep_crawl/findings/*/*.md 2>/dev/null | head -1)
+        FINDING=$(grep -rl "$KEY" .deep_crawl/findings/*/*.md 2>/dev/null | head -1)
         [ -n "$FINDING" ] && echo "  Source: $FINDING"
         TRACE_FAILS=$((TRACE_FAILS + 1))
     fi
-done < <(grep '^\- \[x\]' /tmp/deep_crawl/CRAWL_PLAN.md)
+done < <(grep '^\- \[x\]' .deep_crawl/CRAWL_PLAN.md)
 
 echo "Traceability: $TRACE_FAILS tasks missing from output"
+
+# Log traceability gate results
+echo "## Traceability Gate" >> "$CRAWL_LOG"
+echo "  Failures: $TRACE_FAILS" >> "$CRAWL_LOG"
+echo "" >> "$CRAWL_LOG"
 ```
 
 If TRACE_FAILS > 0:
@@ -1186,7 +1469,11 @@ Log: `Step 5c: {total} tasks traced, {TRACE_FAILS} gaps, {recovered} recovered`
 The orchestrator writes these directly (no sub-agent needed — they are small, <500 words total):
 
 - **Identity** — from xray.md and investigation findings. 1-3 sentences: what it is, what it does, what the stack is. Verify framework claims against investigation findings — only list a framework as part of the stack if the investigation confirmed it is actively used (mounted routes, configured endpoints), not merely imported. If a framework is imported but not wired up, note it as "library dependency, not deployed as service."
-- **Gaps** — from Phase 2 coverage check results
+- **Gaps** — from Phase 2 coverage check results. Each gap must include:
+  1. **Scope:** what specifically is missing (not generic "testing is thin" — quantify: "37 async functions have no corresponding test coverage")
+  2. **Impact:** what a downstream agent cannot do because of this gap (e.g., "cannot safely refactor error handling without reading 12+ source files")
+  3. **Investigation cost:** estimated effort to fill (e.g., "~5 module deep-reads targeting the worker subsystem")
+  Gaps without scope quantification or impact estimates are not useful — they just say "something is missing" without helping prioritize.
 - **Header metadata** — file count, token count, timestamp, git hash
 - **Footer metadata** — task counts, coverage scope, evidence counts, hub module count, playbook count
 - **Environment Bootstrap** — read assembled `config_surface.md` + cross-cutting findings for external systems. Produce bootstrap checklist with:
@@ -1197,40 +1484,109 @@ The orchestrator writes these directly (no sub-agent needed — they are small, 
   - **How to run** — the actual command to start the application (not just setup).
   Write to `sections/environment_bootstrap.md`.
 
-Write to `/tmp/deep_crawl/sections/header.md`, `/tmp/deep_crawl/sections/identity.md`, `/tmp/deep_crawl/sections/gaps.md`, `/tmp/deep_crawl/sections/environment_bootstrap.md`, `/tmp/deep_crawl/sections/footer.md`.
+Write to `.deep_crawl/sections/header.md`, `.deep_crawl/sections/identity.md`, `.deep_crawl/sections/gaps.md`, `.deep_crawl/sections/environment_bootstrap.md`, `.deep_crawl/sections/footer.md`.
+
+#### Step 6b: Header Normalization (mandatory before concatenation)
+
+Mechanically normalize all section files to enforce the hierarchy rule: each section file gets exactly one `## ` header. This prevents raw investigation headers from leaking into the final document (the exact failure mode that caused n8n's 68 `##` headers).
+
+```bash
+# === HEADER NORMALIZATION ===
+for f in .deep_crawl/sections/*.md; do
+    [ -f "$f" ] || continue
+    SECTION=$(basename "$f" .md)
+    # Skip non-content files
+    [[ "$SECTION" == _* || "$SECTION" == S* || "$SECTION" == gotchas_from_* ]] && continue
+
+    H2_COUNT=$(grep -c "^## " "$f" 2>/dev/null || echo 0)
+    H1_COUNT=$(grep -c "^# " "$f" 2>/dev/null || echo 0)
+
+    if [ "$H1_COUNT" -gt 0 ]; then
+        echo "NORMALIZE: $SECTION has $H1_COUNT h1 headers — demoting all # to ##, ## to ###, ### to ####"
+        sed -i 's/^#### /##### /g; s/^### /#### /g; s/^## /### /g; s/^# /## /g' "$f"
+    elif [ "$H2_COUNT" -gt 1 ]; then
+        echo "WARN: $SECTION has $H2_COUNT h2 headers (expected 1) — demoting extra ## to ###"
+        # Keep first ## as-is, demote the rest
+        awk 'BEGIN{seen=0} /^## /{seen++; if(seen>1){sub(/^## /,"### ")}} {print}' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+    fi
+done
+
+# Verify: each section file should now have exactly 1 ## header
+VIOLATIONS=0
+for f in .deep_crawl/sections/*.md; do
+    [ -f "$f" ] || continue
+    SECTION=$(basename "$f" .md)
+    [[ "$SECTION" == _* || "$SECTION" == S* || "$SECTION" == gotchas_from_* || "$SECTION" == header || "$SECTION" == footer ]] && continue
+    H2=$(grep -c "^## " "$f" 2>/dev/null || echo 0)
+    [ "$H2" -ne 1 ] && echo "HEADER VIOLATION: $SECTION has $H2 ## headers (expected 1)" && VIOLATIONS=$((VIOLATIONS + 1))
+done
+echo "Header normalization: $VIOLATIONS violations remaining"
+[ "$VIOLATIONS" -gt 0 ] && echo "FIX REQUIRED: Manually inspect and correct violating section files before proceeding."
+
+# Log header normalization to orchestrator.log
+for f in .deep_crawl/sections/*.md; do
+    [ -f "$f" ] || continue
+    SECTION=$(basename "$f" .md)
+    [[ "$SECTION" == _* || "$SECTION" == S* || "$SECTION" == gotchas_from_* || "$SECTION" == header || "$SECTION" == footer ]] && continue
+    H1=$(grep -c "^# " "$f" 2>/dev/null || echo 0)
+    H2=$(grep -c "^## " "$f" 2>/dev/null || echo 0)
+    RESULT="PASS"
+    [ "$H2" -ne 1 ] && RESULT="FAIL"
+    echo "$(date -Iseconds) HEADER_NORM $SECTION h1=$H1 h2=$H2 $RESULT" >> "$ORCH_LOG"
+done
+```
+
+#### Step 6c: Generate Document Map
+
+Generate a navigational Document Map section from the actual sections on disk:
+
+```bash
+echo "## Document Map" > .deep_crawl/sections/document_map.md
+echo "" >> .deep_crawl/sections/document_map.md
+echo "| Section | What It Covers |" >> .deep_crawl/sections/document_map.md
+echo "|---------|---------------|" >> .deep_crawl/sections/document_map.md
+for f in critical_paths module_index change_impact_index key_interfaces \
+    data_contracts error_handling shared_state domain_glossary config_surface \
+    conventions gotchas hazards extension_points change_playbooks reading_order \
+    environment_bootstrap; do
+    [ -f ".deep_crawl/sections/${f}.md" ] && \
+    echo "| $(head -1 .deep_crawl/sections/${f}.md | sed 's/^## //; s/ (see.*//') | $(wc -w < .deep_crawl/sections/${f}.md) words |"
+done >> .deep_crawl/sections/document_map.md
+```
 
 #### Step 7: Assemble DRAFT_ONBOARD.md
 
 Concatenate all section files in template order:
 
 ```bash
-cat /tmp/deep_crawl/sections/header.md \
-    /tmp/deep_crawl/sections/identity.md \
-    /tmp/deep_crawl/sections/critical_paths.md \
-    /tmp/deep_crawl/sections/module_index.md \
-    /tmp/deep_crawl/sections/change_impact_index.md \
-    /tmp/deep_crawl/sections/key_interfaces.md \
-    /tmp/deep_crawl/sections/data_contracts.md \
-    /tmp/deep_crawl/sections/error_handling.md \
-    /tmp/deep_crawl/sections/shared_state.md \
-    /tmp/deep_crawl/sections/domain_glossary.md \
-    /tmp/deep_crawl/sections/config_surface.md \
-    /tmp/deep_crawl/sections/conventions.md \
-    /tmp/deep_crawl/sections/gotchas.md \
-    /tmp/deep_crawl/sections/hazards.md \
-    /tmp/deep_crawl/sections/extension_points.md \
-    /tmp/deep_crawl/sections/change_playbooks.md \
-    /tmp/deep_crawl/sections/reading_order.md \
-    /tmp/deep_crawl/sections/environment_bootstrap.md \
-    /tmp/deep_crawl/sections/gaps.md \
-    /tmp/deep_crawl/sections/footer.md \
-    > /tmp/deep_crawl/DRAFT_ONBOARD.md
+cat .deep_crawl/sections/header.md \
+    .deep_crawl/sections/document_map.md \
+    .deep_crawl/sections/identity.md \
+    .deep_crawl/sections/critical_paths.md \
+    .deep_crawl/sections/module_index.md \
+    .deep_crawl/sections/change_impact_index.md \
+    .deep_crawl/sections/key_interfaces.md \
+    .deep_crawl/sections/data_contracts.md \
+    .deep_crawl/sections/error_handling.md \
+    .deep_crawl/sections/shared_state.md \
+    .deep_crawl/sections/domain_glossary.md \
+    .deep_crawl/sections/config_surface.md \
+    .deep_crawl/sections/conventions.md \
+    .deep_crawl/sections/gotchas.md \
+    .deep_crawl/sections/hazards.md \
+    .deep_crawl/sections/extension_points.md \
+    .deep_crawl/sections/change_playbooks.md \
+    .deep_crawl/sections/reading_order.md \
+    .deep_crawl/sections/environment_bootstrap.md \
+    .deep_crawl/sections/gaps.md \
+    .deep_crawl/sections/footer.md \
+    > .deep_crawl/DRAFT_ONBOARD.md
 ```
 
 #### Step 8: Verify retention
 
 ```bash
-wc -w /tmp/deep_crawl/SYNTHESIS_INPUT.md /tmp/deep_crawl/DRAFT_ONBOARD.md
+wc -w .deep_crawl/SYNTHESIS_INPUT.md .deep_crawl/DRAFT_ONBOARD.md
 ```
 
 If the draft is under 80% of SYNTHESIS_INPUT.md word count, an assembly agent dropped findings. Identify which section agent under-produced by comparing each section's word count against its input word count, and re-spawn that agent with: "Your previous output was N words from M words of input. Include every finding — you dropped content. The context window is 1M tokens and there is no reason to exclude findings."
@@ -1241,22 +1597,22 @@ This is a mechanical step — no LLM needed. Extract all file:line citations tha
 
 ```bash
 # Extract unique file:line citations from [FACT]-tagged lines in findings
-grep '\[FACT' /tmp/deep_crawl/SYNTHESIS_INPUT.md \
+grep '\[FACT' .deep_crawl/SYNTHESIS_INPUT.md \
   | grep -oP '[\w/.-]+\.(py|ts|tsx|js|jsx):\d+' | sort -u \
-  > /tmp/deep_crawl/_synthesis_fact_citations.txt
+  > .deep_crawl/_synthesis_fact_citations.txt
 
 # Extract unique file:line citations from assembled draft
-grep -oP '[\w/.-]+\.(py|ts|tsx|js|jsx):\d+' /tmp/deep_crawl/DRAFT_ONBOARD.md \
-  | sort -u > /tmp/deep_crawl/_draft_citations.txt
+grep -oP '[\w/.-]+\.(py|ts|tsx|js|jsx):\d+' .deep_crawl/DRAFT_ONBOARD.md \
+  | sort -u > .deep_crawl/_draft_citations.txt
 
 # Find dropped citations
-comm -23 /tmp/deep_crawl/_synthesis_fact_citations.txt \
-         /tmp/deep_crawl/_draft_citations.txt \
-  > /tmp/deep_crawl/_dropped_citations.txt
+comm -23 .deep_crawl/_synthesis_fact_citations.txt \
+         .deep_crawl/_draft_citations.txt \
+  > .deep_crawl/_dropped_citations.txt
 
-TOTAL=$(wc -l < /tmp/deep_crawl/_synthesis_fact_citations.txt)
-RETAINED=$(comm -12 /tmp/deep_crawl/_synthesis_fact_citations.txt /tmp/deep_crawl/_draft_citations.txt | wc -l)
-DROPPED=$(wc -l < /tmp/deep_crawl/_dropped_citations.txt)
+TOTAL=$(wc -l < .deep_crawl/_synthesis_fact_citations.txt)
+RETAINED=$(comm -12 .deep_crawl/_synthesis_fact_citations.txt .deep_crawl/_draft_citations.txt | wc -l)
+DROPPED=$(wc -l < .deep_crawl/_dropped_citations.txt)
 
 echo "Fact citations: $RETAINED/$TOTAL retained, $DROPPED dropped"
 ```
@@ -1266,8 +1622,8 @@ If DROPPED > 0, recover the dropped facts:
 ```bash
 # For each dropped citation, extract the full [FACT] line from SYNTHESIS_INPUT.md
 while IFS= read -r cite; do
-    grep "$cite" /tmp/deep_crawl/SYNTHESIS_INPUT.md | grep '\[FACT'
-done < /tmp/deep_crawl/_dropped_citations.txt > /tmp/deep_crawl/_dropped_facts.txt
+    grep "$cite" .deep_crawl/SYNTHESIS_INPUT.md | grep '\[FACT'
+done < .deep_crawl/_dropped_citations.txt > .deep_crawl/_dropped_facts.txt
 ```
 
 Classify each dropped fact by the section it belongs to (using the finding file it came from):
@@ -1276,13 +1632,13 @@ Classify each dropped fact by the section it belongs to (using the finding file 
 - Facts from `findings/cross_cutting/` → append to the corresponding section (Error Handling, Shared State, etc.)
 - Facts from `findings/conventions/` → append to Conventions section
 
-Append dropped facts to the appropriate section files in `/tmp/deep_crawl/sections/`, then re-concatenate DRAFT_ONBOARD.md using the Step 7 concatenation command.
+Append dropped facts to the appropriate section files in `.deep_crawl/sections/`, then re-concatenate DRAFT_ONBOARD.md using the Step 7 concatenation command.
 
 Log: `Step 8b: {RETAINED}/{TOTAL} fact citations retained ({PCT}%). Recovered {N} dropped facts.`
 
 If DROPPED == 0: `Step 8b: {TOTAL}/{TOTAL} fact citations retained (100%). No recovery needed.`
 
-Log fact-level retention to `/tmp/deep_crawl/REFINE_LOG.md`:
+Log fact-level retention to `.deep_crawl/REFINE_LOG.md`:
 ```
 ## Fact-Level Retention
 Citations in findings: {N}
@@ -1297,22 +1653,24 @@ Phase 4 and Phase 5 are delegated to **separate** sub-agents to prevent self-val
 
 **Sub-agent 1: Cross-referencer**
 
+**Before spawning**, apply the agent logging protocol: write the prompt to `.deep_crawl/agent_logs/prompts/phase4_crossref.md` and log the SPAWN event. **After completion**, write the return text to `.deep_crawl/agent_logs/results/phase4_crossref.md` and log the DONE event.
+
 Spawn a sub-agent for Phase 4 only:
 
 ```
 You are cross-referencing a DEEP_ONBOARD.md draft for an AI agent onboarding document. This is an additive-only process — you may NOT delete, merge, summarize, or compress any content.
 
 ## Input Files
-- /tmp/deep_crawl/DRAFT_ONBOARD.md — the assembled draft to cross-reference
-- /tmp/deep_crawl/CRAWL_PLAN.md — the investigation plan (for coverage context)
+- .deep_crawl/DRAFT_ONBOARD.md — the assembled draft to cross-reference
+- .deep_crawl/CRAWL_PLAN.md — the investigation plan (for coverage context)
 - .claude/skills/deep-crawl/configs/compression_targets.json — for min_tokens floor check
 
 ## Your Task
 Execute Phase 4 (CROSS-REFERENCE) — additive only, no deletions.
-Write the cross-referenced document to /tmp/deep_crawl/DEEP_ONBOARD.md.
-Write the log to /tmp/deep_crawl/REFINE_LOG.md.
+Write the cross-referenced document to .deep_crawl/DEEP_ONBOARD.md.
+Write the log to .deep_crawl/REFINE_LOG.md.
 
-When done: touch /tmp/deep_crawl/REFINE.done
+When done: touch .deep_crawl/REFINE.done
 
 [Copy Phase 4 instructions verbatim from SKILL.md]
 ```
@@ -1322,14 +1680,16 @@ Use `run_in_background: true`.
 **Cross-referencer completion gate:** After REFINE.done appears, verify:
 ```bash
 # Artifacts must exist
-test -f /tmp/deep_crawl/DEEP_ONBOARD.md && test -f /tmp/deep_crawl/REFINE_LOG.md && echo "PASS" || echo "FAIL"
+test -f .deep_crawl/DEEP_ONBOARD.md && test -f .deep_crawl/REFINE_LOG.md && echo "PASS" || echo "FAIL"
 
 # Cross-referencing is strictly additive — final must be >= draft
-wc -w /tmp/deep_crawl/DRAFT_ONBOARD.md /tmp/deep_crawl/DEEP_ONBOARD.md
+wc -w .deep_crawl/DRAFT_ONBOARD.md .deep_crawl/DEEP_ONBOARD.md
 # If DEEP_ONBOARD word count < DRAFT_ONBOARD, re-spawn with: "Your output lost words. Cross-referencing is additive only — you may NOT delete content. Re-execute all 4 steps."
 ```
 
 **Sub-agent 2: Validator**
+
+**Before spawning**, apply the agent logging protocol: write the prompt to `.deep_crawl/agent_logs/prompts/phase5_validate.md` and log the SPAWN event. **After completion**, write the return text to `.deep_crawl/agent_logs/results/phase5_validate.md` and log the DONE event.
 
 After the cross-referencer completes and passes its gate, spawn a **separate** sub-agent for Phase 5:
 
@@ -1337,8 +1697,8 @@ After the cross-referencer completes and passes its gate, spawn a **separate** s
 You are validating a DEEP_ONBOARD.md document for an AI agent onboarding document.
 
 ## Input Files
-- /tmp/deep_crawl/DEEP_ONBOARD.md — the refined document to validate
-- /tmp/deep_crawl/CRAWL_PLAN.md — the investigation plan (for coverage targets only)
+- .deep_crawl/DEEP_ONBOARD.md — the refined document to validate
+- .deep_crawl/CRAWL_PLAN.md — the investigation plan (for coverage targets only)
 - Codebase at {ROOT_PATH} — read source files to verify claims
 
 ## NOT Available to You
@@ -1349,9 +1709,9 @@ You validate the document as a standalone artifact — if information is missing
 Execute Phase 5 (VALIDATE) from the deep-crawl skill instructions below. Phase 5 ONLY.
 You may read codebase source files to verify claims and check coverage.
 You may NOT modify DEEP_ONBOARD.md — report gaps in VALIDATION_REPORT.md only.
-Write the validation report to /tmp/deep_crawl/VALIDATION_REPORT.md.
+Write the validation report to .deep_crawl/VALIDATION_REPORT.md.
 
-When done: touch /tmp/deep_crawl/VALIDATE.done
+When done: touch .deep_crawl/VALIDATE.done
 
 [Copy Phase 5 instructions verbatim from SKILL.md]
 ```
@@ -1361,10 +1721,10 @@ Use `run_in_background: true`.
 **Validator completion gate:** After VALIDATE.done appears, verify:
 ```bash
 # Report must exist with required sections
-test -f /tmp/deep_crawl/VALIDATION_REPORT.md && echo "PASS" || echo "FAIL"
-grep -c "^### Q[0-9]" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect 12
-grep -c "^### Spot Check" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect 10
-grep -c "Adversarial Simulation" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect >= 1
+test -f .deep_crawl/VALIDATION_REPORT.md && echo "PASS" || echo "FAIL"
+grep -c "^### Q[0-9]" .deep_crawl/VALIDATION_REPORT.md  # expect 12
+grep -c "^### Spot Check" .deep_crawl/VALIDATION_REPORT.md  # expect 10
+grep -c "Adversarial Simulation" .deep_crawl/VALIDATION_REPORT.md  # expect >= 1
 ```
 
 **Orchestrator spot-check (before remediation):** The orchestrator reads 5 [FACT]
@@ -1382,7 +1742,7 @@ If >= 2/5 spot-checks fail, re-spawn S6 with corrective instructions before proc
 
 ```bash
 # Check for NO or PARTIAL standard questions
-grep -E "^\*\*Rating:\*\* (NO|PARTIAL)" /tmp/deep_crawl/VALIDATION_REPORT.md
+grep -E "^\*\*Rating:\*\* (NO|PARTIAL)" .deep_crawl/VALIDATION_REPORT.md
 ```
 
 If any standard question is NO or PARTIAL, or if the adversarial simulation is PARTIAL/FAIL:
@@ -1405,7 +1765,7 @@ If any standard question is NO or PARTIAL, or if the adversarial simulation is P
 | Q12 BOOTSTRAP missing | C | Setup patterns (Python: requirements.txt, Dockerfile, Makefile; TypeScript: package.json, tsconfig.json, Dockerfile) | findings/cross_cutting/gap_bootstrap.md |
 | Adversarial step N failed | B | Module referenced in failing step | findings/modules/gap_adversarial_{N}.md |
 
-**Step R2: Spawn targeted investigation agents.** For each gap, spawn one sub-agent with the appropriate protocol. Use `run_in_background: true` for parallel execution. Sub-agent prompts follow the standard Phase 2 format:
+**Step R2: Spawn targeted investigation agents.** For each gap, spawn one sub-agent with the appropriate protocol. Use `run_in_background: true` for parallel execution. **Apply the agent logging protocol**: write prompts to `.deep_crawl/agent_logs/prompts/gap_{name}.md`, log SPAWN events, and after completion write return text to `.deep_crawl/agent_logs/results/gap_{name}.md` and log DONE events. Sub-agent prompts follow the standard Phase 2 format:
 
 ```
 You are investigating {CODEBASE} at {ROOT_PATH} to fill a specific gap in the onboarding document.
@@ -1427,13 +1787,13 @@ You are investigating {CODEBASE} at {ROOT_PATH} to fill a specific gap in the on
 - [ABSENCE]: Searched and confirmed non-existence. Example: "No rate limiting (grep — 0 hits)"
 
 ## Output
-Write findings to: /tmp/deep_crawl/findings/{category}/gap_{name}.md
-When done: touch /tmp/deep_crawl/batch_status/gap_{name}.done
+Write findings to: .deep_crawl/findings/{category}/gap_{name}.md
+When done: touch .deep_crawl/batch_status/gap_{name}.done
 ```
 
 **Step R3: Wait for completion.** Monitor sentinel files:
 ```bash
-ls /tmp/deep_crawl/batch_status/gap_*.done 2>/dev/null | wc -l
+ls .deep_crawl/batch_status/gap_*.done 2>/dev/null | wc -l
 ```
 
 **Step R4: Patch DEEP_ONBOARD.md.** For each new finding:
@@ -1453,11 +1813,11 @@ You are re-validating specific questions that previously failed.
 {List of previously NO/PARTIAL questions}
 
 ## Input
-- /tmp/deep_crawl/DEEP_ONBOARD.md (updated with gap investigation results)
+- .deep_crawl/DEEP_ONBOARD.md (updated with gap investigation results)
 - Codebase at {ROOT_PATH}
 
-Append results to /tmp/deep_crawl/VALIDATION_REPORT.md under "## Gap Closure Re-validation"
-When done: touch /tmp/deep_crawl/REVALIDATE.done
+Append results to .deep_crawl/VALIDATION_REPORT.md under "## Gap Closure Re-validation"
+When done: touch .deep_crawl/REVALIDATE.done
 ```
 
 **Step R6: Accept or deliver.** If all re-checked questions are now YES, proceed to delivery. If any remain NO/PARTIAL after one investigation cycle, note in Gaps section and deliver. **Maximum 1 gap-closure cycle** to prevent infinite loops.
@@ -1520,15 +1880,20 @@ Write each section to disk before reading the next group. Do NOT read SYNTHESIS_
 
 ### Phase 4: CROSS-REFERENCE (Additive Only — No Deletions)
 
+```bash
+echo "## Phase 4: CROSS-REFERENCE — $(date -Iseconds)" >> "$CRAWL_LOG"
+echo "$(date -Iseconds) PHASE 4 CROSSREF" >> "$ORCH_LOG"
+```
+
 This phase adds cross-references between independently-assembled sections. It may NOT delete, merge, summarize, or compress any content. Every operation is strictly additive.
 
 **Step 1: Measure.**
 ```bash
-wc -w /tmp/deep_crawl/DRAFT_ONBOARD.md | awk '{printf "~%d tokens\n", $1 * 1.3}'
+wc -w .deep_crawl/DRAFT_ONBOARD.md | awk '{printf "~%d tokens\n", $1 * 1.3}'
 ```
 Read `min_tokens` from `.claude/skills/deep-crawl/configs/compression_targets.json`. If below floor, the assembly agents dropped findings — re-spawn the undersized section agents with explicit "include every finding" instructions. Do NOT proceed until the floor is met.
 
-Log to `/tmp/deep_crawl/REFINE_LOG.md`:
+Log to `.deep_crawl/REFINE_LOG.md`:
 ```
 ## Phase 4 Cross-Reference Log
 Step 1: PASS — draft is ~{N} tokens (floor: {min_tokens})
@@ -1550,6 +1915,12 @@ Step 1: PASS — draft is ~{N} tokens (floor: {min_tokens})
     - Group criteria: same file within 50 lines, or same function name, or
       description mentions the same concept (e.g., "exec()" security model)
 
+**Step 2b: Normalize voice across sections.** The draft was assembled by 5-7 independent agents with different writing styles. Scan for these inconsistencies and fix them (additive rewording only — do not remove content):
+1. **Terminology normalization:** If different sections use different names for the same concept (e.g., "provider" vs "adapter" vs "connector" for the same abstraction), pick the term the codebase uses most and add "(also called {alternate})" on first occurrence in each section.
+2. **Tense consistency:** Ensure all behavioral descriptions use present tense ("returns" not "returned", "calls" not "called"). Error paths use conditional ("if X fails, Y happens").
+3. **Citation style consistency:** Normalize to `[FACT] ({file}:{line})` format — some agents may use `[FACT]: {file}:{line}` or `[FACT] {file}:{line}`.
+4. Do NOT rewrite prose for style preference. Only fix inconsistencies that would confuse a reader who jumps between sections.
+
 Log: `Step 2: Added {N} cross-references ({M} gotcha clusters linked)`
 
 **Step 3: Verify completeness.** Two checks:
@@ -1562,16 +1933,21 @@ Log: `Step 3: {N}/10 questions answerable, {gaps noted}`
 
 **Completion gate:** REFINE_LOG.md must have entries for Steps 1-3. Word count of DEEP_ONBOARD.md must be >= word count of DRAFT_ONBOARD.md (cross-references only add words, never remove).
 
-Write final version to `/tmp/deep_crawl/DEEP_ONBOARD.md`.
+Write final version to `.deep_crawl/DEEP_ONBOARD.md`.
 
 ```bash
-wc -w /tmp/deep_crawl/DRAFT_ONBOARD.md /tmp/deep_crawl/DEEP_ONBOARD.md
+wc -w .deep_crawl/DRAFT_ONBOARD.md .deep_crawl/DEEP_ONBOARD.md
 # DEEP_ONBOARD >= DRAFT_ONBOARD (strictly additive)
 ```
 
 ---
 
 ### Phase 5: VALIDATE (Quality Assurance)
+
+```bash
+echo "## Phase 5: VALIDATE — $(date -Iseconds)" >> "$CRAWL_LOG"
+echo "$(date -Iseconds) PHASE 5 VALIDATE" >> "$ORCH_LOG"
+```
 
 #### 5a. Standard Questions Test
 
@@ -1703,36 +2079,55 @@ Confirm stable sections (Identity, Critical Paths, Module Index) come before vol
 
 ```bash
 # Verify report completeness
-grep -c "^### Q[0-9]" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect 12
-grep -c "^### Spot Check" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect 10
-grep -c "Adversarial Simulation" /tmp/deep_crawl/VALIDATION_REPORT.md  # expect >= 1
+grep -c "^### Q[0-9]" .deep_crawl/VALIDATION_REPORT.md  # expect 12
+grep -c "^### Spot Check" .deep_crawl/VALIDATION_REPORT.md  # expect 10
+grep -c "Adversarial Simulation" .deep_crawl/VALIDATION_REPORT.md  # expect >= 1
 ```
 
-Write validation results to `/tmp/deep_crawl/VALIDATION_REPORT.md`.
+Write validation results to `.deep_crawl/VALIDATION_REPORT.md`.
 
 ---
 
 ### Phase 6: DELIVER (Package and Configure)
 
-**Step 1:** Copy to output location (differs for local vs remote):
 ```bash
-if [ "${DEEP_CRAWL_MODE:-local}" = "remote" ]; then
-    # Remote repo: deliver to temp output directory (not inside the clone)
-    OUTPUT_DIR="/tmp/deep_crawl/output"
-    mkdir -p "$OUTPUT_DIR"
-    cp /tmp/deep_crawl/DEEP_ONBOARD.md "$OUTPUT_DIR/DEEP_ONBOARD.md"
-    cp /tmp/xray/xray.md "$OUTPUT_DIR/xray.md"
-    cp /tmp/deep_crawl/VALIDATION_REPORT.md "$OUTPUT_DIR/DEEP_ONBOARD_VALIDATION.md"
-    echo "Remote crawl output delivered to: $OUTPUT_DIR/"
-    echo "  - DEEP_ONBOARD.md"
-    echo "  - xray.md"
-    echo "  - DEEP_ONBOARD_VALIDATION.md"
-else
-    # Local repo: deliver to project docs/
-    mkdir -p docs
-    cp /tmp/deep_crawl/DEEP_ONBOARD.md docs/DEEP_ONBOARD.md
-    cp /tmp/xray/xray.md docs/xray.md
-fi
+echo "## Phase 6: DELIVER — $(date -Iseconds)" >> "$CRAWL_LOG"
+echo "$(date -Iseconds) PHASE 6 DELIVER output=$OUTPUT_DIR/" >> "$ORCH_LOG"
+```
+
+**Step 1:** Deliver to unified output directory (`output/{repo-name}/`):
+```bash
+# OUTPUT_DIR was set in Phase 0: output/{repo-name}
+mkdir -p "$OUTPUT_DIR/data"
+
+# Final reports at output root
+cp .deep_crawl/DEEP_ONBOARD.md "$OUTPUT_DIR/deep_onboard.md"
+# xray.md and xray.json are already in OUTPUT_DIR from the xray run
+
+# All intermediate data under data/
+for f in CRAWL_PLAN.md SYNTHESIS_INPUT.md DRAFT_ONBOARD.md VALIDATION_REPORT.md \
+         PREFLIGHT.md REFINE_LOG.md; do
+    cp ".deep_crawl/$f" "$OUTPUT_DIR/data/" 2>/dev/null
+done
+cp -r .deep_crawl/findings "$OUTPUT_DIR/data/" 2>/dev/null
+cp -r .deep_crawl/sections "$OUTPUT_DIR/data/" 2>/dev/null
+cp -r .deep_crawl/batch_status "$OUTPUT_DIR/data/" 2>/dev/null
+cp -r .deep_crawl/agent_logs "$OUTPUT_DIR/data/" 2>/dev/null
+
+echo "Output delivered to: $OUTPUT_DIR/"
+echo "  $OUTPUT_DIR/deep_onboard.md"
+echo "  $OUTPUT_DIR/xray.md"
+echo "  $OUTPUT_DIR/data/agent_logs/  (agent prompts, results, orchestrator.log)"
+echo "  $OUTPUT_DIR/data/crawl.log  (full pipeline debug log)"
+echo "  $OUTPUT_DIR/data/  (all intermediate artifacts)"
+
+# Log final delivery stats
+echo "## Delivery" >> "$CRAWL_LOG"
+echo "  Final document: $(wc -w < .deep_crawl/DEEP_ONBOARD.md 2>/dev/null || echo 0) words" >> "$CRAWL_LOG"
+echo "  Total findings: $(ls .deep_crawl/findings/*/*.md 2>/dev/null | wc -l) files" >> "$CRAWL_LOG"
+echo "  Total sections: $(ls .deep_crawl/sections/*.md 2>/dev/null | wc -l) files" >> "$CRAWL_LOG"
+echo "  FACT citations: $(grep -c '\[FACT' .deep_crawl/DEEP_ONBOARD.md 2>/dev/null || echo 0)" >> "$CRAWL_LOG"
+echo "Completed: $(date -Iseconds)" >> "$CRAWL_LOG"
 ```
 
 **Step 2:** Configure CLAUDE.md for automatic delivery (**local repos only** — skip for remote):
@@ -1740,47 +2135,43 @@ fi
 if [ "${DEEP_CRAWL_MODE:-local}" = "remote" ]; then
     echo "Skipping CLAUDE.md update (remote repo — read-only analysis)"
 else
+    ONBOARD_PATH="$OUTPUT_DIR/deep_onboard.md"
     if [ -f CLAUDE.md ]; then
-        grep -q "DEEP_ONBOARD" CLAUDE.md || cat >> CLAUDE.md << 'ONBOARD_EOF'
+        grep -q "DEEP_ONBOARD" CLAUDE.md || cat >> CLAUDE.md << ONBOARD_EOF
 
 # Codebase Onboarding
-Read docs/DEEP_ONBOARD.md before starting any task. It contains verified behavioral documentation, critical paths, gotchas, and conventions for this codebase.
+Read $ONBOARD_PATH before starting any task. It contains verified behavioral documentation, critical paths, gotchas, and conventions for this codebase.
 
 ## Onboarding Document Change Tracking
 
-If you modify code that may affect claims in docs/DEEP_ONBOARD.md, append to docs/.onboard_changes.log:
+If you modify code that may affect claims in $ONBOARD_PATH, append to $OUTPUT_DIR/data/.onboard_changes.log:
 
     {ISO_TIMESTAMP} | {FILE:LINE} | {SECTION_PATH} | {BRIEF_DESCRIPTION}
 
-Section path uses document headings: `{## Section}` or `{## Section} / {### Subsection}`.
+Section path uses document headings: \`{## Section}\` or \`{## Section} / {### Subsection}\`.
 Do not manually edit DEEP_ONBOARD.md — it is a generated artifact.
 ONBOARD_EOF
     else
-        cat > CLAUDE.md << 'CLEOF'
+        cat > CLAUDE.md << CLEOF
 # Project Instructions
 
 ## Codebase Onboarding
-Read docs/DEEP_ONBOARD.md before starting any task. It contains verified behavioral documentation, critical paths, gotchas, and conventions for this codebase.
+Read $ONBOARD_PATH before starting any task. It contains verified behavioral documentation, critical paths, gotchas, and conventions for this codebase.
 
 ## Onboarding Document Change Tracking
 
-If you modify code that may affect claims in docs/DEEP_ONBOARD.md, append to docs/.onboard_changes.log:
+If you modify code that may affect claims in $ONBOARD_PATH, append to $OUTPUT_DIR/data/.onboard_changes.log:
 
     {ISO_TIMESTAMP} | {FILE:LINE} | {SECTION_PATH} | {BRIEF_DESCRIPTION}
 
-Section path uses document headings: `{## Section}` or `{## Section} / {### Subsection}`.
+Section path uses document headings: \`{## Section}\` or \`{## Section} / {### Subsection}\`.
 Do not manually edit DEEP_ONBOARD.md — it is a generated artifact.
 CLEOF
     fi
 fi
 ```
 
-**Step 3:** Copy validation report (**local repos only** — remote already copied in Step 1):
-```bash
-if [ "${DEEP_CRAWL_MODE:-local}" != "remote" ]; then
-    cp /tmp/deep_crawl/VALIDATION_REPORT.md docs/DEEP_ONBOARD_VALIDATION.md
-fi
-```
+**Step 3:** Validation report is already in `$OUTPUT_DIR/data/VALIDATION_REPORT.md` from Step 1.
 
 **Step 4:** Report to user:
 ```
@@ -1795,10 +2186,10 @@ Adversarial test: {PASS/PARTIAL/FAIL}
 Gotchas documented: {count}
 Request traces: {count}
 
-Delivered to: {local: docs/DEEP_ONBOARD.md | remote: /tmp/deep_crawl/output/}
+Delivered to: output/{repo-name}/DEEP_ONBOARD.md
 CLAUDE.md: {UPDATED/CREATED/SKIPPED (remote)} — document will auto-load in all sessions
 Prompt caching: Active — subsequent sessions read at ~90% reduced cost
-Clone: {remote only: /tmp/deep_crawl/repo/ — rm -rf when done}
+Clone: {remote only: .deep_crawl/repo/ — rm -rf when done}
 ```
 
 ---
@@ -1831,13 +2222,13 @@ Not all claims have the same epistemological status. Use these tags:
 - Note in Gaps: "No git history available — coupling and churn data missing"
 
 **Remote repository:**
-- `DEEP_CRAWL_ROOT` points to `/tmp/deep_crawl/repo/` (the clone directory)
+- `DEEP_CRAWL_ROOT` points to `.deep_crawl/repo/` (the clone directory)
 - All file reads, greps, and investigation happen against the clone
-- Phase 6 delivers to `/tmp/deep_crawl/output/` instead of project `docs/`
+- Phase 6 delivers to `output/{repo-name}/` (same structure as local crawls)
 - CLAUDE.md update is skipped (read-only analysis of external repo)
 - The clone is a full clone with git history — git log/blame work normally
 - Private repos: `gh repo clone` handles auth via the user's `gh` credentials
-- Cleanup: user should `rm -rf /tmp/deep_crawl/repo/` when done
+- Cleanup: user should `rm -rf .deep_crawl/repo/` when done
 - If the clone is very large (>2000 files), the monorepo edge case applies
 
 **Monorepo (>2000 files):**

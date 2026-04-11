@@ -41,7 +41,7 @@ Read `INTENT.md` for the full rationale. The key decisions:
 ## Entry Point and Pipeline
 
 ```
-python xray.py /path/to/project [--output both] [--out /tmp/xray] [--preset minimal]
+python xray.py /path/to/project [--output both] [--preset minimal] [--repo-name NAME]
 ```
 
 `xray.py:main()` orchestrates everything:
@@ -179,7 +179,7 @@ Phase 2 is entirely defined in `.claude/` — markdown files that instruct Claud
 **Seven-Phase Pipeline:**
 
 ```
-Phase 0   SETUP         Create /tmp/deep_crawl/ dirs, verify xray exists
+Phase 0   SETUP         Create .deep_crawl/ dirs, verify xray exists
 Phase 0b  PRE-FLIGHT    Git freshness check, file count, framework detection
 Phase 1   PLAN          Build crawl agenda from investigation_targets, detect domain facets
 Phase 1b  CALIBRATE     3 exemplar investigations (trace, module, cross-cutting) set quality bar
@@ -280,7 +280,7 @@ Stable sections go first (caching-friendly). Volatile sections at the bottom.
 The deep crawl's key architectural decision: **all intermediate state lives on disk, not in conversation context.**
 
 ```
-/tmp/deep_crawl/
+.deep_crawl/
   findings/
     traces/          # Protocol A output (one .md per trace)
     modules/         # Protocol B output (one .md per module)
@@ -322,16 +322,22 @@ Each has a config toggle in `configs/default_config.json` (all default to true) 
 
 ## What the Output Directory Contains
 
-`output/` holds example outputs from iterative development runs against the Kosmos codebase (802 files, 2.4M tokens):
+`output/` holds per-repo analysis output. Each analyzed repo gets one folder with final deliverables at the top and intermediate data underneath:
+
+```
+output/<repo-name>/
+  xray.md              ← Curated markdown summary
+  deep_onboard.md      ← Full onboarding document (from deep crawl)
+  data/
+    xray.json          ← Complete structured output
+    <crawl artifacts>  ← Plans, findings, sections, validation reports
+```
+
+Current contents:
 
 | Directory | Significance |
 |-----------|-------------|
-| `output/unrestricted-r14/` | Best run. v3.2 scanner + full deep crawl. 12/12 questions, 10/10 spot checks, adversarial PASS 5/5. 57K words, 777 [FACT] citations. |
-| `output/unrestricted-r9/` through `r13/` | Earlier iterations showing pipeline evolution |
-
-The R14 output contains:
-- `xray.json` — Complete v3.2 scan (16MB)
-- `DEEP_ONBOARD.md` — Final onboarding document (522KB)
+| `output/kosmos/` | Kosmos analysis (802 files, 2.4M tokens). Full deep crawl. 12/12 questions, 10/10 spot checks, adversarial PASS 5/5. 57K words, 777 [FACT] citations. |
 - `VALIDATION_REPORT.md` — QA results (23KB)
 - `CRAWL_PLAN.md` — Investigation plan (5.2KB)
 
@@ -439,7 +445,7 @@ xray.py ─── detect_language() → Python or TypeScript path
       └── formatters/json_formatter.py
 
 .claude/skills/deep-crawl/SKILL.md
-  ├── Reads: /tmp/xray/xray.json (Phase 1 output)
+  ├── Reads: output/$REPO_NAME/data/xray.json (Phase 1 output)
   ├── Spawns: investigation sub-agents (Phase 2)
   ├── Spawns: assembly sub-agents (Phase 3, S1-S6)
   ├── Spawns: cross-reference sub-agent (Phase 4)

@@ -43,7 +43,7 @@ The crawl agent traces at function level; actual depth may differ. -->
 All P1-P7 investigated + 12/12 standard questions answerable + coverage check passes (50%+ subsystems documented, modules deep-read >= max(10, file_count/40), all entry points traced, hub module coverage).
 
 ## Context Management
-Write findings to /tmp/deep_crawl/findings/{type}/ after each task.
+Write findings to .deep_crawl/findings/{type}/ after each task.
 Checkpoint this file every 5 tasks.
 
 ## Progress

@@ -4,7 +4,7 @@
 
 ```bash
 # Local repos: run xray manually first
-python xray.py . --output both --out /tmp/xray
+python xray.py . --output both
 
 # Remote repos: xray runs automatically — no manual step needed
 ```
@@ -26,17 +26,17 @@ python xray.py . --output both --out /tmp/xray
 
 ### Local Repository
 ```bash
-python xray.py . --output both --out /tmp/xray   # 1. Scan
+python xray.py . --output both   # 1. Scan
 /deep-crawl full                                   # 2. Orchestrated crawl (preferred)
 @deep_onboard_validator full                       # 3. Optional independent QA
-# Output: docs/DEEP_ONBOARD.md, CLAUDE.md updated
+# Output: output/<repo-name>/deep_onboard.md, CLAUDE.md updated
 ```
 
 ### Remote Repository
 ```bash
 /deep-crawl full https://github.com/owner/repo    # Clone + scan + crawl (all automatic)
-# Output: /tmp/deep_crawl/output/DEEP_ONBOARD.md
-# Cleanup: rm -rf /tmp/deep_crawl/repo/
+# Output: output/<repo-name>/deep_onboard.md
+# Cleanup: rm -rf .deep_crawl/repo/
 ```
 
 Supported URL formats: `https://github.com/owner/repo`, `gh:owner/repo`, `git@github.com:owner/repo.git`
@@ -51,6 +51,6 @@ If `/deep-crawl full` is unavailable or you prefer sequential execution:
 ## After Code Changes
 
 ```bash
-python xray.py . --output both --out /tmp/xray
+python xray.py . --output both
 @deep_crawl refresh
 ```

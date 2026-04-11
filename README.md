@@ -89,7 +89,7 @@ cd claude-repo-xray
 
 # Scan any Python project (zero dependencies)
 python xray.py /path/to/python-project                          # Full analysis to stdout
-python xray.py /path/to/python-project --output both --out /tmp/xray   # Markdown + JSON to files
+python xray.py /path/to/python-project --output both             # Markdown + JSON to output/<repo>/
 python xray.py /path/to/python-project --preset minimal          # ~2K tokens, quick survey
 
 # Scan any TypeScript/JavaScript project (requires Node.js)
@@ -98,8 +98,8 @@ python xray.py /path/to/ts-project                              # Auto-detects l
 
 # Layer 2: Deep crawl (requires Claude Code)
 cd /path/to/project
-python /path/to/xray.py . --output both --out /tmp/xray   # Scanner first
-/deep-crawl full                                           # Then exhaustive investigation
+python /path/to/xray.py . --output both   # Scanner first (writes to output/<repo>/)
+/deep-crawl full                           # Then exhaustive investigation
 ```
 
 Requirements: Python 3.8+. No `pip install` for Python scanning. TypeScript scanning requires Node.js (run `npm install && npm run build` in `ts-scanner/` once). Layer 2 requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview).
@@ -156,7 +156,7 @@ python xray.py --init-config > .xray.json
 **JSON** -- Complete structured data for programmatic consumption. Agents use JSON for specific lookups and markdown for orientation.
 
 ```bash
-python xray.py . --output both --out ./analysis
+python xray.py . --output both
 # Creates: analysis.md, analysis.json
 ```
 
@@ -363,7 +363,7 @@ Python scanner: no external dependencies, Python 3.8+ stdlib only. TypeScript sc
 
 ### Deep Crawl Internals
 
-All intermediate state lives on disk (`/tmp/deep_crawl/`), not in conversation context. Sub-agents write findings to individual markdown files. The orchestrator never reads finding content until assembly -- it only checks sentinel files for completion.
+All intermediate state lives on disk (`.deep_crawl/`), not in conversation context. Sub-agents write findings to individual markdown files. The orchestrator never reads finding content until assembly -- it only checks sentinel files for completion.
 
 Findings are quality-gated between batches. If a finding has fewer than 200 words or 5 `[FACT]` citations, the sub-agent is re-spawned with corrective instructions. Batch 2 (module deep reads) uses elevated thresholds: 400 words and 10 citations.
 

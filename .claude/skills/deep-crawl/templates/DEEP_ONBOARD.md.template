@@ -30,7 +30,7 @@ subsequent sessions load it at ~10% of the initial token cost.
 **X-Ray reference data:** The companion file `xray.md` (provided alongside this
 document) contains raw structural data: full import graphs, all class skeletons,
 dependency distances, and investigation targets. If you were not given `xray.md`,
-ask the user to provide it or regenerate with: `python xray.py . --output both --out /tmp/xray`.
+ask the user to provide it or regenerate with: `python xray.py . --output both --out .xray`.
 
 ---
 
@@ -298,8 +298,13 @@ Derived from configuration surface and cross-cutting findings. -->
 
 ## Gaps
 
-- {specific gap}
-- {specific gap}
+<!-- Each gap must be specific and quantified. Not "testing is thin" but
+"37/108 async functions have no test coverage — concentrated in worker/ subsystem."
+Include impact (what a downstream agent can't do) and investigation cost. -->
+
+| Gap | Scope | Impact | Investigation Cost |
+|-----|-------|--------|-------------------|
+| {specific gap} | {quantified: N files/functions/paths affected} | {what downstream agents can't do without this} | {estimated effort to fill} |
 
 ---
 

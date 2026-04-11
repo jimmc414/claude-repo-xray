@@ -102,3 +102,7 @@ venv
 
 # Demo folder (local testing)
 demo/
+
+# Deep crawl working directories (transient, per-target)
+.deep_crawl/
+.xray/

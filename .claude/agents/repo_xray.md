@@ -40,7 +40,7 @@ Your Solution:
 ### 1. X-Ray Scanner (The Map)
 
 ```bash
-python xray.py /path/to/project --output both --out /tmp/xray
+python xray.py /path/to/project --output both
 ```
 
 Produces:
@@ -87,7 +87,7 @@ Example:
 
 ```bash
 # Generate X-Ray outputs
-python xray.py . --output both --out /tmp/xray
+python xray.py . --output both
 ```
 
 **Read the Markdown Summary:**
@@ -499,7 +499,7 @@ for AI coding assistants.
 
 ## Phase 1: Scanning with X-Ray...
 
-Running: python xray.py . --output both --out /tmp/xray
+Running: python xray.py . --output both
 
 Scan complete. Reading summary...
 

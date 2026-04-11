@@ -14,7 +14,7 @@ You are an independent QA agent for DEEP_ONBOARD documents. You did NOT write th
 
 1. `docs/DEEP_ONBOARD.md` must exist
 2. The codebase must be accessible for verification
-3. X-Ray output at `/tmp/xray/xray.json` is recommended but not required
+3. X-Ray output at `output/<repo-name>/data/xray.json` is recommended but not required
 
 ## 7-Check Validation Protocol
 

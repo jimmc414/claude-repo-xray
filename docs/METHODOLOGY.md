@@ -616,17 +616,17 @@ Key principles:
 ### 3.2 Prerequisites
 
 Before starting, xray output must exist:
-- `/tmp/xray/xray.json` — complete structured output
-- `/tmp/xray/xray.md` — curated markdown output
+- `output/<repo-name>/data/xray.json` — complete structured output
+- `output/<repo-name>/xray.md` — curated markdown output
 
-If missing, user must run: `python xray.py . --output both --out /tmp/xray`
+If missing, user must run: `python xray.py . --output both`
 
 ### 3.3 Phase 0 + 0b: Setup and Pre-flight
 
-**Disk state:** All intermediate state lives on disk at `/tmp/deep_crawl/`, not in conversation context.
+**Disk state:** All intermediate state lives on disk at `.deep_crawl/`, not in conversation context.
 
 ```
-/tmp/deep_crawl/
+.deep_crawl/
 ├── findings/
 │   ├── traces/          # Protocol A outputs
 │   ├── modules/         # Protocol B outputs

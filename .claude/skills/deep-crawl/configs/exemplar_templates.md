@@ -1,6 +1,6 @@
 # Structural Exemplar Templates
 
-Structural skeletons showing what elements each section type should contain. Use `{placeholder}` markers where codebase-specific identifiers go. For quality reference from the current repo, see `/tmp/deep_crawl/findings/calibration/cal_{type}.md` (generated during Phase 1b).
+Structural skeletons showing what elements each section type should contain. Use `{placeholder}` markers where codebase-specific identifiers go. For quality reference from the current repo, see `.deep_crawl/findings/calibration/cal_{type}.md` (generated during Phase 1b).
 
 ---
 
@@ -118,20 +118,34 @@ Target: hop chain with branching and error paths, [FACT] at every hop.
 
 ## Template 5: Gotcha Entry
 
-Target: domain-cluster headers (derived from investigation subsystems) + severity tags per entry + specific file:line evidence.
+Target: domain-cluster headers (derived from investigation subsystems) + severity tags per entry + specific file:line evidence + root-cause clustering.
+
+**Severity calibration (from quality_gates.json `gotcha_severity_criteria`):**
+
+| Severity | Criterion | Typical % |
+|----------|-----------|-----------|
+| CRITICAL | Active data loss, security vuln, or silent corruption affecting production NOW | <=5% of all gotchas |
+| HIGH | Behavioral surprise that causes bugs during common modifications | ~25-35% |
+| MEDIUM | Confusing/misleading code that wastes time but doesn't break production | ~50-60% |
+
+**Self-check:** If >5% of gotchas are CRITICAL, review each against the CRITICAL definition. "Could cause problems" is HIGH. "Is causing problems now" is CRITICAL.
+
+**Root-cause clustering:** After severity tagging, identify gotchas that share a common root cause (same design decision, same pattern, same underlying assumption). Add `(root cause: {description})` after the cluster heading and cross-link related gotchas.
 
 ```markdown
 ### {Domain Cluster A} Gotchas
 
+*Root cause: dual Pydantic/SQLAlchemy model pattern — same entity has two representations with divergent field sets*
+
 1. [CRITICAL] **{Gotcha title}** -- {Describe the dangerous behavior in one sentence}. If {condition}, this {consequence}. [FACT] (`{file_a}:{line}`, `{file_b}:{line}`)
 
-2. [HIGH] **{Gotcha title}** -- {Describe silent degradation mechanism}. [FACT] (`{file_a}:{line}`, `{file_b}:{line}`)
+2. [HIGH] **{Gotcha title}** -- {Describe silent degradation mechanism}. (related: #1 — same root cause) [FACT] (`{file_a}:{line}`, `{file_b}:{line}`)
 
 3. [MEDIUM] **{Gotcha title}** -- {Describe confusing behavior}. [FACT] (`{file}:{line}`)
 
 ### {Domain Cluster B} Gotchas
 
-4. [CRITICAL] **{Gotcha title}** -- {Describe data loss risk}. [FACT] (`{file_a}:{line}` vs `{file_b}:{line}`)
+4. [HIGH] **{Gotcha title}** -- {Describe data loss risk}. [FACT] (`{file_a}:{line}` vs `{file_b}:{line}`)
 
 5. [HIGH] **{Gotcha title}** -- {Describe condition where valid input produces wrong output}. [FACT] ({file}:{line})
 

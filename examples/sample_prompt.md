@@ -2,7 +2,7 @@
 
 Copy and adapt this prompt when starting a new AI session with your generated output files.
 
-Replace the placeholder values with your actual filenames and codebase path. The scanner names output files based on your `--out` flag (e.g., `python xray.py . --output both --out ./analysis` produces `analysis.md` and `analysis.json`). The deep crawl produces `DEEP_ONBOARD.md` in its working directory.
+Replace the placeholder values with your actual filenames and codebase path. Running `python xray.py . --output both` writes to `output/<repo-name>/xray.md` and `output/<repo-name>/data/xray.json`. The deep crawl delivers `deep_onboard.md` to the same `output/<repo-name>/` directory.
 
 ---
 

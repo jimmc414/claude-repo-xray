@@ -58,6 +58,24 @@
       "note": "Each investigated module must have its own ### in the Module Index."
     }
   },
+  "gotcha_severity_criteria": {
+    "CRITICAL": {
+      "definition": "Active data loss, security vulnerability, or silent corruption that affects production behavior NOW — not hypothetically",
+      "examples": ["Dead message routing (messages sent but never received)", "Unwired safety checks (validation defined but never called)", "Silent data truncation on write path", "Authentication bypass in active route"],
+      "max_expected_pct": 5,
+      "calibration_note": "If >5% of gotchas are CRITICAL, review each against this definition. Most 'could cause problems' gotchas are HIGH, not CRITICAL. CRITICAL means the bug exists today and is actively harmful."
+    },
+    "HIGH": {
+      "definition": "Behavioral surprise that will cause bugs during common modification tasks — wrong assumptions, missing error handling, implicit ordering dependencies",
+      "examples": ["Method returns None on error instead of raising (callers assume non-None)", "Retry logic defined but unreachable due to early return", "Two models represent same entity with divergent field sets", "Singleton lacks thread safety in concurrent context"],
+      "calibration_note": "HIGH gotchas cause bugs when you change code nearby. They are dormant until touched."
+    },
+    "MEDIUM": {
+      "definition": "Confusing or misleading code that wastes developer time but doesn't cause incorrect behavior in production",
+      "examples": ["Misleading variable name (e.g., 'cache' that doesn't cache)", "Dead code that looks active", "Inconsistent naming between related modules", "Overly broad exception catch that hides useful errors during development"],
+      "calibration_note": "MEDIUM gotchas slow you down but don't break production. If removing the gotcha would change runtime behavior, it's at least HIGH."
+    }
+  },
   "validation": {
     "standard_questions_total": 12,
     "spot_check_count": 10,

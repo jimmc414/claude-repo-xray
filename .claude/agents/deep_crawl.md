@@ -20,7 +20,7 @@ For each task in CRAWL_PLAN.md, in priority order:
 1. Select the appropriate protocol (A for traces, B for modules, C for
    cross-cutting, D for conventions)
 2. Execute the protocol directly — read the code, write findings to disk
-3. Write findings to the appropriate `/tmp/deep_crawl/findings/{type}/` directory
+3. Write findings to the appropriate `.deep_crawl/findings/{type}/` directory
 4. After every 5 tasks, update CRAWL_PLAN.md with `[x]` marks
 
 When all tasks are complete, verify the stopping criteria and coverage checks
